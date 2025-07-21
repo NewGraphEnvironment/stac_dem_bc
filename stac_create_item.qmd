@@ -6,7 +6,7 @@ jupyter: titiler  # Use your Conda environment
 
 ```{r env-activate}
 library(reticulate)
-reticulate::use_condaenv("titiler", required = TRUE)
+reticulate::use_condaenv("titiler2", required = TRUE)
 # reticulate::py_config()
 
 ```
@@ -61,7 +61,7 @@ def datetime_parse_item(s):
 ```
 
 
-```{python dev}
+```{python stac-item-create}
 # Define the path to the STAC collection JSON file.  
 
 path_local = "/Users/airvine/Projects/gis/stac_dem_bc/stac/prod/stac_dem_bc"
@@ -157,10 +157,14 @@ fs::file_delete(j)
 for item in collection.get_all_items():
     try:
         item.validate()
-        print(f"✅ {item.id} is valid.")
+        # print(f"✅ {item.id} is valid.")
     except Exception as e:
         print(f"❌ {item.id} failed validation: {e}")
 
+
+# or 1 at a time
+item = Item.from_file(f"{path_local}/093-093h-2019-dem-bc_093h092_xli1m_utm10_2019.json")
+item.validate()
 ```
 
 
@@ -255,6 +259,38 @@ print("Matching Items in BC:")
 for item_id, stac_url in matching_items:
     print(f"- {item_id}: {stac_url}")
 
+
+```
+
+```{python footprint}
+
+# here we explore how to update the footprints of our items so that we see where the raster has non-na values
+# Remote URL wrapped in /vsicurl/ for GDAL
+url = "/vsicurl/https://nrs.objectstore.gov.bc.ca/gdwuts/093/093h/2019/dem/bc_093h092_xli1m_utm10_2019.tif"
+url = "/vsicurl/https://nrs.objectstore.gov.bc.ca/gdwuts/093/093h/2019/dem/bc_093h084_xli1m_utm10_2019.tif"
+
+from stactools.core.utils.raster_footprint import RasterFootprint
+from shapely.geometry import shape, mapping, Polygon
+
+# Build footprint
+rf = RasterFootprint.from_href(
+    href=url,
+    precision=5,                # Coarser geometry (faster, smaller)
+    densification_factor=None, # Disable extra vertex interpolation
+    densification_distance=None,
+    simplify_tolerance=0.001,  # Simplify geometry slightly (in degrees) 0.001 ≈ 111 meters
+    no_data=None,              # Use nodata from metadata (excludes it automatically)
+    bands=[1]                  # Only use first band
+)
+geojson_dict = rf.footprint()
+
+# Optional: turn into shapely geometry
+geom = shape(geojson_dict)
+
+# Convert back to GeoJSON dict
+geojson_geom = mapping(geom)
+
+print(geojson_geom)
 
 ```
 
