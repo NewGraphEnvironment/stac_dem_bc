@@ -1,0 +1,169 @@
+---
+title: "STAC create collection "
+format: html
+jupyter: titiler  # Use your Conda environment
+---
+
+```{r env-activate}
+library(reticulate)
+reticulate::use_condaenv("titiler", required = TRUE)
+# reticulate::py_config()
+
+```
+
+```{r s3-get-keys}
+keys <- ngr::ngr_s3_keys_get(
+  url_bucket = "https://nrs.objectstore.gov.bc.ca/gdwuts",
+  prefix = "",
+  pattern = c("dem", "*.tif")
+)
+
+fs::dir_create("data")
+
+# get rid of paths with ( in them
+keys_clean <- keys[!stringr::str_detect(keys, "\\(")]
+
+readr::write_lines(keys_clean, "data/urls_list.txt")
+
+```
+
+
+```{python import-modules}
+import pystac
+from pystac import Collection, Extent, SpatialExtent, TemporalExtent
+from datetime import datetime
+import timeit
+```
+
+
+```{python function-bbox-combined}
+import rasterio
+from rasterio.warp import transform_bounds
+from shapely.geometry import box
+from shapely.ops import unary_union
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def extract_wgs84_bbox(path):
+    try:
+        with rasterio.open(path) as src:
+            bounds = transform_bounds(src.crs, "EPSG:4326", *src.bounds)
+            return box(*bounds)
+    except Exception as e:
+        print(f"❌ Error processing {path}: {e}")
+        return None
+
+def bbox_combined(paths, max_workers=8):
+    bboxes = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(extract_wgs84_bbox, path): path for path in paths}
+        for future in as_completed(futures):
+            result = future.result()
+            if result is not None:
+                bboxes.append(result)
+
+    if not bboxes:
+        raise ValueError("No valid bounding boxes found.")
+
+    union = unary_union(bboxes)
+    return union.bounds  # (min lon, min lat, max lon, max lat)
+
+```
+
+```{python temporal-extent}
+
+from datetime import datetime, timezone
+
+def datetime_parse_item(s):
+    if s is None:
+        return None
+    if len(s) == 8:
+        return datetime.strptime(s, "%Y%m%d").replace(tzinfo=timezone.utc)
+    elif len(s) == 4:
+        return datetime.strptime(s, "%Y").replace(tzinfo=timezone.utc)
+    return None
+
+# Load paths from the same source
+with open("data/urls_list.txt") as f:
+    path_items = f.read().splitlines()
+
+# Extract all valid datetimes
+times = [
+    datetime_parse_item(date_extract_from_path(p))
+    for p in path_items
+]
+
+# Filter out invalid values
+times = [t for t in times if t is not None]
+
+# Compute min/max
+start_time = min(times)
+end_time = max(times)
+
+# Create and set temporal extent
+temporal_extent = TemporalExtent([[start_time, end_time]])
+
+# Optional: print it for confirmation
+print(f"Temporal extent: {start_time.isoformat()} to {end_time.isoformat()}")
+
+```
+
+
+```{python collection-create}
+path_collection = "/Users/airvine/Projects/gis/stac_dem_bc/stac/prod/stac_dem_bc/collection.json"
+path_s3_json = "https://stac-dem-bc.s3.amazonaws.com/collection.json"
+collection_id = "stac-dem-bc"
+
+# path_cogs = list(Path(path_collection).parent.rglob("*.tif"))
+
+with open("data/urls_list.txt") as f:
+    path_cogs = f.read().splitlines()
+    
+# Define spatial extent (bounding box for BC)
+# spatial_extent = SpatialExtent([[-140, 48, -114, 60]])
+
+# Get bbox from your COGs - except that it takes forever
+# duration = timeit.timeit(lambda: bbox_combined(path_cogs[:500]), number=1)
+# print(f"Computed bbox in {duration:.2f} seconds.")
+bbox = bbox_combined(path_cogs)
+spatial_extent = SpatialExtent([list(bbox)])
+
+# Define temporal extent using datetime objects
+# temporal_extent = TemporalExtent([[datetime(2011, 9, 14), datetime(2024, 9, 26)]])
+
+# Create the extent object
+extent = Extent(spatial=spatial_extent, temporal=temporal_extent)
+
+# Create the STAC Collection
+collection = Collection(
+    id=collection_id,
+    description="A collection of Digital Elevation Models from British Columbia - as served on lidarbc",
+    extent=extent,
+    license="CC-BY-4.0",
+    title=f"Digital Elevation Models from British Columbia - {collection_id}",
+    href=path_collection
+)
+
+
+# Save the collection JSON
+collection.save(catalog_type=pystac.CatalogType.ABSOLUTE_PUBLISHED)
+
+# Explicitly set the self link
+collection.set_self_href(path_s3_json)
+
+# Save locally
+collection.save_object(include_self_link=True, dest_href=path_collection)
+
+# Manually force PySTAC to remember the cloud HREF
+collection.set_self_href(path_s3_json)
+
+```
+
+Test to see if the collection is valid
+
+```{python}
+# stac validate ./bc-uav-collection.json
+
+collection = pystac.Collection.from_file(path_collection)
+collection.validate()
+```
+

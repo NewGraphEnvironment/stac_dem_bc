@@ -1,0 +1,260 @@
+---
+title: "STAC create item "
+format: html
+jupyter: titiler  # Use your Conda environment
+---
+
+```{r env-activate}
+library(reticulate)
+reticulate::use_condaenv("titiler", required = TRUE)
+# reticulate::py_config()
+
+```
+
+
+```{python import-modules}
+import pathlib
+import pystac
+import rio_stac
+```
+
+```{python date-extract}
+import re
+
+def date_extract_after_utm(s):
+    match = re.search(r'_utm\d{1,2}_([0-9]{4,8})', s)
+    return match.group(1) if match else None
+
+# this is more flexible 
+def date_extract_from_path(s):
+    # Step 1: Try to extract YYYYMMDD or YYYY after _utmXX_
+    match = re.search(r'_utm\d{1,2}_([0-9]{4,8})', s)
+    if match:
+        val = match.group(1)
+        if val.isdigit():
+            year = int(val[:4])
+            if 2000 <= year <= 2050:
+                return val
+
+    # Step 2: Fallback: look for /YYYY/ in the path
+    fallback = re.search(r'/([2][0-9]{3})/', s)
+    if fallback:
+        year = int(fallback.group(1))
+        if 2000 <= year <= 2050:
+            return str(year)
+
+    return None
+
+
+from datetime import datetime, timezone
+
+def datetime_parse_item(s):
+    if s is None:
+        return None
+    if len(s) == 8:
+        return datetime.strptime(s, "%Y%m%d").replace(tzinfo=timezone.utc)
+    elif len(s) == 4:
+        return datetime.strptime(s, "%Y").replace(tzinfo=timezone.utc)
+    return None
+
+
+```
+
+
+```{python dev}
+# Define the path to the STAC collection JSON file.  
+
+path_local = "/Users/airvine/Projects/gis/stac_dem_bc/stac/prod/stac_dem_bc"
+path_collection = f"{path_local}/collection.json"
+
+# Define the path to the STAC collection JSON file on S3.  Seems a bit weird that we actually
+# need to put a file here in able to build our collection
+path_s3_stac = "https://stac-dem-bc.s3.amazonaws.com"
+path_s3_json = f"{path_s3_stac}/collection.json"
+
+# Define the base local path where imagery is stored
+path_base = pathlib.Path("/Users/airvine/Projects/gis/stac_dem_bc/stac/dev/stac_dem_bc")
+
+# Define the base S3 URL where assets are hosted
+path_s3 = "https://nrs.objectstore.gov.bc.ca/gdwuts"
+
+# Load the existing STAC collection from the file
+collection = pystac.Collection.from_file(path_collection)
+
+# Manually set the self HREF for the collection to the cloud location
+collection.set_self_href(path_s3_json)
+
+# Define a list of paths to process
+# path_items = list(path_base.rglob("*.tif"))
+
+with open("data/urls_list.txt") as f:
+    path_items = f.read().splitlines()
+
+# Iterate over each image file in the list
+for path_item in path_items:
+    # Compute the relative path of the item within the base directory
+    href_item = path_item.replace("https:/", "https://")
+    item_id = path_item[len(path_s3):].replace("/", "-").removesuffix(".tif")
+    item_time = datetime_parse_item(date_extract_from_path(path_item))
+
+
+    # Create a STAC Item for the given image file
+    item = rio_stac.stac.create_stac_item(
+        path_item, 
+        id=item_id,
+        asset_media_type='image/tiff; application=geotiff; profile=cloud-optimized',
+        asset_name='image',
+        asset_href=href_item,
+        with_proj=True,  # Extract and include projection properties
+        collection=collection.id,  # Assign the item to the collection
+        collection_url=collection.get_self_href(),  # Use collection's self href
+        asset_roles=["data"]
+    )
+    
+    # becasue we use rio we need to add the datetime after
+    item.datetime = item_time
+
+    # Add the newly created item to the collection
+    collection.add_item(item)
+    
+    # Define the correct self_href for the item JSON file
+    item_self_href = f"{path_s3_stac}/{item_id}.json"
+    item.set_self_href(item_self_href)
+
+    # Print the asset HREF for debugging purposes
+    print(f"Asset HREF after editing: {item.assets['image'].href}")
+
+    # Save the STAC item JSON in the main directory 
+    path_item_json = f"{path_local}/{item_id}.json"
+    item.save_object(dest_href=path_item_json)
+
+
+# Save the updated STAC collection with the new items included
+collection.save_object(
+    # include_self_link=True, 
+    dest_href=path_collection
+    )
+
+```
+
+
+
+```{r json-clean, eval= FALSE}
+# DELETE ATTACK - USE WITH CARE
+# list all the jsonsin the directory so we can delete them
+path_base = "/Users/airvine/Projects/gis/stac_dem_bc/stac/prod/stac_dem_bc"
+# path_base = "/Users/airvine/Projects/gis/uav_imagery/stac/dev/imagery_uav_bc"
+
+j <- fs::dir_ls(path_base, glob = "*.json", recurse = TRUE)
+
+fs::file_delete(j)
+
+```
+
+```{python validate}
+
+
+for item in collection.get_all_items():
+    try:
+        item.validate()
+        print(f"✅ {item.id} is valid.")
+    except Exception as e:
+        print(f"❌ {item.id} failed validation: {e}")
+
+```
+
+
+```{python, xyz, eval - FALSE}
+import mercantile
+
+# Bounds from Titiler response
+west, south, east, north = -124.703866, 54.107650, -124.695957, 54.111509
+
+# Choose a zoom level
+zoom = 15
+
+# Get a tile covering the center of the bounds
+tile = mercantile.tile((west + east) / 2, (south + north) / 2, zoom)
+
+print(f"Tile coordinates: Z={tile.z}, X={tile.x}, Y={tile.y}")
+```
+
+```{python query-s3-json}
+import pystac
+
+# Load the Collection JSON directly
+collection = pystac.Collection.from_file("https://dev-imagery-uav-bc.s3.amazonaws.com/imagery_uav_bc.json")
+
+# Define BC bounding box (approximate)
+bbox_bc = [-139, 48, -114, 60]  # (West, South, East, North)
+
+# Get all items linked in the collection
+items = collection.get_all_items()
+
+# Filter items that fall within BC bounds
+bc_items = []
+for item in items:
+    # Check if item's bounding box intersects with BC
+    item_bbox = item.bbox  # [west, south, east, north]
+    if (
+        item_bbox[2] >= bbox_bc[0] and  # Item east >= BC west
+        item_bbox[0] <= bbox_bc[2] and  # Item west <= BC east
+        item_bbox[3] >= bbox_bc[1] and  # Item north >= BC south
+        item_bbox[1] <= bbox_bc[3]      # Item south <= BC north
+    ):
+        bc_items.append(item)
+
+# Print matching items
+for item in bc_items:
+    print(f"Item: {item.id}")
+    for asset_key, asset in item.assets.items():
+        print(f"  - {asset_key}: {asset.href}")
+
+
+```
+
+
+```{python query-titiler}
+import requests
+import pystac
+
+# Define BC bounding box (West, South, East, North)
+bbox_bc = [-139, 48, -114, 60]
+
+# Titiler endpoint
+titiler_endpoint = "http://titiler-env.eba-s4jhubvr.us-west-2.elasticbeanstalk.com"
+
+# Load the STAC Collection
+collection_url = "https://dev-imagery-uav-bc.s3.amazonaws.com/imagery_uav_bc.json"
+collection = pystac.Collection.from_file(collection_url)
+
+# Get all items
+items = collection.get_all_items()
+
+# Filter items using /stac/bounds
+matching_items = []
+for item in items:
+    stac_url = item.get_self_href()
+    bounds_url = f"{titiler_endpoint}/stac/bounds?url={stac_url}"
+
+    response = requests.get(bounds_url)
+    if response.status_code == 200:
+        item_bbox = response.json()["bounds"]  # [west, south, east, north]
+
+        # Check intersection with BC bbox
+        if (
+            item_bbox[2] >= bbox_bc[0] and  # Item east >= BC west
+            item_bbox[0] <= bbox_bc[2] and  # Item west <= BC east
+            item_bbox[3] >= bbox_bc[1] and  # Item north >= BC south
+            item_bbox[1] <= bbox_bc[3]      # Item south <= BC north
+        ):
+            matching_items.append((item.id, stac_url))
+
+# Print matching items
+print("Matching Items in BC:")
+for item_id, stac_url in matching_items:
+    print(f"- {item_id}: {stac_url}")
+
+
+```
+
