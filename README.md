@@ -6,9 +6,11 @@ stac_dem_bc
 ![groovy](https://img.shields.io/badge/live-fRee-green)
 ![fUn](https://img.shields.io/badge/play-hArd-red)
 
-The goal of `stac_dem_bc` is to serve the British Columbia lidarBC
-digital elevation model collection. It can be queried by location and/or
-time using our API via the lovely [`rstac` R
+The goal of
+[`stac_dem_bc`](https://github.com/NewGraphEnvironment/stac_dem_bc) is
+to serve the British Columbia lidarBC digital elevation model
+collection. It can be queried by location and/or time using our API via
+the lovely [`rstac` R
 package](https://brazil-data-cube.github.io/rstac/) and [QGIS
 (v3.42+)](https://qgis.org/). Still a work in progress but currently
 functioning at <https://images.a11s.one>. See below how to add STAC
