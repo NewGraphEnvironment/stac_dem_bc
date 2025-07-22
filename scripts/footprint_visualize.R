@@ -100,3 +100,29 @@ json_coords <- apply(coords_3157, 1, function(pt) {
 
 cat('[\n', paste(json_coords, collapse = ',\n'), '\n      ]\n')
 
+# Coordinates matrix (close the ring explicitly)
+coords <- matrix(c(
+  -119.40053338927621, 52.79566272471252,
+  -119.19419935891520, 52.79965904570134,
+  -119.19948670972303, 52.90433844541799,
+  -119.40631682427218, 52.90032702306161,
+  -119.40053338927621, 52.79566272471252  # closing point
+), ncol = 2, byrow = TRUE)
+
+# Create sf polygon
+poly <- sf::st_polygon(list(coords)) |> sf::st_sfc(crs = 4326)
+poly_sf <- sf::st_sf(geometry = poly)
+
+# 093-093h-2019-dem-bc_093h084_xli1m_utm10_2019
+wkt <- "POLYGON ((-121.40461294509775314 53.79960989157642359, 
+                  -121.19939305697234033 53.79670359157857007, 
+                  -121.19493664604227945 53.90038439235420498, 
+                  -121.40066388155801747 53.90330168726016069, 
+                  -121.40461294509775314 53.79960989157642359))"
+
+poly_sf2 <- sf::st_as_sfc(wkt, crs = 4326) |> 
+  sf::st_sf(geometry = _)
+
+mapview::mapview(poly_sf) +
+  mapview::mapview(poly_sf2)
+
