@@ -16,7 +16,7 @@ vm_upload_run <- function(droplet, file_name, path_remote,
                           run_only = FALSE,
                           upload_only = FALSE) {
   # build remote paths
-  remote_dest   <- fs::path(".", path_remote)       # e.g. "./config"
+  remote_dest <- if (fs::is_absolute_path(path_remote)) path_remote else fs::path(".", path_remote)
   remote_script <- fs::path(path_remote,
                             fs::path_file(file_name))  # e.g. "config/stac_update.sh"
   
