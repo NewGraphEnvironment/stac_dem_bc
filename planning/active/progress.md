@@ -299,5 +299,24 @@ _(None yet)_
 
 ---
 
-**Session end:** 2026-01-30 (Test safety enhancement complete)
+---
+
+### Working Directory Setup Note 📝
+
+**Issue:** Claude Code session was opened in `/Users/airvine/Projects/repo/stac_uav_bc` instead of the worktree directory.
+
+**Impact:** Every bash command reset to wrong directory, requiring `cd ~/Projects/.../stac_dem_bc-phase1-2-modernization &&` prefix.
+
+**Solution:** Restart Claude Code session in the worktree directory:
+```bash
+cd ~/Projects/repo/stac_dem_bc-phase1-2-modernization
+# Then open Claude Code here
+```
+
+**Best practice:** Always open Claude Code in the directory you're actively working in (especially important for worktrees).
+
+---
+
+**Session end:** 2026-01-30 (Ready to restart in correct directory)
 **Last updated:** 2026-01-30
+**Next:** Restart Claude Code in worktree directory, run Phase 1 test
