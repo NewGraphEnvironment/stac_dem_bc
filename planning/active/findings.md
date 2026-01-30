@@ -262,6 +262,34 @@ with concurrent.futures.ThreadPoolExecutor() as executor:
 
 ---
 
+## Test vs Production Path Isolation
+
+**Finding:** Test mode must use separate output directory from production
+
+**Problem discovered:** Original code hardcoded output to `prod/stac_dem_bc/` even in test mode, risking accidental production contamination.
+
+**Solution:**
+```python
+if test_only:
+    path_local = "/Users/airvine/Projects/gis/stac_dem_bc/stac/dev/stac_dem_bc"  # Safe testing
+else:
+    path_local = "/Users/airvine/Projects/gis/stac_dem_bc/stac/prod/stac_dem_bc"  # Production
+```
+
+**Directory structure:**
+```
+/Users/airvine/Projects/gis/stac_dem_bc/stac/
+├── dev/stac_dem_bc/       # Test output (never uploaded to S3)
+│   └── collection.json
+└── prod/stac_dem_bc/      # Production output (gets uploaded to S3)
+    ├── collection.json
+    └── [22,548+ item JSONs]
+```
+
+**Benefit:** True isolation - test runs cannot accidentally overwrite production data
+
+---
+
 ## Open Questions
 
 1. **Deletion handling:** How to safely remove items from PgSTAC? Manual review first?
@@ -271,4 +299,4 @@ with concurrent.futures.ThreadPoolExecutor() as executor:
 
 ---
 
-**Last updated:** 2026-01-30 (PWF migration)
+**Last updated:** 2026-01-30 (Test safety enhancement)

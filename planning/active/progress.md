@@ -281,5 +281,23 @@ _(None yet)_
 
 ---
 
-**Session end:** 2026-01-30 (PWF migration complete)
+---
+
+### Test Safety Enhancement ✅
+
+**Issue identified:** Test mode was writing to prod directory (unsafe!)
+
+**Resolution:**
+- Created `/Users/airvine/Projects/gis/stac_dem_bc/stac/dev/` directory structure
+- Updated `stac_create_item.qmd` to switch paths based on `test_only` flag:
+  - `test_only=True` → writes to `dev/stac_dem_bc/` (safe testing)
+  - `test_only=False` → writes to `prod/stac_dem_bc/` (production builds)
+- Copied `collection.json` from prod to dev for testing
+- Added print statements to confirm mode and output directory
+
+**Benefit:** True isolation between test and production environments
+
+---
+
+**Session end:** 2026-01-30 (Test safety enhancement complete)
 **Last updated:** 2026-01-30

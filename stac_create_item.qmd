@@ -79,13 +79,22 @@ test_number_items = 10
 # Incremental mode - set to True to process only new URLs from data/urls_new.txt
 incremental = False
 
-# Define paths
-path_local = "/Users/airvine/Projects/gis/stac_dem_bc/stac/prod/stac_dem_bc"
+# Define paths - test_only controls dev vs prod output
+if test_only:
+    # DEV: Safe testing environment, isolated from production
+    path_local = "/Users/airvine/Projects/gis/stac_dem_bc/stac/dev/stac_dem_bc"
+else:
+    # PROD: Production output that gets uploaded to S3
+    path_local = "/Users/airvine/Projects/gis/stac_dem_bc/stac/prod/stac_dem_bc"
+
 path_collection = f"{path_local}/collection.json"
 path_s3_stac = "https://stac-dem-bc.s3.amazonaws.com"
 path_s3_json = f"{path_s3_stac}/collection.json"
 path_s3 = "https://nrs.objectstore.gov.bc.ca/gdwuts"
 path_results_csv = "data/stac_geotiff_checks.csv"
+
+print(f"Mode: {'TEST (dev output)' if test_only else 'PRODUCTION (prod output)'}")
+print(f"Output directory: {path_local}")
 
 # Load base collection
 collection = pystac.Collection.from_file(path_collection)
