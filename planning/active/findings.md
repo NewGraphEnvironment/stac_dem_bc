@@ -262,6 +262,63 @@ with concurrent.futures.ThreadPoolExecutor() as executor:
 
 ---
 
+## URL List Management and Workflow
+
+**Finding:** Understanding `data/urls_list.txt` creation, usage, and update cycle
+
+### Current Workflow (Phase 1)
+
+**Step 1: Create URL list** (`stac_create_collection.qmd`)
+```r
+keys <- ngr::ngr_s3_keys_get(
+  url_bucket = "https://nrs.objectstore.gov.bc.ca/gdwuts",
+  prefix = "",
+  pattern = c("dem", "*.tif")
+)
+keys_clean <- keys[!stringr::str_detect(keys, "\\(")]  # Remove problematic filenames
+readr::write_lines(keys_clean, "data/urls_list.txt")
+```
+- Fetches ALL DEM URLs from BC provincial objectstore
+- One-time manual execution (or when full refresh needed)
+- Creates `data/urls_list.txt` with 22,548 URLs
+
+**Step 2: Process items** (`stac_create_item.qmd`)
+```python
+with open("data/urls_list.txt") as f:
+    path_items = f.read().splitlines()
+```
+- Reads `urls_list.txt` (read-only, no modification)
+- Processes URLs (all or subset in test mode)
+- Creates STAC JSON items
+
+### Future Workflow (Phase 2 - Incremental Updates)
+
+**Step 1: Detect changes** (`detect_changes.py` - not built yet)
+- Fetch current BC DEM directory listing
+- Compare with cached `urls_list.txt`
+- Output new URLs to `data/urls_new.txt`
+- Output deleted URLs to `data/urls_deleted.txt`
+- **UPDATE** `urls_list.txt` with current inventory
+- Exit code 0 if no changes, 1 if changes found
+
+**Step 2: Process incrementally** (`stac_create_item.qmd` with `incremental=True`)
+- Read `urls_new.txt` instead of `urls_list.txt`
+- Process only new/changed files
+- Append to existing collection
+
+### File Responsibilities
+
+| File | Created By | Updated By | Purpose |
+|------|------------|------------|---------|
+| `data/urls_list.txt` | stac_create_collection.qmd (R) | detect_changes.py (future) | Master URL inventory |
+| `data/urls_new.txt` | detect_changes.py (future) | detect_changes.py | New URLs to process |
+| `data/urls_deleted.txt` | detect_changes.py (future) | detect_changes.py | Deleted URLs (audit) |
+| `data/stac_geotiff_checks.csv` | stac_create_item.qmd | stac_create_item.qmd | Validation cache |
+
+**Important:** During Phase 1 testing, `urls_list.txt` is read-only. It won't be modified until Phase 2 change detection script is built.
+
+---
+
 ## Test vs Production Path Isolation
 
 **Finding:** Test mode must use separate output directory from production
