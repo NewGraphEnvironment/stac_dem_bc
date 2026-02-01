@@ -25,6 +25,7 @@ import concurrent.futures
 import subprocess
 import pandas as pd
 import os
+import glob
 from tqdm import tqdm
 from pystac import Link, RelType, Item
 ```
@@ -78,11 +79,11 @@ def datetime_parse_item(s):
 # =============================================================================
 
 # Test mode flags - set to True for development testing
-test_only = True
-test_number_items = 10
+test_only = False
+test_number_items = 10  # Only used when test_only=True
 
 # Incremental mode - set to True to process only new URLs from data/urls_new.txt
-incremental = False
+incremental = False  # Set to True for weekly updates after initial catalog build
 
 # Define paths - test_only controls dev vs prod output
 if test_only:
@@ -105,11 +106,28 @@ print(f"Output directory: {path_local}")
 collection = pystac.Collection.from_file(path_collection)
 collection.set_self_href(path_s3_json)
 
-# Clear existing item links in test mode to avoid accumulation
-if test_only:
+# Handle existing item links based on mode
+# WHY: Test mode normally clears items for clean slate, BUT incremental mode needs
+#      to keep existing items to append new ones. If both flags are set, incremental
+#      takes priority (we're testing the append behavior).
+if test_only and not incremental:
+    # Test mode (non-incremental): Clear for clean test run
     # Remove all item links (keeps other links like self, root, etc.)
     collection.links = [link for link in collection.links if link.rel != 'item']
     print("Test mode: Cleared existing item links from collection")
+
+    # WHY: Also delete old item JSON files to prevent accumulation across test runs.
+    #      Without this, old JSON files remain even though collection.links is cleared.
+    old_jsons = glob.glob(f"{path_local}/*-*.json")  # Match item pattern (not collection.json)
+    if old_jsons:
+        for json_file in old_jsons:
+            os.remove(json_file)
+        print(f"Test mode: Deleted {len(old_jsons)} old item JSON files")
+elif incremental:
+    # Incremental mode: Keep existing items, we're appending
+    # Count and report how many items we're starting with
+    existing_item_count = len([l for l in collection.links if l.rel == 'item'])
+    print(f"Incremental mode: Appending to collection with {existing_item_count} existing items")
 
 # Load list of image paths (from urls_list.txt or urls_new.txt for incremental)
 urls_file = "data/urls_new.txt" if incremental else "data/urls_list.txt"
@@ -260,13 +278,26 @@ except Exception as e:
 
 # Add all valid item JSON hrefs to the collection
 if results:
+    # WHY: In incremental mode, check for duplicate links before adding.
+    #      Without this check, reprocessing the same URLs creates duplicate item links.
+    existing_item_hrefs = {link.target for link in collection.links if link.rel == 'item'}
+
+    added_count = 0
+    skipped_count = 0
     for result in results:
-        collection.add_link(Link(
-            rel=RelType.ITEM,
-            target=f"{path_s3_stac}/{result['id']}.json",
-            media_type="application/json"
-        ))
+        item_href = f"{path_s3_stac}/{result['id']}.json"
+        if item_href not in existing_item_hrefs:
+            collection.add_link(Link(
+                rel=RelType.ITEM,
+                target=item_href,
+                media_type="application/json"
+            ))
+            added_count += 1
+        else:
+            skipped_count += 1
+
     print(f"Successfully created {len(results)} STAC items")
+    print(f"Added {added_count} new item links, skipped {skipped_count} duplicates")
 else:
     print("No items were created")
 
