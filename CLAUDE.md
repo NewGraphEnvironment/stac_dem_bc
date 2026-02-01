@@ -13,12 +13,13 @@ This project implements automated weekly updates of STAC DEM BC JSONs using VM-b
 
 ### Key Implementation Phases
 
-**Phase 1-2: Modernization (phase1-2-modernization worktree)**
+**Phase 1-2: Modernization ✅ COMPLETE (phase1-2-modernization worktree)**
 - Port stac_orthophoto_bc performance improvements
 - Pre-validation system with COG detection
 - Parallel item creation using ThreadPoolExecutor
 - Incremental update logic with change detection
 - Optimize spatial extent calculation
+- **Result:** 100-item test passed, ready for VM automation
 
 **Phase 3: VM Automation (phase3-automation worktree - future)**
 - Master automation script (stac_update_weekly.sh)
@@ -28,7 +29,9 @@ This project implements automated weekly updates of STAC DEM BC JSONs using VM-b
 
 ### Project Context
 
-**Dataset:** 22,548 DEM GeoTIFFs from BC provincial objectstore (nrs.objectstore.gov.bc.ca/gdwuts)
+**Dataset:** 58,109 DEM GeoTIFFs from BC provincial objectstore (nrs.objectstore.gov.bc.ca/gdwuts)
+- Grew 158% from initial 22,548 files (discovered in Phase 2.1 change detection)
+- ~90 files with parentheses in filename excluded (all fail validation - see issue #8)
 
 **Current Issues:**
 - Processing all files takes 5-6 hours sequentially
@@ -146,6 +149,55 @@ Logs capture: configuration, validation progress, item creation, errors, warning
 - **Spatial extent:** Hardcoded BC bbox vs calculated (saves ~20 minutes, BC boundary stable)
 - **Validation caching:** Pre-validate all files vs validate on-demand (frontload cost, faster iterations)
 - **Parallel processing:** ThreadPoolExecutor vs multiprocessing (avoid rasterio threading issues)
+
+### Parallel Processing & Performance Patterns
+
+**Proven from Phase 1-2 (stac_orthophoto_bc + stac_dem_bc):**
+
+**1. ThreadPoolExecutor for Rasterio Operations**
+```python
+# CORRECT: Works reliably with rasterio
+with concurrent.futures.ThreadPoolExecutor() as executor:
+    results = list(executor.map(process_geotiff, urls))
+
+# WRONG: Causes threading conflicts, hangs/crashes
+with multiprocessing.Pool() as pool:
+    results = pool.map(process_geotiff, urls)
+```
+WHY: Rasterio uses internal threading that conflicts with multiprocessing. ThreadPoolExecutor avoids these conflicts while still providing parallelism for I/O-bound operations (reading remote GeoTIFFs via /vsicurl/).
+
+**2. Validation Caching Strategy**
+- Pre-validate all files in parallel using `rio cogeo validate`
+- Cache results in CSV (`url, is_geotiff, is_cog`)
+- Skip unreadable files during item creation (logged, not fatal)
+- Incremental mode: only validate new URLs not in cache
+- **Benefit:** Frontload ~20-30 min cost once, skip 100-500 invalid files on every subsequent run
+
+**3. Test Mode Design Pattern**
+When implementing test modes that support both clean runs and incremental appends:
+```python
+if test_only and not incremental:
+    # Clear BOTH metadata AND files
+    collection.links = [link for link in collection.links if link.rel != 'item']
+    for old_json in glob.glob(f"{path_local}/*-*.json"):
+        os.remove(old_json)
+```
+WHY: Clearing only collection links leaves orphaned JSON files across test runs. Must clean both to prevent accumulation and mismatches.
+
+**4. Incremental Mode Duplicate Prevention**
+```python
+existing_item_hrefs = {link.target for link in collection.links if link.rel == 'item'}
+for result in results:
+    item_href = f"{path_s3_stac}/{result['id']}.json"
+    if item_href not in existing_item_hrefs:
+        collection.add_link(Link(...))
+```
+WHY: Reprocessing same URLs (e.g., after failures, testing) would create duplicate links without explicit checking. PySTAC doesn't prevent duplicates automatically.
+
+**5. Dataset Monitoring**
+- BC DEM objectstore grew 158% undocumented (22,548 → 58,109 files)
+- Change detection discovered 35,569 new files, 8 deleted
+- **Lesson:** Always implement monitoring/change detection for external data sources, even if "stable"
 
 ### Dependencies
 - Python: pystac, rio_stac, rasterio, rio-cogeo, pandas, tqdm, concurrent.futures (built-in)

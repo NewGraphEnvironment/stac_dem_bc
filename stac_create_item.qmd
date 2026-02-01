@@ -79,11 +79,11 @@ def datetime_parse_item(s):
 # =============================================================================
 
 # Test mode flags - set to True for development testing
-test_only = False
-test_number_items = 10  # Only used when test_only=True
+test_only = True
+test_number_items = 100  # Test with 100 items to verify prod-like scale
 
 # Incremental mode - set to True to process only new URLs from data/urls_new.txt
-incremental = False  # Set to True for weekly updates after initial catalog build
+incremental = False  # Test non-incremental mode (full rebuild)
 
 # Define paths - test_only controls dev vs prod output
 if test_only:
