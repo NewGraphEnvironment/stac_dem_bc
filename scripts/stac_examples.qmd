@@ -1,0 +1,155 @@
+---
+title: "STAC Testing and Exploration Examples"
+format: html
+engine: knitr
+---
+
+Reference examples for working with STAC collections after they're created.
+
+```{r env-activate}
+# Auto-install reticulate if not present
+if (!require("reticulate", quietly = TRUE)) {
+  pak::pkg_install("reticulate")
+  library(reticulate)
+}
+
+reticulate::use_condaenv("stac-catalog", required = TRUE)
+
+```
+
+## Tile Coordinate Calculation
+
+Calculate tile coordinates for Titiler visualization:
+
+```{python xyz}
+import mercantile
+
+# Bounds from Titiler response
+west, south, east, north = -124.703866, 54.107650, -124.695957, 54.111509
+
+# Choose a zoom level
+zoom = 15
+
+# Get a tile covering the center of the bounds
+tile = mercantile.tile((west + east) / 2, (south + north) / 2, zoom)
+
+print(f"Tile coordinates: Z={tile.z}, X={tile.x}, Y={tile.y}")
+```
+
+## Query STAC Collection from S3
+
+Load and query a STAC collection directly from S3, filtering by bounding box:
+
+```{python query-s3-json}
+import pystac
+
+# Load the Collection JSON directly
+collection = pystac.Collection.from_file("https://dev-imagery-uav-bc.s3.amazonaws.com/imagery_uav_bc.json")
+
+# Define BC bounding box (approximate)
+bbox_bc = [-139, 48, -114, 60]  # (West, South, East, North)
+
+# Get all items linked in the collection
+items = collection.get_all_items()
+
+# Filter items that fall within BC bounds
+bc_items = []
+for item in items:
+    # Check if item's bounding box intersects with BC
+    item_bbox = item.bbox  # [west, south, east, north]
+    if (
+        item_bbox[2] >= bbox_bc[0] and  # Item east >= BC west
+        item_bbox[0] <= bbox_bc[2] and  # Item west <= BC east
+        item_bbox[3] >= bbox_bc[1] and  # Item north >= BC south
+        item_bbox[1] <= bbox_bc[3]      # Item south <= BC north
+    ):
+        bc_items.append(item)
+
+# Print matching items
+for item in bc_items:
+    print(f"Item: {item.id}")
+    for asset_key, asset in item.assets.items():
+        print(f"  - {asset_key}: {asset.href}")
+
+```
+
+## Query via Titiler API
+
+Test Titiler API integration for filtering items:
+
+```{python query-titiler}
+import requests
+import pystac
+
+# Define BC bounding box (West, South, East, North)
+bbox_bc = [-139, 48, -114, 60]
+
+# Titiler endpoint
+titiler_endpoint = "http://titiler-env.eba-s4jhubvr.us-west-2.elasticbeanstalk.com"
+
+# Load the STAC Collection
+collection_url = "https://dev-imagery-uav-bc.s3.amazonaws.com/imagery_uav_bc.json"
+collection = pystac.Collection.from_file(collection_url)
+
+# Get all items
+items = collection.get_all_items()
+
+# Filter items using /stac/bounds
+matching_items = []
+for item in items:
+    stac_url = item.get_self_href()
+    bounds_url = f"{titiler_endpoint}/stac/bounds?url={stac_url}"
+
+    response = requests.get(bounds_url)
+    if response.status_code == 200:
+        item_bbox = response.json()["bounds"]  # [west, south, east, north]
+
+        # Check intersection with BC bbox
+        if (
+            item_bbox[2] >= bbox_bc[0] and  # Item east >= BC west
+            item_bbox[0] <= bbox_bc[2] and  # Item west <= BC east
+            item_bbox[3] >= bbox_bc[1] and  # Item north >= BC south
+            item_bbox[1] <= bbox_bc[3]      # Item south <= BC north
+        ):
+            matching_items.append((item.id, stac_url))
+
+# Print matching items
+print("Matching Items in BC:")
+for item_id, stac_url in matching_items:
+    print(f"- {item_id}: {stac_url}")
+
+```
+
+## Generate Precise Raster Footprints
+
+Explore how to update item footprints to show actual data extent (non-NA values) instead of simple bounding box:
+
+```{python footprint}
+# Remote URL wrapped in /vsicurl/ for GDAL
+url = "/vsicurl/https://nrs.objectstore.gov.bc.ca/gdwuts/093/093h/2019/dem/bc_093h092_xli1m_utm10_2019.tif"
+url = "/vsicurl/https://nrs.objectstore.gov.bc.ca/gdwuts/093/093h/2019/dem/bc_093h084_xli1m_utm10_2019.tif"
+
+from stactools.core.utils.raster_footprint import RasterFootprint
+from shapely.geometry import shape, mapping, Polygon
+
+# Build footprint
+rf = RasterFootprint.from_href(
+    href=url,
+    precision=5,                # Coarser geometry (faster, smaller)
+    densification_factor=None, # Disable extra vertex interpolation
+    densification_distance=None,
+    simplify_tolerance=0.001,  # Simplify geometry slightly (in degrees) 0.001 ≈ 111 meters
+    no_data=None,              # Use nodata from metadata (excludes it automatically)
+    bands=[1]                  # Only use first band
+)
+geojson_dict = rf.footprint()
+
+# Optional: turn into shapely geometry
+geom = shape(geojson_dict)
+
+# Convert back to GeoJSON dict
+geojson_geom = mapping(geom)
+
+print(geojson_geom)
+
+```

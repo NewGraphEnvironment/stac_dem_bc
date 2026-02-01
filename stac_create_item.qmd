@@ -1,12 +1,17 @@
 ---
 title: "STAC create item "
 format: html
-jupyter: titiler  # Use your Conda environment
+engine: knitr
 ---
 
 ```{r env-activate}
-library(reticulate)
-reticulate::use_condaenv("titiler2", required = TRUE)
+# Auto-install reticulate if not present
+if (!require("reticulate", quietly = TRUE)) {
+  pak::pkg_install("reticulate")
+  library(reticulate)
+}
+
+reticulate::use_condaenv("stac-catalog", required = TRUE)
 # reticulate::py_config()
 
 ```
@@ -16,6 +21,13 @@ reticulate::use_condaenv("titiler2", required = TRUE)
 import pathlib
 import pystac
 import rio_stac
+import concurrent.futures
+import subprocess
+import pandas as pd
+import os
+import glob
+from tqdm import tqdm
+from pystac import Link, RelType, Item
 ```
 
 ```{python date-extract}
@@ -62,78 +74,236 @@ def datetime_parse_item(s):
 
 
 ```{python stac-item-create}
-# Define the path to the STAC collection JSON file.  
+# =============================================================================
+# Configuration
+# =============================================================================
 
-path_local = "/Users/airvine/Projects/gis/stac_dem_bc/stac/prod/stac_dem_bc"
+# Test mode flags - set to True for development testing
+test_only = True
+test_number_items = 100  # Test with 100 items to verify prod-like scale
+
+# Incremental mode - set to True to process only new URLs from data/urls_new.txt
+incremental = False  # Test non-incremental mode (full rebuild)
+
+# Define paths - test_only controls dev vs prod output
+if test_only:
+    # DEV: Safe testing environment, isolated from production
+    path_local = "/Users/airvine/Projects/gis/stac_dem_bc/stac/dev/stac_dem_bc"
+else:
+    # PROD: Production output that gets uploaded to S3
+    path_local = "/Users/airvine/Projects/gis/stac_dem_bc/stac/prod/stac_dem_bc"
+
 path_collection = f"{path_local}/collection.json"
-
-# Define the path to the STAC collection JSON file on S3.  Seems a bit weird that we actually
-# need to put a file here in able to build our collection
 path_s3_stac = "https://stac-dem-bc.s3.amazonaws.com"
 path_s3_json = f"{path_s3_stac}/collection.json"
-
-# Define the base local path where imagery is stored
-path_base = pathlib.Path("/Users/airvine/Projects/gis/stac_dem_bc/stac/dev/stac_dem_bc")
-
-# Define the base S3 URL where assets are hosted
 path_s3 = "https://nrs.objectstore.gov.bc.ca/gdwuts"
+path_results_csv = "data/stac_geotiff_checks.csv"
 
-# Load the existing STAC collection from the file
+print(f"Mode: {'TEST (dev output)' if test_only else 'PRODUCTION (prod output)'}")
+print(f"Output directory: {path_local}")
+
+# Load base collection
 collection = pystac.Collection.from_file(path_collection)
-
-# Manually set the self HREF for the collection to the cloud location
 collection.set_self_href(path_s3_json)
 
-# Define a list of paths to process
-# path_items = list(path_base.rglob("*.tif"))
+# Handle existing item links based on mode
+# WHY: Test mode normally clears items for clean slate, BUT incremental mode needs
+#      to keep existing items to append new ones. If both flags are set, incremental
+#      takes priority (we're testing the append behavior).
+if test_only and not incremental:
+    # Test mode (non-incremental): Clear for clean test run
+    # Remove all item links (keeps other links like self, root, etc.)
+    collection.links = [link for link in collection.links if link.rel != 'item']
+    print("Test mode: Cleared existing item links from collection")
 
-with open("data/urls_list.txt") as f:
+    # WHY: Also delete old item JSON files to prevent accumulation across test runs.
+    #      Without this, old JSON files remain even though collection.links is cleared.
+    old_jsons = glob.glob(f"{path_local}/*-*.json")  # Match item pattern (not collection.json)
+    if old_jsons:
+        for json_file in old_jsons:
+            os.remove(json_file)
+        print(f"Test mode: Deleted {len(old_jsons)} old item JSON files")
+elif incremental:
+    # Incremental mode: Keep existing items, we're appending
+    # Count and report how many items we're starting with
+    existing_item_count = len([l for l in collection.links if l.rel == 'item'])
+    print(f"Incremental mode: Appending to collection with {existing_item_count} existing items")
+
+# Load list of image paths (from urls_list.txt or urls_new.txt for incremental)
+urls_file = "data/urls_new.txt" if incremental else "data/urls_list.txt"
+with open(urls_file) as f:
     path_items = f.read().splitlines()
 
-# Iterate over each image file in the list
-for path_item in path_items:
-    # Compute the relative path of the item within the base directory
+# Determine URLs to check
+if test_only:
+    urls_to_check = path_items[:test_number_items]
+else:
+    urls_to_check = path_items
+
+print(f"Processing {len(urls_to_check)} URLs (test_only={test_only}, incremental={incremental})")
+
+# =============================================================================
+# Pre-Validation: Check GeoTIFF and COG Status
+# =============================================================================
+
+# Load existing validation cache if it exists
+if os.path.exists(path_results_csv):
+    df_existing = pd.read_csv(path_results_csv)
+    existing_urls = set(df_existing["url"])
+    print(f"Loaded {len(df_existing)} existing validation results")
+else:
+    df_existing = pd.DataFrame(columns=["url", "is_geotiff", "is_cog"])
+    existing_urls = set()
+    print("No existing validation cache found, will validate all URLs")
+
+# Determine which URLs need validation
+if incremental:
+    # In incremental mode, only validate new URLs not in cache
+    urls_to_validate = [url for url in urls_to_check if url not in existing_urls]
+    print(f"Incremental mode: {len(urls_to_validate)} new URLs need validation")
+else:
+    # In full mode, validate all URLs in the list
+    urls_to_validate = urls_to_check
+
+def check_geotiff_cog(url: str) -> dict:
+    """
+    Validate GeoTIFF and COG status in one step using rio cogeo validate.
+
+    Returns dict with url, is_geotiff (readable), and is_cog (cloud-optimized) status.
+    """
+    try:
+        result = subprocess.run(
+            ["rio", "cogeo", "validate", f"/vsicurl/{url}"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False
+        )
+        output = result.stdout.decode() + result.stderr.decode()
+        return {
+            "url": url,
+            "is_geotiff": "is NOT a valid cloud optimized GeoTIFF" in output or "is a valid cloud optimized GeoTIFF" in output,
+            "is_cog": "is a valid cloud optimized GeoTIFF" in output
+        }
+    except FileNotFoundError:
+        raise RuntimeError("`rio cogeo` is not installed or not in PATH. Install with: pip install rio-cogeo")
+
+# Run validation in parallel if there are URLs to validate
+if urls_to_validate:
+    print(f"Validating {len(urls_to_validate)} GeoTIFFs...")
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        new_results = list(tqdm(executor.map(check_geotiff_cog, urls_to_validate),
+                               total=len(urls_to_validate),
+                               desc="Validating GeoTIFFs"))
+
+    # Combine and save
+    df_new = pd.DataFrame(new_results)
+    df_all = pd.concat([df_existing, df_new], ignore_index=True) if len(df_existing) > 0 else df_new
+    df_all.to_csv(path_results_csv, index=False)
+    print(f"Validation complete. Saved {len(df_all)} results to {path_results_csv}")
+else:
+    df_all = df_existing
+    print("No new URLs to validate, using existing cache")
+
+# Create lookup dictionary for fast access during item creation
+results_lookup = {
+    row["url"].replace("https:/", "https://"): {"is_geotiff": row["is_geotiff"], "is_cog": row["is_cog"]}
+    for _, row in df_all.iterrows()
+}
+
+# =============================================================================
+# Parallel Item Creation
+# =============================================================================
+
+def process_item(path_item: str) -> dict | None:
+    """
+    Process a single GeoTIFF URL to create a STAC item.
+
+    Returns dict with item_id and item object, or None if processing fails.
+    """
     href_item = path_item.replace("https:/", "https://")
+    check = results_lookup.get(href_item)
+
+    # Skip unreadable GeoTIFFs
+    if check is None or not check["is_geotiff"]:
+        print(f"Skipping unreadable GeoTIFF: {href_item}")
+        return None
+
     item_id = path_item[len(path_s3):].replace("/", "-").removesuffix(".tif")
     item_time = datetime_parse_item(date_extract_from_path(path_item))
 
-
-    # Create a STAC Item for the given image file
-    item = rio_stac.stac.create_stac_item(
-        path_item, 
-        id=item_id,
-        asset_media_type='image/tiff; application=geotiff; profile=cloud-optimized',
-        asset_name='image',
-        asset_href=href_item,
-        with_proj=True,  # Extract and include projection properties
-        collection=collection.id,  # Assign the item to the collection
-        collection_url=collection.get_self_href(),  # Use collection's self href
-        asset_roles=["data"]
+    # Set media type based on COG validation results
+    media_type = (
+        "image/tiff; application=geotiff; profile=cloud-optimized"
+        if check["is_cog"] else
+        "image/tiff; application=geotiff"
     )
-    
-    # becasue we use rio we need to add the datetime after
-    item.datetime = item_time
 
-    # Add the newly created item to the collection
-    collection.add_item(item)
-    
-    # Define the correct self_href for the item JSON file
-    item_self_href = f"{path_s3_stac}/{item_id}.json"
-    item.set_self_href(item_self_href)
+    try:
+        item = rio_stac.stac.create_stac_item(
+            path_item,
+            id=item_id,
+            asset_media_type=media_type,
+            asset_name='image',
+            asset_href=href_item,
+            with_proj=True,
+            collection=collection.id,
+            collection_url=path_s3_json,
+            asset_roles=["data"]
+        )
+        item.datetime = item_time
+        item.assets['image'].href = href_item
 
-    # Print the asset HREF for debugging purposes
-    print(f"Asset HREF after editing: {item.assets['image'].href}")
+        # Save item JSON locally
+        path_item_json = f"{path_local}/{item_id}.json"
+        item.save_object(dest_href=path_item_json, include_self_link=False)
 
-    # Save the STAC item JSON in the main directory 
-    path_item_json = f"{path_local}/{item_id}.json"
-    item.save_object(dest_href=path_item_json)
+        return {
+            "id": item_id,
+            "item": item
+        }
+    except Exception as e:
+        print(f"Error processing {href_item}: {e}")
+        return None
 
+# Run item creation in parallel using threads (avoids rasterio multiprocessing issues)
+print(f"Creating STAC items for {len(urls_to_check)} URLs...")
+try:
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        results = list(filter(None, tqdm(executor.map(process_item, urls_to_check),
+                                        total=len(urls_to_check),
+                                        desc="Creating STAC Items")))
+except Exception as e:
+    print(f"Parallel execution failed: {e}")
+    results = []
 
-# Save the updated STAC collection with the new items included
-collection.save_object(
-    # include_self_link=True, 
-    dest_href=path_collection
-    )
+# Add all valid item JSON hrefs to the collection
+if results:
+    # WHY: In incremental mode, check for duplicate links before adding.
+    #      Without this check, reprocessing the same URLs creates duplicate item links.
+    existing_item_hrefs = {link.target for link in collection.links if link.rel == 'item'}
+
+    added_count = 0
+    skipped_count = 0
+    for result in results:
+        item_href = f"{path_s3_stac}/{result['id']}.json"
+        if item_href not in existing_item_hrefs:
+            collection.add_link(Link(
+                rel=RelType.ITEM,
+                target=item_href,
+                media_type="application/json"
+            ))
+            added_count += 1
+        else:
+            skipped_count += 1
+
+    print(f"Successfully created {len(results)} STAC items")
+    print(f"Added {added_count} new item links, skipped {skipped_count} duplicates")
+else:
+    print("No items were created")
+
+# Save the updated collection
+collection.save_object(dest_href=path_collection)
+print(f"Collection saved to {path_collection}")
 
 ```
 
@@ -152,8 +322,8 @@ fs::file_delete(j)
 ```
 
 ```{python validate}
-
-
+# Validate all items in the collection
+print(f"\nValidating {len(list(collection.get_items()))} items...")
 for item in collection.get_all_items():
     try:
         item.validate()
@@ -161,136 +331,7 @@ for item in collection.get_all_items():
     except Exception as e:
         print(f"❌ {item.id} failed validation: {e}")
 
-
-# or 1 at a time
-item = Item.from_file(f"{path_local}/093-093h-2019-dem-bc_093h092_xli1m_utm10_2019.json")
-item.validate()
-```
-
-
-```{python, xyz, eval - FALSE}
-import mercantile
-
-# Bounds from Titiler response
-west, south, east, north = -124.703866, 54.107650, -124.695957, 54.111509
-
-# Choose a zoom level
-zoom = 15
-
-# Get a tile covering the center of the bounds
-tile = mercantile.tile((west + east) / 2, (south + north) / 2, zoom)
-
-print(f"Tile coordinates: Z={tile.z}, X={tile.x}, Y={tile.y}")
-```
-
-```{python query-s3-json}
-import pystac
-
-# Load the Collection JSON directly
-collection = pystac.Collection.from_file("https://dev-imagery-uav-bc.s3.amazonaws.com/imagery_uav_bc.json")
-
-# Define BC bounding box (approximate)
-bbox_bc = [-139, 48, -114, 60]  # (West, South, East, North)
-
-# Get all items linked in the collection
-items = collection.get_all_items()
-
-# Filter items that fall within BC bounds
-bc_items = []
-for item in items:
-    # Check if item's bounding box intersects with BC
-    item_bbox = item.bbox  # [west, south, east, north]
-    if (
-        item_bbox[2] >= bbox_bc[0] and  # Item east >= BC west
-        item_bbox[0] <= bbox_bc[2] and  # Item west <= BC east
-        item_bbox[3] >= bbox_bc[1] and  # Item north >= BC south
-        item_bbox[1] <= bbox_bc[3]      # Item south <= BC north
-    ):
-        bc_items.append(item)
-
-# Print matching items
-for item in bc_items:
-    print(f"Item: {item.id}")
-    for asset_key, asset in item.assets.items():
-        print(f"  - {asset_key}: {asset.href}")
-
-
-```
-
-
-```{python query-titiler}
-import requests
-import pystac
-
-# Define BC bounding box (West, South, East, North)
-bbox_bc = [-139, 48, -114, 60]
-
-# Titiler endpoint
-titiler_endpoint = "http://titiler-env.eba-s4jhubvr.us-west-2.elasticbeanstalk.com"
-
-# Load the STAC Collection
-collection_url = "https://dev-imagery-uav-bc.s3.amazonaws.com/imagery_uav_bc.json"
-collection = pystac.Collection.from_file(collection_url)
-
-# Get all items
-items = collection.get_all_items()
-
-# Filter items using /stac/bounds
-matching_items = []
-for item in items:
-    stac_url = item.get_self_href()
-    bounds_url = f"{titiler_endpoint}/stac/bounds?url={stac_url}"
-
-    response = requests.get(bounds_url)
-    if response.status_code == 200:
-        item_bbox = response.json()["bounds"]  # [west, south, east, north]
-
-        # Check intersection with BC bbox
-        if (
-            item_bbox[2] >= bbox_bc[0] and  # Item east >= BC west
-            item_bbox[0] <= bbox_bc[2] and  # Item west <= BC east
-            item_bbox[3] >= bbox_bc[1] and  # Item north >= BC south
-            item_bbox[1] <= bbox_bc[3]      # Item south <= BC north
-        ):
-            matching_items.append((item.id, stac_url))
-
-# Print matching items
-print("Matching Items in BC:")
-for item_id, stac_url in matching_items:
-    print(f"- {item_id}: {stac_url}")
-
-
-```
-
-```{python footprint}
-
-# here we explore how to update the footprints of our items so that we see where the raster has non-na values
-# Remote URL wrapped in /vsicurl/ for GDAL
-url = "/vsicurl/https://nrs.objectstore.gov.bc.ca/gdwuts/093/093h/2019/dem/bc_093h092_xli1m_utm10_2019.tif"
-url = "/vsicurl/https://nrs.objectstore.gov.bc.ca/gdwuts/093/093h/2019/dem/bc_093h084_xli1m_utm10_2019.tif"
-
-from stactools.core.utils.raster_footprint import RasterFootprint
-from shapely.geometry import shape, mapping, Polygon
-
-# Build footprint
-rf = RasterFootprint.from_href(
-    href=url,
-    precision=5,                # Coarser geometry (faster, smaller)
-    densification_factor=None, # Disable extra vertex interpolation
-    densification_distance=None,
-    simplify_tolerance=0.001,  # Simplify geometry slightly (in degrees) 0.001 ≈ 111 meters
-    no_data=None,              # Use nodata from metadata (excludes it automatically)
-    bands=[1]                  # Only use first band
-)
-geojson_dict = rf.footprint()
-
-# Optional: turn into shapely geometry
-geom = shape(geojson_dict)
-
-# Convert back to GeoJSON dict
-geojson_geom = mapping(geom)
-
-print(geojson_geom)
+print("Validation complete")
 
 ```
 

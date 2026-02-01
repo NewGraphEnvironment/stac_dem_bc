@@ -35,6 +35,14 @@ vignettes/*.pdf
 # Temporary files created by R markdown
 *.utf8.md
 *.knit.md
+*.rmarkdown
+
+# Quarto output files
+*.html
+*_files/
+
+# Claude Code config
+.claude/
 
 # R Environment Variables
 .Renviron
@@ -47,3 +55,6 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Logs (but keep README)
+logs/*.log
