@@ -317,6 +317,152 @@ cd ~/Projects/repo/stac_dem_bc-phase1-2-modernization
 
 ---
 
-**Session end:** 2026-01-30 (Ready to restart in correct directory)
-**Last updated:** 2026-01-30
-**Next:** Restart Claude Code in worktree directory, run Phase 1 test
+## 2026-02-01: Phase 1 Testing & Environment Setup
+
+### Environment Infrastructure ✅
+
+**Issue identified:** titiler/titiler2 conda environments contained STAC packages but were misnamed (Titiler not needed for catalog creation).
+
+**Resolution:** Created properly-named `stac-catalog` environment:
+- Name reflects actual purpose (STAC catalog creation, not tile serving)
+- Reusable across all STAC projects (DEM, orthophoto, UAV)
+- Dependencies: pystac, pystac-client, rio-stac, rasterio, rio-cogeo, pandas, tqdm, shapely
+- Documented in `environment.yml`
+
+**Rationale:** Titiler is a separate visualization service (AWS endpoint), not needed in processing environment.
+
+---
+
+### Test Mode Improvements ✅
+
+**stac_create_collection.qmd:**
+- Added test mode configuration (R variables: `test_only`, `test_number_items`)
+- Dev/prod path switching for output isolation
+- S3 fetch optimization: Skip in test mode, reuse existing `urls_list.txt` (saves 5+ minutes)
+- Auto-cleanup: Delete old test item JSONs before creating fresh collection
+- Type conversion fixes for R<->Python interop (bool/int casting)
+- Added missing `date_extract_from_path()` function
+- Hardcoded BC bbox implementation (Phase 1.3) with preserved `bbox_combined()` for other projects
+
+**stac_create_item.qmd:**
+- Fixed collection/items sync issue: Clear item links in test mode before adding new ones
+- Prevents accumulation of duplicate links across multiple test runs
+- Import `Item` class for validation block
+- Moved to `stac-catalog` environment
+
+**Both files:**
+- Changed from `jupyter: titiler2` to `engine: knitr` (proper mixed R/Python workflow)
+- Auto-install reticulate via pak if not present
+- Consistent test mode flags
+
+---
+
+### Code Organization ✅
+
+**Created `scripts/stac_examples.qmd`:**
+- Moved exploration/testing code out of main workflow:
+  - Titiler tile coordinate calculation (mercantile)
+  - S3 STAC collection querying and bbox filtering
+  - Titiler API integration examples
+  - Raster footprint generation (stactools - for future precise geometry)
+- Preserves useful reference examples without cluttering production code
+- Properly documented with context
+
+---
+
+### Documentation Updates ✅
+
+**CLAUDE.md:**
+- Added logging requirement to Testing Strategy section
+- Documented proper logging commands:
+  ```bash
+  quarto render stac_create_item.qmd --execute 2>&1 | tee logs/$(date +%Y%m%d_%H%M%S)_test_description.log
+  ```
+- Ensures all test and production runs captured for debugging and SRED evidence
+
+**Known logging limitation:** Quarto doesn't pipe Python stdout during rendering, so logs capture Quarto processing output but not detailed Python print statements. Future improvement: Add Python logging module for structured logs.
+
+---
+
+### Phase 1 Test Results ✅
+
+**Test parameters:**
+- Mode: Test (dev output directory)
+- Items: 10 URLs
+- Environment: stac-catalog
+
+**Validation results:**
+- All 10 GeoTIFFs validated successfully
+- COG detection working correctly
+- Validation cache created: `data/stac_geotiff_checks.csv`
+
+**Output verification:**
+- 10 STAC item JSONs created in `/Users/airvine/Projects/gis/stac_dem_bc/stac/dev/stac_dem_bc/`
+- Collection.json updated with exactly 10 item links (sync verified)
+- Sample item inspection (082-082e-2017-dem-bc_082e003_2_1_3_xl1m_17603.json):
+  - ✅ Valid STAC 1.1.0 structure with projection extension
+  - ✅ Correct geometry (WGS84 polygon)
+  - ✅ Bbox and projection metadata (EPSG 26911 = UTM Zone 11N)
+  - ✅ Datetime parsed from path: 2017-01-01
+  - ✅ **Media type: `image/tiff; application=geotiff; profile=cloud-optimized`** (COG detected!)
+  - ✅ Asset href points to BC objectstore
+  - ✅ Collection link correct
+
+**Performance:**
+- Collection creation: ~1 minute (hardcoded bbox, reused URLs)
+- Item creation: ~2 minutes for 10 items (parallel processing)
+- Much faster than original sequential approach would have been
+
+---
+
+### Phase 1 Completion Status
+
+**Phase 1.1:** ✅ Pre-validation system with COG detection
+**Phase 1.2:** ✅ Parallel item creation (ThreadPoolExecutor)
+**Phase 1.3:** ✅ Spatial extent optimization (hardcoded BC bbox, preserved calculated option)
+**Phase 1.4:** ✅ Test mode and dependencies
+
+**All Phase 1 goals achieved and tested!**
+
+---
+
+### Commits
+
+**71bc7ef** - Complete Phase 1 test infrastructure and environment setup
+- stac-catalog environment
+- Test mode for both .qmd files
+- Collection/items sync fix
+- Moved exploration code to scripts/
+- Logging documentation
+- Validation cache
+
+---
+
+### Files Modified This Session
+
+| File | Status | Description |
+|------|--------|-------------|
+| `environment.yml` | Created | stac-catalog conda environment definition |
+| `stac_create_collection.qmd` | Modified | Test mode, S3 optimization, cleanup, hardcoded bbox |
+| `stac_create_item.qmd` | Modified | Collection sync fix, stac-catalog env, imports |
+| `scripts/stac_examples.qmd` | Created | Exploration code repository |
+| `CLAUDE.md` | Modified | Logging requirements documented |
+| `data/stac_geotiff_checks.csv` | Created | Validation cache for 10 test items |
+
+---
+
+### Next Steps
+
+**Immediate:**
+- Update task_plan.md to mark Phase 1 complete
+- Begin Phase 2.1: Change detection script (`scripts/detect_changes.py`)
+
+**Before Phase 2:**
+- Consider adding Python logging module for better log capture
+- Test full run with all 22,548 items to benchmark actual performance improvement
+
+---
+
+**Session end:** 2026-02-01 (Phase 1 complete, tested, committed)
+**Last updated:** 2026-02-01
+**Next:** Phase 2 - Incremental update implementation
