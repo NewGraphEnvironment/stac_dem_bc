@@ -1,0 +1,8 @@
+https:/nrs.objectstore.gov.bc.ca/gdwuts/test/092/092b/30_2/dem/bc_092b041_xli1m_utm10_20230930_20240315.tif
+https:/nrs.objectstore.gov.bc.ca/gdwuts/test/092/092l/0_20/dem/bc_092l074_xli1m_utm9_20231030_20231031.tif
+https:/nrs.objectstore.gov.bc.ca/gdwuts/test/092/092l/0_20/dem/bc_092l091_xli1m_utm9_20231030_20231030.tif
+https:/nrs.objectstore.gov.bc.ca/gdwuts/test/093/093b/28_2/dem/bc_093b031_xli1m_utm10_20230828_20230901.tif
+https:/nrs.objectstore.gov.bc.ca/gdwuts/test/094/094a/11_2/dem/bc_094a069_xli1m_utm10_20240611_20240620.tif
+https:/nrs.objectstore.gov.bc.ca/gdwuts/test/094/094a/2024/dem/bc_094a046_3_1_4_xli1m_utm10_20240526_20240526.tif
+https:/nrs.objectstore.gov.bc.ca/gdwuts/test/102/102i/2023/dem/bc_102i069_4_4_4_xli1m_utm09_20231028_20231030.tif
+https:/nrs.objectstore.gov.bc.ca/gdwuts/test/102/102i/8_20/dem/bc_102i050_xli1m_utm9_20231028_20231030.tif

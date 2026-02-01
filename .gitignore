@@ -35,6 +35,14 @@ vignettes/*.pdf
 # Temporary files created by R markdown
 *.utf8.md
 *.knit.md
+*.rmarkdown
+
+# Quarto output files
+*.html
+*_files/
+
+# Claude Code config
+.claude/
 
 # R Environment Variables
 .Renviron
