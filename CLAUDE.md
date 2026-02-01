@@ -132,6 +132,16 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Benchmark timing at each phase
 - Verify STAC API queries through images.a11s.one
 
+**IMPORTANT: Always run tests and production with logging enabled:**
+```bash
+# Test run with logging
+quarto render stac_create_item.qmd --execute 2>&1 | tee logs/$(date +%Y%m%d_%H%M%S)_test_phase1_10items.log
+
+# Production run with logging
+quarto render stac_create_item.qmd --execute 2>&1 | tee logs/$(date +%Y%m%d_%H%M%S)_prod_full_run.log
+```
+Logs capture: configuration, validation progress, item creation, errors, warnings, timing, and summary statistics.
+
 ### Key Trade-offs Documented in Issues
 - **Spatial extent:** Hardcoded BC bbox vs calculated (saves ~20 minutes, BC boundary stable)
 - **Validation caching:** Pre-validate all files vs validate on-demand (frontload cost, faster iterations)

@@ -1,29 +1,51 @@
 ---
 title: "STAC create collection "
 format: html
-jupyter: titiler  # Use your Conda environment
+engine: knitr
 ---
 
 ```{r env-activate}
-library(reticulate)
-reticulate::use_condaenv("titiler", required = TRUE)
+# Auto-install reticulate if not present
+if (!require("reticulate", quietly = TRUE)) {
+  pak::pkg_install("reticulate")
+  library(reticulate)
+}
+
+reticulate::use_condaenv("stac-catalog", required = TRUE)
 # reticulate::py_config()
+
+# Test mode configuration
+test_only <- TRUE  # Set to FALSE for production
+test_number_items <- 10
+
+cat(sprintf("Mode: %s\n", if(test_only) "TEST" else "PRODUCTION"))
 
 ```
 
 ```{r s3-get-keys}
-keys <- ngr::ngr_s3_keys_get(
-  url_bucket = "https://nrs.objectstore.gov.bc.ca/gdwuts",
-  prefix = "",
-  pattern = c("dem", "*.tif")
-)
-
 fs::dir_create("data")
 
-# get rid of paths with ( in them
-keys_clean <- keys[!stringr::str_detect(keys, "\\(")]
+if (test_only && file.exists("data/urls_list.txt")) {
+  # TEST MODE: Reuse existing urls_list.txt (skip slow S3 fetch)
+  cat("Test mode: Reusing existing data/urls_list.txt\n")
+  keys_clean <- readr::read_lines("data/urls_list.txt")
+  cat(sprintf("Loaded %d URLs from cache\n", length(keys_clean)))
+} else {
+  # PRODUCTION MODE: Fetch fresh keys from BC objectstore
+  cat("Fetching fresh keys from BC objectstore...\n")
+  keys <- ngr::ngr_s3_keys_get(
+    url_bucket = "https://nrs.objectstore.gov.bc.ca/gdwuts",
+    prefix = "",
+    pattern = c("dem", "*.tif")
+  )
 
-readr::write_lines(keys_clean, "data/urls_list.txt")
+  # Remove paths with ( in them
+  keys_clean <- keys[!stringr::str_detect(keys, "\\(")]
+
+  # Save to disk
+  readr::write_lines(keys_clean, "data/urls_list.txt")
+  cat(sprintf("Fetched and saved %d URLs\n", length(keys_clean)))
+}
 
 ```
 
@@ -69,9 +91,66 @@ def bbox_combined(paths, max_workers=8):
 
 ```
 
+```{python test-config}
+# =============================================================================
+# Configuration
+# =============================================================================
+
+# Get test mode flags from R environment (convert to Python types)
+test_only = bool(r.test_only)
+test_number_items = int(r.test_number_items)
+
+# Define paths - test_only controls dev vs prod output
+if test_only:
+    # DEV: Safe testing environment, isolated from production
+    path_local = "/Users/airvine/Projects/gis/stac_dem_bc/stac/dev/stac_dem_bc"
+else:
+    # PROD: Production output that gets uploaded to S3
+    path_local = "/Users/airvine/Projects/gis/stac_dem_bc/stac/prod/stac_dem_bc"
+
+path_collection = f"{path_local}/collection.json"
+
+print(f"Mode: {'TEST (dev output)' if test_only else 'PRODUCTION (prod output)'}")
+print(f"Output: {path_collection}")
+
+# Clean up old test items if in test mode
+if test_only:
+    import os
+    import glob
+    old_items = glob.glob(f"{path_local}/*.json")
+    old_items = [f for f in old_items if not f.endswith("collection.json")]
+    if old_items:
+        print(f"Cleaning up {len(old_items)} old test item JSONs...")
+        for item_file in old_items:
+            os.remove(item_file)
+        print("Cleanup complete")
+
+```
+
+
 ```{python temporal-extent}
 
 from datetime import datetime, timezone
+import re
+
+def date_extract_from_path(s):
+    # Step 1: Try to extract YYYYMMDD or YYYY after _utmXX_
+    match = re.search(r'_utm\d{1,2}_([0-9]{4,8})', s)
+    if match:
+        val = match.group(1)
+        if val.isdigit():
+            year = int(val[:4])
+            if 2000 <= year <= 2050:
+                return val
+
+    # Step 2: Fallback: look for /YYYY/ in the path
+    fallback = re.search(r'/([2][0-9]{3})/', s)
+    if fallback:
+        year = int(fallback.group(1))
+        if 2000 <= year <= 2050:
+            return str(year)
+
+    return None
 
 def datetime_parse_item(s):
     if s is None:
@@ -85,6 +164,11 @@ def datetime_parse_item(s):
 # Load paths from the same source
 with open("data/urls_list.txt") as f:
     path_items = f.read().splitlines()
+
+# Limit to test items if in test mode
+if test_only:
+    path_items = path_items[:test_number_items]
+    print(f"Test mode: Using {len(path_items)} items for extent calculation")
 
 # Extract all valid datetimes
 times = [
@@ -109,23 +193,39 @@ print(f"Temporal extent: {start_time.isoformat()} to {end_time.isoformat()}")
 
 
 ```{python collection-create}
-path_collection = "/Users/airvine/Projects/gis/stac_dem_bc/stac/prod/stac_dem_bc/collection.json"
+# path_collection and path_local defined in test-config block above
 path_s3_json = "https://stac-dem-bc.s3.amazonaws.com/collection.json"
 collection_id = "stac-dem-bc"
 
-# path_cogs = list(Path(path_collection).parent.rglob("*.tif"))
+# Use path_items from temporal-extent block (already filtered for test mode)
+path_cogs = path_items
 
-with open("data/urls_list.txt") as f:
-    path_cogs = f.read().splitlines()
-    
-# Define spatial extent (bounding box for BC)
-# spatial_extent = SpatialExtent([[-140, 48, -114, 60]])
+# =============================================================================
+# Spatial Extent Calculation (Phase 1.3 - Issue #4)
+# =============================================================================
+# Two approaches available:
+#
+# Option 1: HARDCODED BC BBOX (default - saves ~20 minutes)
+#   - BC provincial boundary is stable and well-defined
+#   - Slightly less precise (includes areas with no coverage)
+#   - Appropriate for provincial datasets like DEM BC
+#
+# Option 2: CALCULATED from COGs (preserved for other projects)
+#   - Exact data extent
+#   - Takes ~20 minutes for 22K files
+#   - Useful for UAV imagery or datasets with unknown extent
+# =============================================================================
 
-# Get bbox from your COGs - except that it takes forever
-# duration = timeit.timeit(lambda: bbox_combined(path_cogs[:500]), number=1)
-# print(f"Computed bbox in {duration:.2f} seconds.")
-bbox = bbox_combined(path_cogs)
-spatial_extent = SpatialExtent([list(bbox)])
+# Option 1: Hardcoded BC bbox (default)
+bbox = [-140, 48, -114, 60]  # (West, South, East, North)
+spatial_extent = SpatialExtent([bbox])
+print(f"Using hardcoded BC bbox: {bbox}")
+
+# Option 2: Calculate from COGs (uncomment to use)
+# print(f"Calculating spatial extent from {len(path_cogs)} items...")
+# bbox = bbox_combined(path_cogs)
+# spatial_extent = SpatialExtent([list(bbox)])
+# print(f"Calculated bbox: {bbox}")
 
 # Define temporal extent using datetime objects
 # temporal_extent = TemporalExtent([[datetime(2011, 9, 14), datetime(2024, 9, 26)]])

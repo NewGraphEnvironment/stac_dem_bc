@@ -1,12 +1,17 @@
 ---
 title: "STAC create item "
 format: html
-jupyter: titiler  # Use your Conda environment
+engine: knitr
 ---
 
 ```{r env-activate}
-library(reticulate)
-reticulate::use_condaenv("titiler2", required = TRUE)
+# Auto-install reticulate if not present
+if (!require("reticulate", quietly = TRUE)) {
+  pak::pkg_install("reticulate")
+  library(reticulate)
+}
+
+reticulate::use_condaenv("stac-catalog", required = TRUE)
 # reticulate::py_config()
 
 ```
@@ -21,7 +26,7 @@ import subprocess
 import pandas as pd
 import os
 from tqdm import tqdm
-from pystac import Link, RelType
+from pystac import Link, RelType, Item
 ```
 
 ```{python date-extract}
@@ -99,6 +104,12 @@ print(f"Output directory: {path_local}")
 # Load base collection
 collection = pystac.Collection.from_file(path_collection)
 collection.set_self_href(path_s3_json)
+
+# Clear existing item links in test mode to avoid accumulation
+if test_only:
+    # Remove all item links (keeps other links like self, root, etc.)
+    collection.links = [link for link in collection.links if link.rel != 'item']
+    print("Test mode: Cleared existing item links from collection")
 
 # Load list of image paths (from urls_list.txt or urls_new.txt for incremental)
 urls_file = "data/urls_new.txt" if incremental else "data/urls_list.txt"
@@ -280,8 +291,8 @@ fs::file_delete(j)
 ```
 
 ```{python validate}
-
-
+# Validate all items in the collection
+print(f"\nValidating {len(list(collection.get_items()))} items...")
 for item in collection.get_all_items():
     try:
         item.validate()
@@ -289,136 +300,7 @@ for item in collection.get_all_items():
     except Exception as e:
         print(f"❌ {item.id} failed validation: {e}")
 
-
-# or 1 at a time
-item = Item.from_file(f"{path_local}/093-093h-2019-dem-bc_093h092_xli1m_utm10_2019.json")
-item.validate()
-```
-
-
-```{python, xyz, eval - FALSE}
-import mercantile
-
-# Bounds from Titiler response
-west, south, east, north = -124.703866, 54.107650, -124.695957, 54.111509
-
-# Choose a zoom level
-zoom = 15
-
-# Get a tile covering the center of the bounds
-tile = mercantile.tile((west + east) / 2, (south + north) / 2, zoom)
-
-print(f"Tile coordinates: Z={tile.z}, X={tile.x}, Y={tile.y}")
-```
-
-```{python query-s3-json}
-import pystac
-
-# Load the Collection JSON directly
-collection = pystac.Collection.from_file("https://dev-imagery-uav-bc.s3.amazonaws.com/imagery_uav_bc.json")
-
-# Define BC bounding box (approximate)
-bbox_bc = [-139, 48, -114, 60]  # (West, South, East, North)
-
-# Get all items linked in the collection
-items = collection.get_all_items()
-
-# Filter items that fall within BC bounds
-bc_items = []
-for item in items:
-    # Check if item's bounding box intersects with BC
-    item_bbox = item.bbox  # [west, south, east, north]
-    if (
-        item_bbox[2] >= bbox_bc[0] and  # Item east >= BC west
-        item_bbox[0] <= bbox_bc[2] and  # Item west <= BC east
-        item_bbox[3] >= bbox_bc[1] and  # Item north >= BC south
-        item_bbox[1] <= bbox_bc[3]      # Item south <= BC north
-    ):
-        bc_items.append(item)
-
-# Print matching items
-for item in bc_items:
-    print(f"Item: {item.id}")
-    for asset_key, asset in item.assets.items():
-        print(f"  - {asset_key}: {asset.href}")
-
-
-```
-
-
-```{python query-titiler}
-import requests
-import pystac
-
-# Define BC bounding box (West, South, East, North)
-bbox_bc = [-139, 48, -114, 60]
-
-# Titiler endpoint
-titiler_endpoint = "http://titiler-env.eba-s4jhubvr.us-west-2.elasticbeanstalk.com"
-
-# Load the STAC Collection
-collection_url = "https://dev-imagery-uav-bc.s3.amazonaws.com/imagery_uav_bc.json"
-collection = pystac.Collection.from_file(collection_url)
-
-# Get all items
-items = collection.get_all_items()
-
-# Filter items using /stac/bounds
-matching_items = []
-for item in items:
-    stac_url = item.get_self_href()
-    bounds_url = f"{titiler_endpoint}/stac/bounds?url={stac_url}"
-
-    response = requests.get(bounds_url)
-    if response.status_code == 200:
-        item_bbox = response.json()["bounds"]  # [west, south, east, north]
-
-        # Check intersection with BC bbox
-        if (
-            item_bbox[2] >= bbox_bc[0] and  # Item east >= BC west
-            item_bbox[0] <= bbox_bc[2] and  # Item west <= BC east
-            item_bbox[3] >= bbox_bc[1] and  # Item north >= BC south
-            item_bbox[1] <= bbox_bc[3]      # Item south <= BC north
-        ):
-            matching_items.append((item.id, stac_url))
-
-# Print matching items
-print("Matching Items in BC:")
-for item_id, stac_url in matching_items:
-    print(f"- {item_id}: {stac_url}")
-
-
-```
-
-```{python footprint}
-
-# here we explore how to update the footprints of our items so that we see where the raster has non-na values
-# Remote URL wrapped in /vsicurl/ for GDAL
-url = "/vsicurl/https://nrs.objectstore.gov.bc.ca/gdwuts/093/093h/2019/dem/bc_093h092_xli1m_utm10_2019.tif"
-url = "/vsicurl/https://nrs.objectstore.gov.bc.ca/gdwuts/093/093h/2019/dem/bc_093h084_xli1m_utm10_2019.tif"
-
-from stactools.core.utils.raster_footprint import RasterFootprint
-from shapely.geometry import shape, mapping, Polygon
-
-# Build footprint
-rf = RasterFootprint.from_href(
-    href=url,
-    precision=5,                # Coarser geometry (faster, smaller)
-    densification_factor=None, # Disable extra vertex interpolation
-    densification_distance=None,
-    simplify_tolerance=0.001,  # Simplify geometry slightly (in degrees) 0.001 ≈ 111 meters
-    no_data=None,              # Use nodata from metadata (excludes it automatically)
-    bands=[1]                  # Only use first band
-)
-geojson_dict = rf.footprint()
-
-# Optional: turn into shapely geometry
-geom = shape(geojson_dict)
-
-# Convert back to GeoJSON dict
-geojson_geom = mapping(geom)
-
-print(geojson_geom)
+print("Validation complete")
 
 ```
 
