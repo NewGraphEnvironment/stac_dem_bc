@@ -1,8 +1,9 @@
 # Task Plan: Automated Weekly STAC DEM BC Updates
 
-**Status:** Phase 1-2 in progress
+**Status:** Phase 1-2 ✅ COMPLETE
 **Worktree:** `stac_dem_bc-phase1-2-modernization`
 **Started:** 2026-01-30
+**Completed:** 2026-02-01
 **Target:** Reduce 5-6h processing to 1-1.5h full run, 5-15min weekly incremental
 
 ## Goal
@@ -31,25 +32,30 @@ Implement automated weekly STAC DEM BC updates using VM-based cron automation wi
 
 ---
 
-### Phase 2: Incremental Updates 🚧 IN PROGRESS
-**Goal:** Process only new/changed files, not all 22,548
+### Phase 2: Incremental Updates ✅ COMPLETE
+**Goal:** Process only new/changed files, not all 58,109
 
-- [ ] **2.1** Create change detection script (`scripts/detect_changes.py`)
-  - Fetch BC DEM directory listing from provincial objectstore
+- [x] **2.1** Create change detection script (`scripts/detect_changes.R`)
+  - Fetch BC DEM directory listing from provincial objectstore via `ngr::ngr_s3_keys_get()`
   - Compare with cached `data/urls_list.txt`
   - Output new URLs to `data/urls_new.txt`, deleted to `data/urls_deleted.txt`
   - Exit code 0 if no changes, 1 if changes detected
+  - **Result:** Discovered 35,569 new URLs, 8 deleted (158% growth from 22,548 to 58,109)
 
-- [ ] **2.2** Enhance incremental mode in item creation
+- [x] **2.2** Enhance incremental mode in item creation
   - Read from `urls_new.txt` when `incremental=True`
   - Append to existing collection (don't rebuild)
   - Skip validation for already-cached files
+  - Add JSON cleanup in test mode (prevents file accumulation)
+  - Add duplicate link prevention (reprocessing URLs doesn't create duplicates)
+  - **Tested:** Baseline (5 items) → Incremental (+5) → Duplicate detection (0 added, 5 skipped)
 
 - [ ] **2.3** Handle deletions
-  - Track deleted URLs for audit trail
+  - Track deleted URLs for audit trail (✅ implemented in 2.1)
   - Document manual S3/PgSTAC removal process
 
 **Expected improvement:** Weekly runs 5-6h → 5-15 minutes
+**Files modified:** `stac_create_item.qmd`, `scripts/detect_changes.R`
 
 ---
 
@@ -121,8 +127,8 @@ Implement automated weekly STAC DEM BC updates using VM-based cron automation wi
 
 ## Current Focus
 
-**Active task:** Phase 2.1 - Create change detection script
-**Next:** Phase 2.2 - Enhance incremental mode in item creation
+**Active task:** Phase 2 complete - Ready for Phase 3 planning
+**Next:** Phase 2.3 (handle deletions) or migrate to Phase 3 (VM automation)
 
 ---
 
@@ -152,7 +158,12 @@ Implement automated weekly STAC DEM BC updates using VM-based cron automation wi
 
 - **Primary:** [NewGraphEnvironment/sred-2025-2026#8](https://github.com/NewGraphEnvironment/sred-2025-2026/issues/8) (Performance Benchmarking)
 - **Milestone:** [Automated Weekly Updates & Performance Modernization](https://github.com/NewGraphEnvironment/stac_dem_bc/milestone/1)
-- **Issues:** [#4](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/4) (spatial extent), [#5](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/5) (tracking)
+- **Issues:**
+  - [#5](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/5) - Automated Weekly Updates (tracking issue)
+  - [#4](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/4) - Optimize spatial extent
+  - [#6](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/6) - Structured logging and benchmarking
+  - [#7](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/7) - Migrate .qmd to standalone scripts
+  - [#8](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/8) - Investigate parenthesis files (90 excluded)
 
 ---
 
@@ -164,4 +175,4 @@ Implement automated weekly STAC DEM BC updates using VM-based cron automation wi
 
 ---
 
-**Last updated:** 2026-01-30 (PWF migration)
+**Last updated:** 2026-02-01 (Phase 2 complete)
