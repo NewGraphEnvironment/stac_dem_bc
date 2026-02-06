@@ -18,3 +18,4 @@ dependencies:
       - pandas
       # Utilities
       - tqdm
+      - deepdiff  # JSON/dict comparison for QA and debugging

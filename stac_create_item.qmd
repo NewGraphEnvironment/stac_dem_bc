@@ -79,11 +79,14 @@ def datetime_parse_item(s):
 # =============================================================================
 
 # Test mode flags - set to True for development testing
-test_only = True
-test_number_items = 100  # Test with 100 items to verify prod-like scale
+test_only = False  # PRODUCTION: Reprocess all 2,245 albers items with href fix
+test_number_items = 100  # Only used when test_only=True
 
 # Incremental mode - set to True to process only new URLs from data/urls_new.txt
-incremental = False  # Test non-incremental mode (full rebuild)
+incremental = False
+
+# Reprocess invalid items mode - set to True to re-process items from urls_invalid_items.txt
+reprocess_invalid = True  # Re-process invalid items with href fix
 
 # Define paths - test_only controls dev vs prod output
 if test_only:
@@ -106,11 +109,38 @@ print(f"Output directory: {path_local}")
 collection = pystac.Collection.from_file(path_collection)
 collection.set_self_href(path_s3_json)
 
+# Load list of image paths (from appropriate file based on mode)
+if reprocess_invalid:
+    urls_file = "data/urls_invalid_items.txt"
+    mode_desc = "reprocess_invalid"
+elif incremental:
+    urls_file = "data/urls_new.txt"
+    mode_desc = "incremental"
+else:
+    urls_file = "data/urls_list.txt"
+    mode_desc = "full"
+
+with open(urls_file) as f:
+    path_items = f.read().splitlines()
+
+# Determine URLs to check
+if test_only:
+    urls_to_check = path_items[:test_number_items]
+else:
+    urls_to_check = path_items
+
+print(f"Processing {len(urls_to_check)} URLs (mode={mode_desc}, test_only={test_only})")
+
 # Handle existing item links based on mode
 # WHY: Test mode normally clears items for clean slate, BUT incremental mode needs
 #      to keep existing items to append new ones. If both flags are set, incremental
 #      takes priority (we're testing the append behavior).
-if test_only and not incremental:
+if reprocess_invalid:
+    # Reprocess invalid mode: Keep all existing items, we're updating specific JSON files
+    # Count existing items for reporting
+    existing_item_count = len([l for l in collection.links if l.rel == 'item'])
+    print(f"Reprocess invalid mode: Updating {len(path_items)} items (collection has {existing_item_count} total items)")
+elif test_only and not incremental:
     # Test mode (non-incremental): Clear for clean test run
     # Remove all item links (keeps other links like self, root, etc.)
     collection.links = [link for link in collection.links if link.rel != 'item']
@@ -129,19 +159,6 @@ elif incremental:
     existing_item_count = len([l for l in collection.links if l.rel == 'item'])
     print(f"Incremental mode: Appending to collection with {existing_item_count} existing items")
 
-# Load list of image paths (from urls_list.txt or urls_new.txt for incremental)
-urls_file = "data/urls_new.txt" if incremental else "data/urls_list.txt"
-with open(urls_file) as f:
-    path_items = f.read().splitlines()
-
-# Determine URLs to check
-if test_only:
-    urls_to_check = path_items[:test_number_items]
-else:
-    urls_to_check = path_items
-
-print(f"Processing {len(urls_to_check)} URLs (test_only={test_only}, incremental={incremental})")
-
 # =============================================================================
 # Pre-Validation: Check GeoTIFF and COG Status
 # =============================================================================
@@ -156,14 +173,9 @@ else:
     existing_urls = set()
     print("No existing validation cache found, will validate all URLs")
 
-# Determine which URLs need validation
-if incremental:
-    # In incremental mode, only validate new URLs not in cache
-    urls_to_validate = [url for url in urls_to_check if url not in existing_urls]
-    print(f"Incremental mode: {len(urls_to_validate)} new URLs need validation")
-else:
-    # In full mode, validate all URLs in the list
-    urls_to_validate = urls_to_check
+# Determine which URLs need validation (always use cache)
+urls_to_validate = [url for url in urls_to_check if url not in existing_urls]
+print(f"{len(urls_to_validate)} URLs need validation ({len(urls_to_check) - len(urls_to_validate)} already cached)")
 
 def check_geotiff_cog(url: str) -> dict:
     """
@@ -220,7 +232,11 @@ def process_item(path_item: str) -> dict | None:
 
     Returns dict with item_id and item object, or None if processing fails.
     """
-    href_item = path_item.replace("https:/", "https://")
+    # Fix malformed URLs (single slash after https:) without breaking correct ones
+    if path_item.startswith("https:/") and not path_item.startswith("https://"):
+        href_item = path_item.replace("https:/", "https://", 1)
+    else:
+        href_item = path_item
     check = results_lookup.get(href_item)
 
     # Skip unreadable GeoTIFFs
@@ -228,8 +244,19 @@ def process_item(path_item: str) -> dict | None:
         print(f"Skipping unreadable GeoTIFF: {href_item}")
         return None
 
-    item_id = path_item[len(path_s3):].replace("/", "-").removesuffix(".tif")
-    item_time = datetime_parse_item(date_extract_from_path(path_item))
+    item_id = path_item[len(path_s3):].lstrip("/").replace("/", "-").removesuffix(".tif")
+
+    # Extract datetime from path, use placeholder if not found
+    date_str = date_extract_from_path(path_item)
+    datetime_is_unknown = False
+
+    if date_str:
+        item_time = datetime_parse_item(date_str)
+    else:
+        # Placeholder datetime for items where date cannot be extracted
+        # Common for albers10k2m dataset - see issue #12
+        item_time = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        datetime_is_unknown = True
 
     # Set media type based on COG validation results
     media_type = (
@@ -253,6 +280,10 @@ def process_item(path_item: str) -> dict | None:
         item.datetime = item_time
         item.assets['image'].href = href_item
 
+        # Flag items with unknown datetime for future improvement
+        if datetime_is_unknown:
+            item.properties["datetime_unknown"] = True
+
         # Save item JSON locally
         path_item_json = f"{path_local}/{item_id}.json"
         item.save_object(dest_href=path_item_json, include_self_link=False)
@@ -266,9 +297,9 @@ def process_item(path_item: str) -> dict | None:
         return None
 
 # Run item creation in parallel using threads (avoids rasterio multiprocessing issues)
-print(f"Creating STAC items for {len(urls_to_check)} URLs...")
+print(f"Creating STAC items for {len(urls_to_check)} URLs with 32 workers...")
 try:
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=32) as executor:
         results = list(filter(None, tqdm(executor.map(process_item, urls_to_check),
                                         total=len(urls_to_check),
                                         desc="Creating STAC Items")))
@@ -305,6 +336,13 @@ else:
 collection.save_object(dest_href=path_collection)
 print(f"Collection saved to {path_collection}")
 
+# =============================================================================
+# Validation
+# =============================================================================
+# To validate items, use the standalone script:
+#   python scripts/validate_stac_items.py --items-dir <path>
+# This validates from local JSON files and outputs results to CSV.
+
 ```
 
 
@@ -321,17 +359,4 @@ fs::file_delete(j)
 
 ```
 
-```{python validate}
-# Validate all items in the collection
-print(f"\nValidating {len(list(collection.get_items()))} items...")
-for item in collection.get_all_items():
-    try:
-        item.validate()
-        # print(f"✅ {item.id} is valid.")
-    except Exception as e:
-        print(f"❌ {item.id} failed validation: {e}")
-
-print("Validation complete")
-
-```
 
