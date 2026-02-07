@@ -44,15 +44,14 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*)"
           prompt: |
             Review this pull request. Be concise. Only flag real issues.
             Focus on correctness, bugs, and security. Skip style nits.
 
-            Post your review as a PR comment using:
+            You MUST post your review as a PR comment:
               gh pr comment ${{ github.event.pull_request.number }} --body "your review"
-
-            Use inline comments for specific line issues:
-              gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments
 
   # Interactive @claude mentions
   interactive:
