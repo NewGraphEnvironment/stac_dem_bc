@@ -19,14 +19,11 @@ on:
     types: [submitted]
 
 jobs:
-  # Auto-review PRs from owner and bots only
+  # Auto-review PRs from owner only
   review:
     if: |
       github.event_name == 'pull_request' &&
-      (
-        github.event.pull_request.user.login == 'NewGraphEnvironment' ||
-        endsWith(github.event.pull_request.user.login, '[bot]')
-      )
+      github.event.pull_request.user.login == 'NewGraphEnvironment'
     runs-on: ubuntu-latest
     permissions:
       contents: read
