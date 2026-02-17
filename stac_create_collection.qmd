@@ -15,7 +15,7 @@ reticulate::use_condaenv("stac-catalog", required = TRUE)
 # reticulate::py_config()
 
 # Test mode configuration
-test_only <- TRUE  # Set to FALSE for production
+test_only <- FALSE  # Set to FALSE for production
 test_number_items <- 10
 
 cat(sprintf("Mode: %s\n", if(test_only) "TEST" else "PRODUCTION"))
