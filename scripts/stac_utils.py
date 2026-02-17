@@ -12,6 +12,8 @@ import re
 import subprocess
 from datetime import datetime, timezone
 
+import requests
+
 
 # =============================================================================
 # Path Configuration
@@ -110,6 +112,30 @@ def check_geotiff_cog(url: str) -> dict:
 # =============================================================================
 # URL Helpers
 # =============================================================================
+
+def check_url_accessible(url: str, timeout: int = 10) -> dict:
+    """Check if a URL is accessible via HTTP HEAD request.
+
+    Returns dict with url, status_code, accessible, error, last_checked.
+    """
+    try:
+        resp = requests.head(url, timeout=timeout, allow_redirects=True)
+        return {
+            "url": url,
+            "status_code": resp.status_code,
+            "accessible": resp.status_code == 200,
+            "error": "" if resp.status_code == 200 else resp.reason,
+            "last_checked": datetime.now(timezone.utc).isoformat(),
+        }
+    except requests.RequestException as e:
+        return {
+            "url": url,
+            "status_code": None,
+            "accessible": False,
+            "error": str(e),
+            "last_checked": datetime.now(timezone.utc).isoformat(),
+        }
+
 
 def fix_url(url: str) -> str:
     """Fix malformed URLs with single slash after https:."""

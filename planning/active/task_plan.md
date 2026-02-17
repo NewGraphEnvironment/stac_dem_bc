@@ -15,26 +15,27 @@ Create a validation script that checks source GeoTIFF URL accessibility on the B
 - [x] Move issue #7 planning to `planning/archive/2026-02-issue-7-qmd-to-py/`
 - [x] Create fresh planning files for issue #13
 
-### Step 2: Add `check_url_accessible()` to stac_utils.py ⬜ pending
-- [ ] HTTP HEAD request helper with timeout
-- [ ] Returns dict: `{url, status_code, accessible, error}`
+### Step 2: Add `check_url_accessible()` to stac_utils.py ✅ complete
+- [x] HTTP HEAD request helper with timeout
+- [x] Returns dict: `{url, status_code, accessible, error, last_checked}`
 
-### Step 3: Create `scripts/urls_check_access.py` ⬜ pending
-- [ ] argparse CLI (`--urls-file`)
-- [ ] Incremental: load cache from `data/urls_access_checks.csv`, skip known URLs
-- [ ] Parallel HEAD requests (ThreadPoolExecutor)
-- [ ] CSV output shareable with GeoBC
-- [ ] Summary logging
-- [ ] Exit code 1 if any inaccessible
+### Step 3: Create `scripts/urls_check_access.py` ✅ complete
+- [x] argparse CLI (`--urls-file`, `--recheck`, `--workers`, `--timeout`)
+- [x] Incremental: load cache from `data/urls_access_checks.csv`, skip known URLs
+- [x] Parallel HEAD requests (ThreadPoolExecutor)
+- [x] CSV output shareable with GeoBC
+- [x] Summary logging
+- [x] Exit code 1 if any inaccessible
 
-### Step 4: Update `scripts/build_safe.sh` ⬜ pending
-- [ ] Add accessibility check step after URL fetch
-- [ ] Warning only (don't block build — GeoTIFF validation handles skipping)
+### Step 4: Update `scripts/build_safe.sh` ✅ complete
+- [x] Add accessibility check step after URL fetch (Step 3.5)
+- [x] Warning only (don't block build — GeoTIFF validation handles skipping)
 
-### Step 5: Test and verify ⬜ pending
-- [ ] Test against known-bad 092p045 URLs
-- [ ] Test against known-good URLs
-- [ ] Verify CSV output format
+### Step 5: Test and verify ✅ complete
+- [x] Test against known-bad 092p045 URLs (now return 200 — fixed upstream)
+- [x] Test against known-good URLs
+- [x] Verify CSV output format
+- [x] Verify incremental cache works
 
 ## SRED Tracking
 

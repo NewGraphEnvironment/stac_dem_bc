@@ -117,6 +117,22 @@ fi
 log ""
 
 # =============================================================================
+# Step 3.5: Check URL Accessibility
+# =============================================================================
+
+log "Step 3.5: Checking source URL accessibility..."
+ACCESS_LOG="${LOG_DIR}/${TIMESTAMP}_urls_access.log"
+
+if python scripts/urls_check_access.py 2>&1 | tee "$ACCESS_LOG"; then
+    log "✓ All source URLs accessible"
+else
+    log "⚠️  Some source URLs are inaccessible (upstream permission issue)"
+    log "   See data/urls_access_checks.csv for details to share with GeoBC"
+    log "   Continuing build — GeoTIFF validation will skip unreadable files"
+fi
+log ""
+
+# =============================================================================
 # Step 4: Create Collection
 # =============================================================================
 
@@ -218,7 +234,7 @@ if [[ $CURRENT_COUNT -gt 0 ]]; then
     log "Previous count: $CURRENT_COUNT (${DELTA:+\+}$DELTA)"
     log "Backup location: $BACKUP_DIR"
 fi
-log "Logs: $URLS_LOG, $COLLECTION_LOG, $ITEMS_LOG, $VALIDATION_LOG"
+log "Logs: $URLS_LOG, $ACCESS_LOG, $COLLECTION_LOG, $ITEMS_LOG, $VALIDATION_LOG"
 log ""
 
 if [[ "$AUTO_PROMOTE" == false ]]; then
