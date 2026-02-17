@@ -1,38 +1,21 @@
-# Progress: Issue #7 - .qmd to .py Migration
+# Progress: Issue #13 - Source URL Accessibility Validation
 
 ## Session: 2026-02-17
 
 ### Completed
-- [x] Created branch `7-migrate-qmd-to-py`
-- [x] Analyzed stac_create_item.qmd (350 LOC, 3 modes, no real R dependency)
-- [x] Analyzed stac_create_collection.qmd (270 LOC, R dependency on ngr for S3 fetch)
-- [x] Identified 3x duplicated utility functions
-- [x] Created planning files (task_plan.md, findings.md, progress.md)
+- [x] Archived issue #7 planning files
+- [x] Created fresh planning files for issue #13
+- [x] Explored pipeline and validation patterns
+- [x] Step 2: Added `check_url_accessible()` to stac_utils.py
+- [x] Step 3: Created `scripts/urls_check_access.py`
+- [x] Step 4: Updated `scripts/build_safe.sh` with Step 3.5
+- [x] Step 5: Tested — 5 URLs (3 good + 2 known-bad 092p045) all return 200
+  - Note: 092p045 permissions appear to be fixed upstream by GeoBC
+  - CSV output format verified, incremental cache working
 
-### In Progress
-- [x] Phase 1.1: Created `scripts/stac_utils.py` with shared functions
-  - `date_extract_from_path()`, `datetime_parse_item()`, `check_geotiff_cog()`
-  - `fix_url()`, `url_to_item_id()`, `get_output_dir()`
-  - Path constants: `PATH_S3_STAC`, `PATH_S3_JSON`, `PATH_S3`, `PATH_RESULTS_CSV`, `BBOX_BC`
-- [x] Phase 1.2: Updated `item_reprocess.py` to import from `stac_utils`
-- [x] Phase 1.3: Verified imports and syntax
-
-- [x] Phase 1.4: Renamed all scripts to `noun_verb.py` convention
-- [x] Phase 1.5: Updated all cross-references (0 stale refs in code files)
-- [x] Phase 2.1: Created `scripts/item_create.py` (argparse CLI, logging, imports stac_utils)
-- All 6 .py scripts pass syntax checks
-- Local PROJ conflict blocks `rio_stac` import (homebrew vs conda) — VM-only testing
-
-- [x] Phase 3.1: Created `scripts/urls_fetch.R` (standalone R script for S3 key fetch)
-- [x] Phase 3.2: Created `scripts/collection_create.py` (argparse CLI, logging, imports stac_utils)
-- [x] Phase 4.1: Updated `scripts/build_safe.sh` to use new scripts (no more quarto render)
-  - Added urls_fetch.R step, validation step with item_validate.py
-
-### Next Up
-- [ ] Phase 4.2: Archive .qmd files
-- [ ] Phase 4.3: Update CLAUDE.md
-- [ ] Phase 4.4: Update README.md
-- [ ] Test equivalence on VM
+### Findings
+- The 6 known-bad 092p045 URLs now return HTTP 200 (permissions fixed upstream)
+- Script still valuable for ongoing monitoring of new URLs
 
 ---
 
