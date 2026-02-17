@@ -9,58 +9,33 @@ This script:
 4. Flags items with datetime_unknown=True property
 
 Usage:
-    python scripts/reprocess_invalid_items.py
+    python scripts/item_reprocess.py
 """
 
-import pathlib
 import pystac
 import rio_stac
 import concurrent.futures
 import pandas as pd
 import os
-import re
 from tqdm import tqdm
 from datetime import datetime, timezone
 
+from stac_utils import (
+    date_extract_from_path,
+    datetime_parse_item,
+    fix_url,
+    url_to_item_id,
+    get_output_dir,
+    PATH_S3_STAC,
+    PATH_S3_JSON,
+    PATH_S3,
+    PATH_RESULTS_CSV,
+)
+
 # Configuration
-PATH_LOCAL = "/Users/airvine/Projects/gis/stac_dem_bc/stac/prod/stac_dem_bc"
+PATH_LOCAL = get_output_dir(test_only=False)
 PATH_COLLECTION = f"{PATH_LOCAL}/collection.json"
-PATH_S3_STAC = "https://stac-dem-bc.s3.amazonaws.com"
-PATH_S3_JSON = f"{PATH_S3_STAC}/collection.json"
-PATH_S3 = "https://nrs.objectstore.gov.bc.ca/gdwuts"
-PATH_RESULTS_CSV = "data/stac_geotiff_checks.csv"
 INVALID_URLS_FILE = "data/urls_invalid_items.txt"
-
-# Date extraction functions (from stac_create_item.qmd)
-def date_extract_from_path(s):
-    """Extract date from path, trying multiple patterns."""
-    # Step 1: Try to extract YYYYMMDD or YYYY after _utmXX_
-    match = re.search(r'_utm\d{1,2}_([0-9]{4,8})', s)
-    if match:
-        val = match.group(1)
-        if val.isdigit():
-            year = int(val[:4])
-            if 2000 <= year <= 2050:
-                return val
-
-    # Step 2: Fallback: look for /YYYY/ in the path
-    fallback = re.search(r'/([2][0-9]{3})/', s)
-    if fallback:
-        year = int(fallback.group(1))
-        if 2000 <= year <= 2050:
-            return str(year)
-
-    return None
-
-def datetime_parse_item(s):
-    """Parse date string to datetime object."""
-    if s is None:
-        return None
-    if len(s) == 8:
-        return datetime.strptime(s, "%Y%m%d").replace(tzinfo=timezone.utc)
-    elif len(s) == 4:
-        return datetime.strptime(s, "%Y").replace(tzinfo=timezone.utc)
-    return None
 
 def process_item(path_item: str, collection, results_lookup) -> dict | None:
     """
@@ -68,7 +43,7 @@ def process_item(path_item: str, collection, results_lookup) -> dict | None:
 
     Returns dict with item_id and item object, or None if processing fails.
     """
-    href_item = path_item.replace("https:/", "https://")
+    href_item = fix_url(path_item)
     check = results_lookup.get(href_item)
 
     # Skip unreadable GeoTIFFs
@@ -76,7 +51,7 @@ def process_item(path_item: str, collection, results_lookup) -> dict | None:
         print(f"Skipping unreadable GeoTIFF: {href_item}")
         return None
 
-    item_id = path_item[len(PATH_S3):].replace("/", "-").removesuffix(".tif")
+    item_id = url_to_item_id(path_item)
 
     # Extract datetime from path, use placeholder if not found
     date_str = date_extract_from_path(path_item)
@@ -149,7 +124,7 @@ def main():
 
     df_all = pd.read_csv(PATH_RESULTS_CSV)
     results_lookup = {
-        row["url"].replace("https:/", "https://"): {"is_geotiff": row["is_geotiff"], "is_cog": row["is_cog"]}
+        fix_url(row["url"]): {"is_geotiff": row["is_geotiff"], "is_cog": row["is_cog"]}
         for _, row in df_all.iterrows()
     }
     print(f"✓ Loaded {len(results_lookup)} validation results")
@@ -159,7 +134,7 @@ def main():
     print(f"Loading invalid URLs: {INVALID_URLS_FILE}")
     if not os.path.exists(INVALID_URLS_FILE):
         print(f"❌ Invalid URLs file not found: {INVALID_URLS_FILE}")
-        print("Run scripts/extract_invalid_urls.py first")
+        print("Run scripts/item_extract_invalid.py first")
         return 1
 
     with open(INVALID_URLS_FILE) as f:
@@ -208,7 +183,7 @@ def main():
 
     print("=" * 80)
     print("Next Steps:")
-    print("1. Run validation: python scripts/validate_stac_items.py")
+    print("1. Run validation: python scripts/item_validate.py")
     print("2. Verify all items are now valid")
     print("3. Sync to S3 and register to PgSTAC")
     print("=" * 80)

@@ -9,7 +9,7 @@ This script:
 4. Writes URLs to data/urls_invalid_items.txt for re-processing
 
 Usage:
-    python scripts/extract_invalid_urls.py
+    python scripts/item_extract_invalid.py
 """
 
 import csv

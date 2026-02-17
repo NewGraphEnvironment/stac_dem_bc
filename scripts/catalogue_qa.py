@@ -10,14 +10,14 @@ This script:
 5. Logs results to logs/ directory
 
 Usage:
-    python scripts/qa_update_catalogue.py [--sample-percent 1] [--max-items 100]
+    python scripts/catalogue_qa.py [--sample-percent 1] [--max-items 100]
 
 Examples:
     # Check 1% sample (default)
-    python scripts/qa_update_catalogue.py
+    python scripts/catalogue_qa.py
 
     # Check 5% sample, max 200 items
-    python scripts/qa_update_catalogue.py --sample-percent 5 --max-items 200
+    python scripts/catalogue_qa.py --sample-percent 5 --max-items 200
 """
 
 import argparse
