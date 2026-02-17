@@ -72,9 +72,9 @@ else
 fi
 
 # Check required files
-[[ -f "stac_create_collection.qmd" ]] || error "stac_create_collection.qmd not found"
-[[ -f "stac_create_item.qmd" ]] || error "stac_create_item.qmd not found"
-[[ -f "data/urls_list.txt" ]] || error "data/urls_list.txt not found"
+[[ -f "scripts/collection_create.py" ]] || error "scripts/collection_create.py not found"
+[[ -f "scripts/item_create.py" ]] || error "scripts/item_create.py not found"
+[[ -f "scripts/urls_fetch.R" ]] || error "scripts/urls_fetch.R not found"
 
 # =============================================================================
 # Step 1: Backup Current Production
@@ -102,23 +102,28 @@ log "✓ Build directory ready: $BUILD_DIR"
 log ""
 
 # =============================================================================
-# Step 3: Export Build Path for .qmd Files
+# Step 3: Fetch URLs
 # =============================================================================
 
-log "Step 3: Setting build environment..."
-export STAC_OUTPUT_DIR="$BUILD_DIR"
-log "✓ STAC_OUTPUT_DIR=$STAC_OUTPUT_DIR"
+log "Step 3: Fetching URLs from BC objectstore..."
+mkdir -p "$LOG_DIR"
+URLS_LOG="${LOG_DIR}/${TIMESTAMP}_urls_fetch.log"
+
+if Rscript scripts/urls_fetch.R 2>&1 | tee "$URLS_LOG"; then
+    log "✓ URLs fetched successfully"
+else
+    error "URL fetch failed - check $URLS_LOG"
+fi
 log ""
 
 # =============================================================================
-# Step 4: Run Collection Creation
+# Step 4: Create Collection
 # =============================================================================
 
 log "Step 4: Creating STAC collection..."
-mkdir -p "$LOG_DIR"
 COLLECTION_LOG="${LOG_DIR}/${TIMESTAMP}_collection.log"
 
-if quarto render stac_create_collection.qmd --execute 2>&1 | tee "$COLLECTION_LOG"; then
+if python scripts/collection_create.py 2>&1 | tee "$COLLECTION_LOG"; then
     log "✓ Collection created successfully"
 else
     error "Collection creation failed - check $COLLECTION_LOG"
@@ -126,14 +131,14 @@ fi
 log ""
 
 # =============================================================================
-# Step 5: Run Item Creation
+# Step 5: Create Items
 # =============================================================================
 
-log "Step 5: Creating STAC items (this may take 1-2 hours)..."
+log "Step 5: Creating STAC items (this may take several hours)..."
 ITEMS_LOG="${LOG_DIR}/${TIMESTAMP}_items.log"
 START_TIME=$(date +%s)
 
-if quarto render stac_create_item.qmd --execute 2>&1 | tee "$ITEMS_LOG"; then
+if python scripts/item_create.py 2>&1 | tee "$ITEMS_LOG"; then
     END_TIME=$(date +%s)
     DURATION=$((END_TIME - START_TIME))
     MINUTES=$((DURATION / 60))
@@ -148,20 +153,28 @@ log ""
 # =============================================================================
 
 log "Step 6: Validating build output..."
-BUILD_COUNT=$(count_jsons "$BUILD_DIR")
+BUILD_COUNT=$(count_jsons "$PROD_DIR")
 
 if [[ $BUILD_COUNT -eq 0 ]]; then
-    error "Build validation failed: No JSON files created in $BUILD_DIR"
+    error "Build validation failed: No JSON files created"
 fi
 
-log "✓ Build validation passed: $BUILD_COUNT items created"
+log "✓ File count check passed: $BUILD_COUNT JSON files"
 
 # Check collection.json exists
-if [[ ! -f "$BUILD_DIR/collection.json" ]]; then
+if [[ ! -f "$PROD_DIR/collection.json" ]]; then
     error "Build validation failed: collection.json missing"
 fi
 
 log "✓ collection.json present"
+
+# Run STAC item validation
+VALIDATION_LOG="${LOG_DIR}/${TIMESTAMP}_validation.log"
+if python scripts/item_validate.py 2>&1 | tee "$VALIDATION_LOG"; then
+    log "✓ STAC item validation passed"
+else
+    log "⚠️  Some items failed validation - check $VALIDATION_LOG"
+fi
 log ""
 
 # =============================================================================
@@ -205,7 +218,7 @@ if [[ $CURRENT_COUNT -gt 0 ]]; then
     log "Previous count: $CURRENT_COUNT (${DELTA:+\+}$DELTA)"
     log "Backup location: $BACKUP_DIR"
 fi
-log "Logs: $COLLECTION_LOG, $ITEMS_LOG"
+log "Logs: $URLS_LOG, $COLLECTION_LOG, $ITEMS_LOG, $VALIDATION_LOG"
 log ""
 
 if [[ "$AUTO_PROMOTE" == false ]]; then

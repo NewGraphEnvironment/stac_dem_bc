@@ -9,14 +9,14 @@ This script:
 4. Reports invalid items for investigation/removal
 
 Usage:
-    python scripts/validate_stac_items.py [--collection COLLECTION_PATH] [--items-dir ITEMS_DIR]
+    python scripts/item_validate.py [--collection COLLECTION_PATH] [--items-dir ITEMS_DIR]
 
 Examples:
     # Validate all items in prod directory
-    python scripts/validate_stac_items.py
+    python scripts/item_validate.py
 
     # Validate items from specific paths
-    python scripts/validate_stac_items.py --items-dir /path/to/items
+    python scripts/item_validate.py --items-dir /path/to/items
 """
 
 import argparse

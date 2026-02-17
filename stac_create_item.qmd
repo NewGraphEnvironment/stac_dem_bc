@@ -340,7 +340,7 @@ print(f"Collection saved to {path_collection}")
 # Validation
 # =============================================================================
 # To validate items, use the standalone script:
-#   python scripts/validate_stac_items.py --items-dir <path>
+#   python scripts/item_validate.py --items-dir <path>
 # This validates from local JSON files and outputs results to CSV.
 
 ```

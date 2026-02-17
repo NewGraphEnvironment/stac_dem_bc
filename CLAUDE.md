@@ -86,7 +86,7 @@ data/
    - Uses pystac for spec compliance
    - Tracks validation errors for debugging
    - Filters items before PgSTAC registration
-   - Script: `scripts/validate_stac_items.py`
+   - Script: `scripts/item_validate.py`
 
 **Workflow integration:**
 ```
