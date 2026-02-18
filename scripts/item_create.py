@@ -31,6 +31,7 @@ from stac_utils import (
     check_geotiff_cog,
     date_extract_from_path,
     datetime_parse_item,
+    encode_url_for_gdal,
     fix_url,
     get_output_dir,
     url_to_item_id,
@@ -80,8 +81,10 @@ def process_item(path_item: str, collection_id: str, path_local: str,
     )
 
     try:
+        # Encode for GDAL/vsicurl (spaces → %20), but keep original for asset href
+        gdal_path = encode_url_for_gdal(path_item)
         item = rio_stac.stac.create_stac_item(
-            path_item,
+            gdal_path,
             id=item_id,
             asset_media_type=media_type,
             asset_name='image',

@@ -93,8 +93,9 @@ def check_geotiff_cog(url: str) -> dict:
     Returns dict with url, is_geotiff (readable), and is_cog (cloud-optimized).
     """
     try:
+        gdal_url = encode_url_for_gdal(url)
         result = subprocess.run(
-            ["rio", "cogeo", "validate", f"/vsicurl/{url}"],
+            ["rio", "cogeo", "validate", f"/vsicurl/{gdal_url}"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=False
@@ -142,6 +143,14 @@ def fix_url(url: str) -> str:
     if url.startswith("https:/") and not url.startswith("https://"):
         return url.replace("https:/", "https://", 1)
     return url
+
+
+def encode_url_for_gdal(url: str) -> str:
+    """Encode URL for use with /vsicurl/ (GDAL virtual filesystem).
+
+    Spaces in filenames cause CURL errors with /vsicurl/. URL-encode them.
+    """
+    return url.replace(" ", "%20")
 
 
 def url_to_item_id(url: str) -> str:

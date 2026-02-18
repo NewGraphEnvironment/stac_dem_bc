@@ -29,10 +29,6 @@ if (test_only && file.exists("data/urls_list.txt")) {
     pattern = c("dem", "*.tif")
   )
 
-  # Remove paths with ( in them (all fail validation - see issue #8)
-  keys_clean <- keys[!stringr::str_detect(keys, "\\(")]
-
-  readr::write_lines(keys_clean, "data/urls_list.txt")
-  cat(sprintf("Fetched and saved %d URLs (excluded %d with parentheses)\n",
-              length(keys_clean), length(keys) - length(keys_clean)))
+  readr::write_lines(keys, "data/urls_list.txt")
+  cat(sprintf("Fetched and saved %d URLs\n", length(keys)))
 }
