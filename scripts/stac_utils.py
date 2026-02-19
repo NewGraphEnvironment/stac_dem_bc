@@ -9,6 +9,7 @@ Contains common functions and configuration used across:
 """
 
 import json
+import logging
 import re
 from datetime import datetime, timezone
 
@@ -18,6 +19,8 @@ import rasterio.warp
 import requests
 from rio_cogeo.cogeo import cog_validate
 from shapely.geometry import box, mapping
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -93,11 +96,12 @@ def datetime_parse_item(s: str | None) -> datetime | None:
 # =============================================================================
 
 def geotiff_extract_metadata(url: str) -> dict:
-    """Extract spatial metadata and validate GeoTIFF/COG status in one remote read.
+    """Extract spatial metadata and validate GeoTIFF/COG status.
 
-    Opens the remote GeoTIFF via /vsicurl/, extracts CRS, bounds, shape, and
-    transform, then validates COG status. All metadata needed for STAC item
-    creation is returned so subsequent builds can skip the remote read.
+    Opens the remote GeoTIFF via /vsicurl/ to extract CRS, bounds, shape, and
+    transform, then validates COG status (second remote read via cog_validate).
+    All metadata needed for STAC item creation is cached so subsequent builds
+    skip remote reads entirely.
 
     Returns dict with url, is_geotiff, is_cog, epsg, height, width, transform, bounds.
     """
@@ -106,7 +110,7 @@ def geotiff_extract_metadata(url: str) -> dict:
 
     try:
         with rasterio.open(vsicurl_path) as src:
-            epsg = src.crs.to_epsg()
+            epsg = src.crs.to_epsg() if src.crs else None
             height = src.height
             width = src.width
             transform = list(src.transform)[:6]
@@ -124,7 +128,8 @@ def geotiff_extract_metadata(url: str) -> dict:
             "transform": json.dumps(transform),
             "bounds": json.dumps(bounds),
         }
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to read %s: %s", url, e)
         return {
             "url": url,
             "is_geotiff": False,

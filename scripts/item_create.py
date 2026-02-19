@@ -149,14 +149,13 @@ def load_validation_cache(urls_to_check: list[str]) -> dict:
         existing_urls = set()
         logger.info("No existing validation cache found, will validate all URLs")
 
-    # Detect old-format rows missing spatial metadata
-    has_spatial = set()
+    # Detect old-format rows missing spatial metadata (all spatial columns null).
+    # Rows that were extracted but have epsg=None (no CRS) are NOT re-upgraded —
+    # they'll have height/width/transform populated from the extraction.
     needs_upgrade = set()
-    if "epsg" in df_existing.columns:
+    if "transform" in df_existing.columns:
         for _, row in df_existing.iterrows():
-            if pd.notna(row.get("epsg")):
-                has_spatial.add(row["url"])
-            elif row.get("is_geotiff"):
+            if row.get("is_geotiff") and pd.isna(row.get("transform")):
                 needs_upgrade.add(row["url"])
     else:
         needs_upgrade = {row["url"] for _, row in df_existing.iterrows() if row["is_geotiff"]}
