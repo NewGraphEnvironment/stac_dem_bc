@@ -8,11 +8,16 @@ Contains common functions and configuration used across:
 - collection_create.py
 """
 
+import json
 import re
-import subprocess
 from datetime import datetime, timezone
 
+import pystac
+import rasterio
+import rasterio.warp
 import requests
+from rio_cogeo.cogeo import cog_validate
+from shapely.geometry import box, mapping
 
 
 # =============================================================================
@@ -87,27 +92,127 @@ def datetime_parse_item(s: str | None) -> datetime | None:
 # GeoTIFF Validation
 # =============================================================================
 
-def check_geotiff_cog(url: str) -> dict:
-    """Validate GeoTIFF and COG status using rio cogeo validate.
+def geotiff_extract_metadata(url: str) -> dict:
+    """Extract spatial metadata and validate GeoTIFF/COG status in one remote read.
 
-    Returns dict with url, is_geotiff (readable), and is_cog (cloud-optimized).
+    Opens the remote GeoTIFF via /vsicurl/, extracts CRS, bounds, shape, and
+    transform, then validates COG status. All metadata needed for STAC item
+    creation is returned so subsequent builds can skip the remote read.
+
+    Returns dict with url, is_geotiff, is_cog, epsg, height, width, transform, bounds.
     """
+    gdal_url = encode_url_for_gdal(fix_url(url))
+    vsicurl_path = f"/vsicurl/{gdal_url}"
+
     try:
-        gdal_url = encode_url_for_gdal(url)
-        result = subprocess.run(
-            ["rio", "cogeo", "validate", f"/vsicurl/{gdal_url}"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False
-        )
-        output = result.stdout.decode() + result.stderr.decode()
+        with rasterio.open(vsicurl_path) as src:
+            epsg = src.crs.to_epsg()
+            height = src.height
+            width = src.width
+            transform = list(src.transform)[:6]
+            bounds = list(src.bounds)
+
+        is_valid, _, _ = cog_validate(vsicurl_path, quiet=True)
+
         return {
             "url": url,
-            "is_geotiff": "is NOT a valid cloud optimized GeoTIFF" in output or "is a valid cloud optimized GeoTIFF" in output,
-            "is_cog": "is a valid cloud optimized GeoTIFF" in output
+            "is_geotiff": True,
+            "is_cog": is_valid,
+            "epsg": epsg,
+            "height": height,
+            "width": width,
+            "transform": json.dumps(transform),
+            "bounds": json.dumps(bounds),
         }
-    except FileNotFoundError:
-        raise RuntimeError("`rio cogeo` is not installed or not in PATH. Install with: pip install rio-cogeo")
+    except Exception:
+        return {
+            "url": url,
+            "is_geotiff": False,
+            "is_cog": False,
+            "epsg": None,
+            "height": None,
+            "width": None,
+            "transform": None,
+            "bounds": None,
+        }
+
+
+# =============================================================================
+# STAC Item Creation from Cache
+# =============================================================================
+
+def item_create_from_cache(
+    url: str,
+    item_id: str,
+    metadata: dict,
+    collection_id: str,
+    collection_url: str,
+    media_type: str,
+    item_datetime: datetime,
+) -> pystac.Item:
+    """Build a pystac.Item from cached metadata without any remote file access.
+
+    Uses cached CRS, bounds, shape, and transform to construct the item geometry
+    and proj extension fields. WGS84 bbox/geometry computed locally via
+    rasterio.warp.transform_bounds.
+    """
+    epsg = metadata["epsg"]
+    height = metadata["height"]
+    width = metadata["width"]
+    transform = json.loads(metadata["transform"]) if isinstance(metadata["transform"], str) else metadata["transform"]
+    bounds = json.loads(metadata["bounds"]) if isinstance(metadata["bounds"], str) else metadata["bounds"]
+
+    # Native CRS bounds → WGS84 bbox
+    left, bottom, right, top = bounds
+    w, s, e, n = rasterio.warp.transform_bounds(
+        f"EPSG:{epsg}", "EPSG:4326", left, bottom, right, top
+    )
+    bbox = [w, s, e, n]
+    geometry = mapping(box(w, s, e, n))
+
+    # Native CRS geometry (rectangle from bounds)
+    proj_geometry = mapping(box(left, bottom, right, top))
+    proj_bbox = [left, bottom, right, top]
+
+    # 9-element affine (rasterio stores 6, STAC proj uses 9)
+    proj_transform = transform + [0.0, 0.0, 1.0]
+
+    properties = {
+        "proj:epsg": epsg,
+        "proj:geometry": proj_geometry,
+        "proj:bbox": proj_bbox,
+        "proj:shape": [height, width],
+        "proj:transform": proj_transform,
+    }
+
+    item = pystac.Item(
+        id=item_id,
+        geometry=geometry,
+        bbox=bbox,
+        datetime=item_datetime,
+        properties=properties,
+        stac_extensions=[
+            "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
+        ],
+    )
+
+    item.add_link(pystac.Link(
+        rel="collection",
+        target=collection_url,
+        media_type="application/json",
+    ))
+    item.collection_id = collection_id
+
+    item.add_asset(
+        "image",
+        pystac.Asset(
+            href=fix_url(url),
+            media_type=media_type,
+            roles=["data"],
+        ),
+    )
+
+    return item
 
 
 # =============================================================================
