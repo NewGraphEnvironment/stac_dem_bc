@@ -21,6 +21,7 @@ from tqdm import tqdm
 from datetime import datetime, timezone
 
 from stac_utils import (
+    item_create_from_cache,
     date_extract_from_path,
     datetime_parse_item,
     encode_url_for_gdal,
@@ -74,22 +75,35 @@ def process_item(path_item: str, collection, results_lookup) -> dict | None:
     )
 
     try:
-        gdal_path = encode_url_for_gdal(path_item)
-        item = rio_stac.stac.create_stac_item(
-            gdal_path,
-            id=item_id,
-            asset_media_type=media_type,
-            asset_name='image',
-            asset_href=href_item,
-            with_proj=True,
-            collection=collection.id,
-            collection_url=PATH_S3_JSON,
-            asset_roles=["data"]
-        )
-        item.datetime = item_time
-        item.assets['image'].href = href_item
+        # Cache hit: build from metadata (no remote read)
+        if check.get("epsg") is not None:
+            item = item_create_from_cache(
+                url=path_item,
+                item_id=item_id,
+                metadata=check,
+                collection_id=collection.id,
+                collection_url=PATH_S3_JSON,
+                media_type=media_type,
+                item_datetime=item_time,
+            )
+        else:
+            # Cache miss: fall back to rio_stac (remote read)
+            gdal_path = encode_url_for_gdal(path_item)
+            item = rio_stac.stac.create_stac_item(
+                gdal_path,
+                id=item_id,
+                asset_media_type=media_type,
+                asset_name='image',
+                asset_href=href_item,
+                with_proj=True,
+                collection=collection.id,
+                collection_url=PATH_S3_JSON,
+                asset_roles=["data"]
+            )
+            item.assets['image'].href = href_item
 
-        # Flag items with unknown datetime for future improvement
+        item.datetime = item_time
+
         if datetime_is_unknown:
             item.properties["datetime_unknown"] = True
 
@@ -125,10 +139,15 @@ def main():
         return 1
 
     df_all = pd.read_csv(PATH_RESULTS_CSV)
-    results_lookup = {
-        fix_url(row["url"]): {"is_geotiff": row["is_geotiff"], "is_cog": row["is_cog"]}
-        for _, row in df_all.iterrows()
-    }
+    results_lookup = {}
+    for _, row in df_all.iterrows():
+        entry = {"is_geotiff": row["is_geotiff"], "is_cog": row["is_cog"]}
+        for col in ["epsg", "height", "width", "transform", "bounds"]:
+            if col in row and pd.notna(row[col]):
+                entry[col] = int(row[col]) if col in ("epsg", "height", "width") else row[col]
+            else:
+                entry[col] = None
+        results_lookup[fix_url(row["url"])] = entry
     print(f"✓ Loaded {len(results_lookup)} validation results")
     print()
 
