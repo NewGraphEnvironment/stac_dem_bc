@@ -1,6 +1,6 @@
 # Pipeline Scripts
 
-This pipeline builds a searchable catalog of British Columbia's Digital Elevation Model (DEM) data. It takes ~58,000 GeoTIFF files hosted on the provincial objectstore, validates them, generates standardized metadata records, and registers them in a searchable catalog so anyone can find elevation data by location.
+This pipeline builds a searchable catalog of British Columbia's Digital Elevation Model (DEM) data. It takes ~58,000 GeoTIFF files hosted on the provincial objectstore, validates them, generates standardized metadata records, and registers them in a searchable catalog so anyone can find elevation data by location and time.
 
 ## Key Concepts
 
@@ -10,11 +10,13 @@ This pipeline builds a searchable catalog of British Columbia's Digital Elevatio
 
 **COG (Cloud Optimized GeoTIFF)** — A GeoTIFF organized internally so that a viewer can request just the piece it needs (e.g. a zoomed-in corner) over the internet, without downloading the whole file. The pipeline detects which source files are COGs and tags them accordingly in the catalog.
 
-**STAC (SpatioTemporal Asset Catalog)** — A standard way to describe geographic datasets with where-and-when metadata. Think of it as a library catalog for spatial data: each file gets a JSON record describing its location, date, and download link. This makes the collection searchable — "show me all DEMs that overlap this watershed."
+**STAC (SpatioTemporal Asset Catalog)** — A standard way to describe geographic datasets with where-and-when metadata. Think of it as a library catalog for spatial data: each file gets a JSON record describing its location, date, and download link. This makes the collection searchable — "show me all DEMs that overlap this watershed" or "show me DEMs acquired after 2020."
 
 **S3** — Cloud file storage (Amazon-compatible). The generated catalog JSON files are uploaded here so they are accessible via URL from anywhere.
 
 **pgstac** — A PostgreSQL database that stores STAC records and exposes them through a search API. Hosted at `images.a11s.one`, this is what allows users to search the collection by location from QGIS, a web browser, or any STAC-compatible tool.
+
+**Date extraction** — The source GeoTIFFs don't carry acquisition dates in their internal metadata, so the pipeline infers dates from the filename. It looks for a pattern like `_utm10_20230415.tif` (after `_utmXX_`, grab the 4–8 digit date) to get a full date (`YYYYMMDD`) or just a year (`YYYY`). If neither pattern is found, it falls back to looking for a `/YYYY/` directory in the URL path. Files with no detectable date get a placeholder (`2000-01-01`) and are flagged with `datetime_unknown=True` so they can be filtered or fixed later.
 
 **Validation caching** — The pipeline reads each remote GeoTIFF once to extract metadata (projection, dimensions, bounds, COG status) and saves the results to a local CSV. On subsequent runs, items are built from the cache instead of re-reading remote files. This is what makes incremental updates fast (minutes instead of hours).
 
