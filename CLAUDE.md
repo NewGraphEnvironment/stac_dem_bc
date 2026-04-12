@@ -227,28 +227,6 @@ WHY: Reprocessing same URLs (e.g., after failures, testing) would create duplica
 
 <\!-- BEGIN SOUL CONVENTIONS — DO NOT EDIT BELOW THIS LINE -->
 
-# Agent Teams
-
-When to use Claude Code agent teams vs subagents, and key constraints.
-
-**Source:** [code.claude.com/docs/en/agent-teams](https://code.claude.com/docs/en/agent-teams)
-
-## When to Use Teams (vs. Subagents)
-
-Use agent teams when teammates need to **talk to each other** — research debates, competing hypotheses, cross-layer coordination. Use subagents when you just need focused workers that report back results.
-
-**Good fit:** parallel code review, investigating competing bug hypotheses, new modules that don't share files, research from multiple angles.
-
-**Bad fit:** sequential tasks, edits to the same file, simple work where coordination overhead exceeds benefit.
-
-## Key Rules
-
-- **Give enough context in the spawn prompt** — teammates don't inherit the lead's conversation history
-- **Ensure teammates own different files** — two teammates editing the same file leads to overwrites
-- **Shut down all teammates before cleanup** — cleanup fails if teammates are still running
-- **Always clean up via the lead** — teammates should never run cleanup
-- **No session resumption** — after `/resume`, spawn new teammates
-
 # Bookdown Conventions
 
 Standards for bookdown report projects across New Graph Environment.
