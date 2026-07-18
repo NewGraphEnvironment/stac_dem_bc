@@ -7,7 +7,7 @@ dependencies:
   - pip
   - pip:
       # Core STAC packages
-      - pystac>=1.12.0
+      - pystac[validation]>=1.12.0  # validation extra = jsonschema, required by item_validate.py
       - pystac-client>=0.8.0
       - rio-stac>=0.11.0
       # Geospatial packages
@@ -17,5 +17,6 @@ dependencies:
       # Data processing
       - pandas
       # Utilities
+      - requests  # HTTP checks (stac_utils, urls_check_access.py)
       - tqdm
       - deepdiff  # JSON/dict comparison for QA and debugging

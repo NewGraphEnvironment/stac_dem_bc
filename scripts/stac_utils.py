@@ -10,6 +10,7 @@ Contains common functions and configuration used across:
 
 import json
 import logging
+import os
 import re
 from datetime import datetime, timezone
 
@@ -37,7 +38,15 @@ BBOX_BC = [-140, 48, -114, 60]
 
 
 def get_output_dir(test_only: bool) -> str:
-    """Return the local output directory based on mode."""
+    """Return the local output directory based on mode.
+
+    STAC_OUTPUT_DIR overrides both modes — set by the CI workflow, where
+    the catalog is assembled in a runner workspace instead of the local
+    gis directory.
+    """
+    env_dir = os.environ.get("STAC_OUTPUT_DIR")
+    if env_dir:
+        return env_dir
     if test_only:
         return "/Users/airvine/Projects/gis/stac_dem_bc/stac/dev/stac_dem_bc"
     return "/Users/airvine/Projects/gis/stac_dem_bc/stac/prod/stac_dem_bc"

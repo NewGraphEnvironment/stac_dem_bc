@@ -9,4 +9,6 @@
 - Pushed main (CLAUDE.md sync commit), created branch `23-automate-monthly-incremental-catalog-upd`
 - Archived issue #13 PWF → `planning/archive/2026-02-issue-13-url-accessibility/` (commit c72ecf0)
 - Scaffolded PWF baseline from issue #23 with approved phases
-- Next: Phase 1 (CI-safe pipeline fixes)
+- Phase 1 complete: STAC_OUTPUT_DIR override, detect_changes exit contract + plausibility guard, environment.yml deps, s3_sync-ci.sh, urls_reconcile.py; cold-path rehearsal passed (zero deletes, correct order, dedupe verified)
+- Live ngr fetch: objectstore at 98,039 URLs (+37,900 since Feb) → catch-up moved to local run, dispatch verifies steady state (task_plan Phase 4 amended; findings.md has the numbers)
+- Next: Phase 2 (rtj#184 role) and Phase 3 (workflow)

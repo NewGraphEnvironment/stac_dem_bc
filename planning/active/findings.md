@@ -24,6 +24,25 @@ Issue #23 (filed 2026-07-18): catalog five months stale (inventory 2026-02-18, S
 - Public repo → GitHub disables cron after 60 days without repo activity; no-change months produce no commits (document in triage).
 - Side finding (out of scope, flagged to user): `rtj/scripts/geoserv/stac_register-pypgstac.sh:82` still has the parallel-append interleave pattern from the conventions — harmless for KB-scale DEM items, trips on large payloads.
 
+## Phase 1 cold-path rehearsal (2026-07-18)
+
+Stateless-runner path exercised locally with a uv venv (Python 3.12, exact CI dep list — the install itself doubles as the CI-install rehearsal; `import rasterio, rio_stac, pystac, jsonschema` smoke passed, rasterio 1.5.0 manylinux/macos wheels bundle GDAL+PROJ):
+
+- Workspace = temp `STAC_OUTPUT_DIR` holding only the S3-fetched `collection.json` (10.9 MB); synthetic 3-URL `urls_new.txt` from existing catalog URLs.
+- `item_create.py --incremental`: loaded 58,019 links, extracted metadata remotely (~2.3 s/file), wrote 3 item JSONs, added 0 links / skipped 3 duplicates (dedupe ✓), saved collection into the workspace ✓.
+- `item_validate.py --items-dir "$STAC_OUTPUT_DIR" --incremental`: found 3 files, all already in the committed CSV → "Validating 0 new items", exit 0 ✓ (gate semantics for genuinely-new items verified by code review).
+- `s3_sync-ci.sh --dryrun`: 3 item uploads then collection.json last, **zero delete operations** ✓; empty-array expansion works on macOS bash 3.2.
+- `urls_reconcile.py` dry-run: 60,126 cached / 58,019 item-backed / **2,107 never built** (parenthesized "(2)" files lead the list). Item-backed count exactly matches the Feb pgstac registration (58,019).
+- Rehearsal side-effects on tracked `data/` files restored via git checkout (the run's `stac_geotiff_checks.csv` rewrite also shrank it 60,325→60,307 rows — pre-existing item_create cache-merge behavior, not investigated here).
+
+**URL-scheme quirk (load-bearing):** every URL in the cache, the checks CSV, and ngr's live output uses a single-slash scheme (`https:/nrs...`, 0 double-slash of 98,039 fetched). Format is uniform across all three sources, so diffs are sane — but any future ngr "fix" to emit `https://` would make one detection run flag everything new+deleted. The plausibility guard doesn't catch same-size format flips; the massive-new-count log line is the tell.
+
+**Catch-up sizing (changes Phase 4):** live fetch 2026-07-18 returned **98,039 URLs vs 60,126 cached → ~37,900 new in 5 months (+63%)**, echoing the Feb discovery (+35,569). With the 2,107 reconciled, catch-up ≈ 40k items ≈ 6+ h at the documented ~6,450 items/h — beyond the 330-min GHA timeout and non-convergent on retry. The plan's documented oversized-batch fallback (manual local run) is therefore the catch-up path; the dispatch run verifies steady state instead. Steady-state months at the observed growth rate (~7,600 files/month ≈ 75 min) fit the timeout comfortably.
+
+## Code-check (3 fresh-eyes rounds, 2026-07-18)
+
+Round 1: `library(ngr)` sat before the tryCatch — a missing package on a fresh runner would exit 1, which the workflow reads as "changes detected" against the stale tracked urls_new.txt. Fixed by removing library() calls entirely (namespaced calls fail inside tryCatch → exit 2). Round 2: a trailing slash in `STAC_S3_BUCKET` would make the collection.json `cp` write a hidden `/collection.json` key — sync fine, cp exit 0, live collection silently never updates. Fixed with `BUCKET="${BUCKET%/}"`. Round 3 clean; also verified the 8 validation-CSV ids absent from the cache are the 8 known upstream-deleted files, and that the exit-0 path deletes stale tracked urls_new/urls_deleted from the checkout (stateless runner can't reprocess stale change files).
+
 ## Plan-review disposition (adversarial Plan-agent pass, 2026-07-18)
 
 Absorbed into phases: warn-only access check (B1), deletions-only branch + `git add -A data/` commit semantics (B2, G4), listing plausibility guard (G5), items-before-collection sync order (G6), orphaned-URL reconciliation (G7), rebase-before-push (G8), explicit exit-code capture (G9), cron auto-disable doc (G10), oversized-batch fallback doc (A12 — a naive "process first N" cap would orphan the remainder because the cache updates eagerly), import smoke check + Python ≥3.10 pin (A13, A14), ngr SHA pin in DESCRIPTION Remotes (S18), Phase 4 count math (A21). Dropped as verified-unnecessary: "add exit code to item_validate" (already correct). Catch-up sizing note: at ~6,450 items/hour, a 35k-scale surprise busts the 330-min timeout non-convergently — log `wc -l urls_new.txt` early; fallback is a manual local run.

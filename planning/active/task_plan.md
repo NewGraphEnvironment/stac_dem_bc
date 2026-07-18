@@ -4,12 +4,12 @@ The catalog is five months stale: the source URL inventory was last refreshed 20
 
 ## Phase 1: CI-safe pipeline fixes
 
-- [ ] `scripts/stac_utils.py`: `get_output_dir()` honors `STAC_OUTPUT_DIR` env override before mode defaults
-- [ ] `scripts/detect_changes.R`: tryCatch wrapper — R errors exit 2 (0 = no changes, 1 = changes, 2 = error); plausibility guard: fresh listing < 90% of cached → exit 2 without touching cache or outputs
-- [ ] `environment.yml`: add `pystac[validation]` and `requests` so the CI dep list and conda env stay consistent
-- [ ] New `scripts/s3_sync-ci.sh`: no-delete sync on default credential chain; items first (`--exclude "collection.json"`), `aws s3 cp` collection.json last; `--dryrun` passthrough; guards (`STAC_OUTPUT_DIR` set, dir non-empty, collection.json present)
-- [ ] New `scripts/urls_reconcile.py` (one-off helper): compute item-backed URLs from the validation CSV via the url→id mapping, rewrite `urls_list.txt` to that subset (`--dry-run` default) so detect_changes re-flags the ~2,098 never-built URLs on the catch-up run
-- [ ] Cold-path rehearsal (local): temp `STAC_OUTPUT_DIR` with only S3-fetched collection.json, synthetic 2–3-URL urls_new.txt → item_create → item_validate → `s3_sync-ci.sh --dryrun`; assert zero deletions planned, items-before-collection order, only new files uploaded
+- [x] `scripts/stac_utils.py`: `get_output_dir()` honors `STAC_OUTPUT_DIR` env override before mode defaults
+- [x] `scripts/detect_changes.R`: tryCatch wrapper — R errors exit 2 (0 = no changes, 1 = changes, 2 = error); plausibility guard: fresh listing < 90% of cached → exit 2 without touching cache or outputs
+- [x] `environment.yml`: add `pystac[validation]` and `requests` so the CI dep list and conda env stay consistent
+- [x] New `scripts/s3_sync-ci.sh`: no-delete sync on default credential chain; items first (`--exclude "collection.json"`), `aws s3 cp` collection.json last; `--dryrun` passthrough; guards (`STAC_OUTPUT_DIR` set, dir non-empty, collection.json present)
+- [x] New `scripts/urls_reconcile.py` (one-off helper): compute item-backed URLs from the validation CSV via the url→id mapping, rewrite `urls_list.txt` to that subset (dry-run default, `--apply` to rewrite) — re-flags the 2,107 never-built URLs on the catch-up run
+- [x] Cold-path rehearsal (local): temp `STAC_OUTPUT_DIR` with only S3-fetched collection.json, synthetic 3-URL urls_new.txt → item_create → item_validate → `s3_sync-ci.sh --dryrun`; verified zero deletions planned, items-before-collection order, only new files uploaded (see findings.md 2026-07-18 rehearsal)
 
 ## Phase 2: Companion infra — rtj#184 (in ~/Projects/repo/rtj, fresh branch off rtj main)
 
@@ -28,8 +28,9 @@ The catalog is five months stale: the source URL inventory was last refreshed 20
 ## Phase 4: Catch-up run + verification (post-merge)
 
 - [ ] PR via `/gh-pr-push` (body: Relates to #23, why urls_fetch.R is bypassed in CI), merge
-- [ ] Seed catch-up: run `urls_reconcile.py` for real, commit trimmed `urls_list.txt` to main — next run re-detects the ~2,098 never-built URLs plus 5 months of growth
-- [ ] `workflow_dispatch` from main; watch timing; verify cache commit lands and count math holds: S3 objects ≈ valid-item count + collection.json; residual URL-vs-item gap fully explained by known-invalid entries in `stac_geotiff_checks.csv`
+- [ ] Seed catch-up: run `urls_reconcile.py --apply`, commit trimmed `urls_list.txt` to main — next detection re-flags the 2,107 never-built URLs plus 5 months of growth
+- [ ] Catch-up build runs LOCALLY, not via dispatch (live fetch 2026-07-18: objectstore now at 98,039 URLs → ~40k new+reconciled items ≈ 6+ h at Feb rates, beyond the GHA timeout — this is the plan's documented oversized-batch path): detect_changes → incremental pipeline with `STAC_OUTPUT_DIR` workspace → `s3_sync-ci.sh` → commit caches
+- [ ] `workflow_dispatch` from main verifies the steady-state path end to end (post-catch-up delta or clean no-change exit); count math: S3 objects ≈ valid-item count + collection.json; residual URL-vs-item gap fully explained by known-invalid entries in `stac_geotiff_checks.csv`
 - [ ] Register on geoserv (`stac_register-pypgstac.sh stac-dem-bc ...`); verify pgstac count + API query at images.a11s.one returns a new item
 - [ ] Confirm cron live; close #23 via docs commit ("monthly automation live; Fixes #23")
 
