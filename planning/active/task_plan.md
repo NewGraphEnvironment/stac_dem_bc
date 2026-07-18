@@ -13,10 +13,10 @@ The catalog is five months stale: the source URL inventory was last refreshed 20
 
 ## Phase 2: Companion infra — rtj#184 (in ~/Projects/repo/rtj, fresh branch off rtj main)
 
-- [ ] Add `module "stac_dem_bc_update"` + ARN output to `env/prod/main.tf` (block as written in rtj#184)
-- [ ] Optional rider (user call): enable versioning on `stac-dem-bc` in `var.s3_buckets` — no versioning today and collection.json is overwritten in place every run
+- [x] Add `module "stac_dem_bc_update"` + ARN output to `env/prod/main.tf` (rtj branch `184-gha-s3-role-stac-dem-bc`, commit 984d00b, pushed)
+- [x] Optional rider (user call): enable versioning on `stac-dem-bc` — committed separately (c81bcf4) so it can be dropped before apply if unwanted
 - [ ] `tofu plan` / `apply` in env/prod (apply is collaborative — user credentials)
-- [ ] Post role ARN to #23; commit in rtj closes rtj#184
+- [ ] Post role ARN to #23; merge rtj branch closing rtj#184
 
 ## Phase 3: Workflow
 
