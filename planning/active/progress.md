@@ -11,4 +11,5 @@
 - Scaffolded PWF baseline from issue #23 with approved phases
 - Phase 1 complete: STAC_OUTPUT_DIR override, detect_changes exit contract + plausibility guard, environment.yml deps, s3_sync-ci.sh, urls_reconcile.py; cold-path rehearsal passed (zero deletes, correct order, dedupe verified)
 - Live ngr fetch: objectstore at 98,039 URLs (+37,900 since Feb) → catch-up moved to local run, dispatch verifies steady state (task_plan Phase 4 amended; findings.md has the numbers)
-- Next: Phase 2 (rtj#184 role) and Phase 3 (workflow)
+- Phase 3 complete: DESCRIPTION (ngr@519c03b), update.yml (15 steps, ASCII-clean, YAML-validated), README Automation section, CLAUDE.md path fix
+- Next: Phase 2 (rtj#184 role edit + user-run tofu apply), then PR

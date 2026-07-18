@@ -1,0 +1,16 @@
+Package: stac.dem.bc
+Type: Project
+Title: Manifest for stac_dem_bc dependency resolution
+Version: 0.0.0.9000
+Description: Not an R package. This DESCRIPTION exists so that
+    r-lib/actions/setup-r-dependencies can resolve runtime deps for the
+    monthly update GitHub Actions workflow (change detection via ngr).
+    Mirrors the water-temp-bc pattern.
+License: MIT
+Encoding: UTF-8
+Imports:
+    fs,
+    ngr,
+    readr
+Remotes:
+    NewGraphEnvironment/ngr@519c03baa8554b9a82ff995dbe510bfb923a624d

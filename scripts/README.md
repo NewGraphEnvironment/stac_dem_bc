@@ -147,12 +147,29 @@ The bottleneck is network: each GeoTIFF must be partially read over HTTP to extr
 | AWS CLI | Configured with write access to `s3://stac-dem-bc` |
 | System | `rio` CLI tools (installed with rasterio) |
 
+## Automation
+
+`.github/workflows/update.yml` runs the incremental pipeline monthly (3rd of the month, 09:23 UTC) on a GitHub-hosted runner, and can be run on demand from the Actions tab (`workflow_dispatch`). It authenticates to AWS via OIDC (`role_gha_stac_dem_bc`, provisioned in the rtj infrastructure repo — no stored keys) and:
+
+1. Detects changes against the committed `data/urls_list.txt` cache (exit 0 = no changes → clean early exit; 1 = changes; 2 = error)
+2. Builds and validates STAC items for new URLs only, in a runner workspace (`STAC_OUTPUT_DIR`) seeded with the live `collection.json` from S3
+3. Syncs item JSONs then `collection.json` (in that order, never `--delete`) via `s3_sync-ci.sh`
+4. Commits the refreshed `data/` caches back to `main` — a failed run therefore persists nothing and the next run re-detects cleanly
+
+**Failure triage:**
+
+- **One invalid item blocks the whole batch** (the validate step is a deliberate hard gate, and it re-fails monthly until fixed). Remediate with `item_extract_invalid.py` → `item_reprocess.py`, or investigate via the run's `run-logs` artifact.
+- **Inaccessible source URLs do not block** — the access check is warn-only (matching `build_safe.sh`); results land in `data/urls_access_checks.csv` for reporting to GeoBC.
+- **Item shortfall warning**: the run annotates a warning when fewer items were created than URLs detected (an all-invalid batch stays green — validate/sync are skipped and the batch is recorded as attempted). Individual metadata reads can fail transiently, and a failed read is cached in `data/stac_geotiff_checks.csv` as not-a-GeoTIFF — so those URLs are not retried automatically. To recover: delete the affected rows from `stac_geotiff_checks.csv`, run `urls_reconcile.py --apply`, commit both files, and the next run rebuilds them.
+- **Oversized batches**: a month with more than ~35k new files cannot fit the job timeout, and re-running does not help (the run commits nothing, so it repeats identically). Run the pipeline locally instead (the initial 2026 catch-up follows this same local path), then let the cron resume.
+- **Cron auto-disable**: GitHub disables scheduled workflows in public repos after ~60 days without repository activity. No-change months produce no commits, so after a quiet stretch check the Actions tab and re-enable/dispatch.
+
 ## After the Pipeline
 
-Once the catalog is on S3, register it in pgstac to make it searchable:
+Once the catalog is on S3, register it in pgstac to make it searchable. Registration runs on the STAC host (geoserv) using the scripts in the rtj repo (`scripts/geoserv/`):
 
 ```bash
-ssh root@<VM_IP> "bash /tmp/stac_register-pypgstac.sh stac-dem-bc https://stac-dem-bc.s3.amazonaws.com"
+ssh <geoserv> "bash stac_register-pypgstac.sh stac-dem-bc https://stac-dem-bc.s3.amazonaws.com"
 ```
 
-This loads the STAC records into PostgreSQL, powering the search API at `images.a11s.one`. Once registered, the collection is browsable in QGIS (STAC Data Source Manager), through the API directly, or any STAC-compatible client.
+This loads the STAC records into PostgreSQL, powering the search API at `images.a11s.one`. Once registered, the collection is browsable in QGIS (STAC Data Source Manager), through the API directly, or any STAC-compatible client. A full reload takes ~46 minutes (dominated by downloading item JSONs from S3; the database load itself is seconds) — an incremental `pypgstac` upsert path is a planned follow-up.
