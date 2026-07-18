@@ -228,93 +228,37 @@ WHY: Reprocessing same URLs (e.g., after failures, testing) would create duplica
 <\!-- BEGIN SOUL CONVENTIONS — DO NOT EDIT BELOW THIS LINE -->
 
 
-# Cartography
+# CI Monitoring
 
-## Style Registry
+When this repo has GitHub Actions workflows, scan recent runs on session start. Catches failed pkgdown deploys, broken vignette builds, and stale citation regenerations that would otherwise linger until the user manually checks.
 
-Use the `gq` package for all shared layer symbology. Never hardcode hex color values when a registry style exists.
+## On Session Start
 
-```r
-library(gq)
-reg <- gq_reg_main()  # load once per script — 51+ layers
+```bash
+gh run list --limit 5 --json status,conclusion,name,createdAt,databaseId \
+  --jq '.[] | select(.conclusion == "failure")'
 ```
 
-**Core pattern:** `reg$layers$lake`, `reg$layers$road`, `reg$layers$bec_zone`, etc.
+If any failures since the last visit, surface to the user before starting other work:
 
-### Translators
+> Workflow `<name>` failed `<time>` ago (run `<id>`). Investigate with `gh run view <id> --log-failed`. Fix or proceed with current task?
 
-| Target | Simple layer | Classified layer |
-|--------|-------------|-----------------|
-| tmap | `gq_tmap_style(layer)` → `do.call(tm_polygons, ...)` | `gq_tmap_classes(layer)` → field, values, labels |
-| mapgl | `gq_mapgl_style(layer)` → paint properties | `gq_mapgl_classes(layer)` → match expression |
+User decides; do not auto-fix.
 
-### Custom styles
+## Particular Failures Worth Naming
 
-For project-specific layers not in the main registry, use a hand-curated CSV and merge:
+- **pkgdown** — docs site on GitHub Pages broken
+- **R-CMD-check** — package may not install
+- **Vignette / build-vignettes** — vignette docs incomplete
+- **update-citation-cff** — CITATION.cff stale
 
-```r
-reg <- gq_reg_merge(gq_reg_main(), gq_reg_read_csv("path/to/custom.csv"))
-```
+## Why This Matters
 
-Install: `pak::pak("NewGraphEnvironment/gq")`
+Without this scan, post-merge workflow failures linger until someone (often the user) notices a stale docs site or a missing vignette. The session-start sweep catches them on the first re-entry into the repo.
 
-## Map Targets
+## Pairs with `/gh-pr-merge`
 
-| Output | Tool | When |
-|--------|------|------|
-| PDF / print figures | `tmap` v4 | Bookdown PDF, static reports |
-| Interactive HTML | `mapgl` (MapLibre GL) | Bookdown gitbook, memos, web pages |
-| QGIS project | Native QML | Field work, Mergin Maps |
-
-## Key Rules
-
-- **`sf_use_s2(FALSE)`** at top of every mapping script
-- **Compute area BEFORE simplify** in SQL
-- **No map title** — title belongs in the report caption
-- **Legend over least-important terrain** — swap legend and logo sides when it reduces AOI occlusion. No fixed convention for which side.
-- **Four-corner rule** — legend, logo, scale bar, keymap each get their own corner. Never stack two in the same quadrant.
-- **Bbox must match canvas aspect ratio** — compute the ratio from geographic extents and page dimensions. Mismatch causes white space bands.
-- **Consistent element-to-frame spacing** — all inset elements should have visually equal margins from the frame edge
-- **Map fills to frame** — basemap extends edge-to-edge, no dead bands. Use near-zero `inner.margins` and `outer.margins`.
-- **Suppress auto-legends** — build manual ones from registry values
-- **ALL CAPS labels appear larger** — use title case for legend labels (gq `gq_tmap_classes()` handles this automatically via `to_title()` fallback)
-
-## Self-Review (after every render)
-
-Read the PNG and check before showing anyone:
-
-1. Correct polygon/study area shown? (verify source data, not just the bbox)
-2. Map fills the page? (no white/black bands)
-3. Keymap inside frame with spacing from edge?
-4. No element overlap? (each in its own corner)
-5. Legend over least-important terrain?
-6. Consistent spacing across all elements?
-7. Scale bar breaks appropriate for extent?
-
-See the `cartography` skill for full reference: basemap blending, BC spatial data queries, label hierarchy, mapgl gotchas, and worked examples.
-
-## Land Cover Change
-
-Use [drift](https://github.com/NewGraphEnvironment/drift) and [flooded](https://github.com/NewGraphEnvironment/flooded) together for riparian land cover change analysis. flooded delineates floodplain extents from DEMs and stream networks; drift tracks what's changing inside them over time.
-
-**Pipeline:**
-
-```r
-# 1. Delineate floodplain AOI (flooded)
-valleys <- flooded::fl_valley_confine(dem, streams)
-
-# 2. Fetch, classify, summarize (drift)
-rasters   <- drift::dft_stac_fetch(aoi, source = "io-lulc", years = c(2017, 2020, 2023))
-classified <- drift::dft_rast_classify(rasters, source = "io-lulc")
-summary    <- drift::dft_rast_summarize(classified, unit = "ha")
-
-# 3. Interactive map with layer toggle
-drift::dft_map_interactive(classified, aoi = aoi)
-```
-
-- Class colors come from drift's shipped class tables (IO LULC, ESA WorldCover)
-- For production COGs on S3, `dft_map_interactive()` serves tiles via titiler — set `options(drift.titiler_url = "...")`
-- See the [drift vignette](https://www.newgraphenvironment.com/drift/articles/neexdzii-kwa.html) for a worked example (Neexdzii Kwa floodplain, 2017-2023)
+The skill watches workflows triggered by a fresh merge in real time — that's the targeted catch. This convention is the backstop for failures that landed when no one was watching (merges via web UI, scheduled triggers, manually-triggered workflows).
 
 
 # Code Check Conventions
@@ -329,6 +273,17 @@ Add new checks here when a bug class is discovered — they compound over time.
 - `"echo '${VAR}'"` — if VAR contains `'`, shell syntax breaks
 - Use `printf '%s\n' "$VAR" | command` to pipe values safely
 - Heredocs: unquoted `<<EOF` expands variables locally, `<<'EOF'` does not — know which you need
+- Pass-through-ssh args: `printf '%q'` escapes per-arg so workload paths with spaces / quotes / metacharacters survive the local-shell → ssh-argv → remote-shell round-trip. Without it, `ssh host 'cmd' "$path"` joins args with spaces on remote and re-parses, losing argument boundaries.
+- `git commit -m "$(cat <<'EOF' ... EOF)"` chokes on apostrophes in prose bodies in some contexts — the bash parser surfaces an unmatched-quote error even though heredoc bodies should be quote-neutral. Resilient default for multi-line commit messages: write the body to `/tmp/msg.txt` and use `git commit -F /tmp/msg.txt`.
+
+### Heredoc precedence in pipelines
+- `cmd1 | cmd2 <<EOF` — the heredoc binds to `cmd2` (the rightmost simple command). If you intended `cmd1` to receive it, put `<<EOF` on cmd1 explicitly: `cmd1 <<EOF | cmd2`.
+- Symptom when wrong: ssh body silently echoed by tee/cat/etc, ssh side gets empty stdin, exits 0 (or near-0) without doing anything. Caught the hard way 2026-05-01 in cypher_restore-fwapg.sh.
+
+### pipefail with ssh+tee
+- `set -eu` does NOT propagate exit codes through pipelines. `ssh ... | tee log` returns tee's exit (always 0 for healthy tee), masking ssh failure.
+- Use `set -euo pipefail` for any script that pipes a meaningful command into tee/cat/grep/etc. Or check `${PIPESTATUS[0]}` explicitly.
+- Symptom when wrong: task notifications report "exit 0 / completed" while remote work was actually skipped or errored.
 
 ### Paths
 - Hardcoded absolute paths (`/Users/airvine/...`) break for other users
@@ -341,6 +296,40 @@ Add new checks here when a bug class is discovered — they compound over time.
 - Empty variable before destructive operation (rm, destroy) — add guard: `[ -n "$VAR" ] || exit 1`
 - `grep` returning empty silently — downstream commands get empty input
 
+### Parallel writers sharing one output file interleave mid-record
+- `xargs -P N ... >> shared_file` (or any fan-out where N processes append to the same fd/path) is only safe while each record fits in a single `write()`. O_APPEND makes individual `write()` calls atomic, but a large record (anything beyond pipe/stdio buffer size, ~64 KB) spans multiple writes — concurrent jobs interleave mid-record and corrupt the file.
+- The trap is latent: small records never trip it, so the pattern looks proven until the first large payload arrives. Caught 2026-07-11 in rtj's `stac_register-pypgstac.sh` — 20 parallel `curl | jq -c` jobs appending STAC items to one NDJSON worked for every prior collection (KB-scale items), then 9 MB floodplain items interleaved and produced an orjson decode error ~864 KB into line 1.
+- Fix pattern: each parallel job writes its own temp file (unique name, e.g. md5 of the input), concatenate after the fan-out completes:
+  ```bash
+  cat urls.txt | xargs -P 20 -I {} fetch_one.sh {} "$OUT_DIR"   # each writes $OUT_DIR/<md5>.json
+  cat "$OUT_DIR"/*.json > combined.ndjson
+  ```
+- Pair with a count guard — parallel `curl` failures under xargs are also silent: `[ "$(wc -l < combined.ndjson)" -eq "$EXPECTED" ] || exit 1` before any downstream load.
+
+### `mktemp` template needs enough X's, and a failed `mktemp` leaves an empty var
+- BSD/macOS `mktemp -d -t <name>` requires the template to contain at least 3 `X`s (`XXXXXX` is the safe default). Without them, mktemp errors to stderr (`too few X's in template`) and **prints nothing to stdout**.
+- Pattern: `SCRATCH=$(mktemp -d -t aider-smoke) && cd "$SCRATCH" && <destructive>`. When mktemp fails, `$SCRATCH=""`. `cd ""` is a no-op that **leaves you in the caller's cwd**. The destructive command (`rm`, `git init`, `git add+commit`) then runs in cwd instead of a throwaway tmpdir.
+- Caught the hard way 2026-05-13: a Claude smoke test inside the rtj checkout did exactly this, accidentally committed a `demo.R` to the active feature branch, which then rode the squash-merge into rtj/main and had to be cleaned up post-merge.
+- Fix patterns:
+  - Always use `XXXXXX` (6 X's) in the template: `mktemp -d -t aider-smoke.XXXXXX`.
+  - Guard the result: `SCRATCH=$(mktemp -d ...) || exit 1; [ -n "$SCRATCH" ] || exit 1`.
+  - Use `set -euo pipefail` so the failed command-substitution kills the script.
+
+### BSD vs GNU sed/grep portability (macOS hits this constantly)
+- macOS ships BSD `sed`/`grep`. Linux CI/cloud-init hosts ship GNU. Snippets that work on one silently misbehave on the other.
+- **`\+` and `\|` are GNU BRE extensions.** On BSD they're treated as literal `+` and `|`, so the regex still "matches" but matches nothing useful — leaving raw input unchanged.
+  - Symptom seen 2026-05-28: `sed 's/[^a-z0-9]\+/-/g'` on macOS left spaces in an issue-title slug, producing an invalid git branch name.
+  - Fix: use `sed -E` (POSIX ERE) so `+`, `|`, `?`, `(...)` all work without escapes on both flavors. The same regex becomes `sed -E 's/[^a-z0-9]+/-/g'`.
+- **`s|pat|repl|` delimiter conflicts with `|` in alternation/replacement on BSD.** Pick a delimiter that does not appear in pattern or replacement (`#`, `,`, `:` are common choices). Compound `s|x|y|; s|^| /||` chains where the trailing `||` looks like an empty delimiter break on BSD sed even when GNU accepts them.
+- **Don't parse `ls`.** BSD `ls` emits ANSI colour codes when stdout is a TTY *or* when `CLICOLOR_FORCE` is set in env (often by shell rc files), and the codes leak through pipes. Downstream `grep`/`sed` chokes on the embedded escapes (`[01;31m...[0m`).
+  - Use `find <dir> -maxdepth 1 -mindepth 1 -type d -exec basename {} \;` for directory listings, or `printf '%s\n' <dir>/*/` for a glob, or `for d in <dir>/*/; do basename "$d"; done`.
+- **When writing a snippet you expect to ship in a `skills/` SKILL.md or any cloud-init runcmd**: it must be POSIX-portable. Default to `sed -E`, avoid `\+`/`\|`, and don't pipe `ls`.
+
+### `gh` CLI
+- **`gh pr create` resolves branch from CWD, not `--repo`**. Specifying `--repo NewGraphEnvironment/X` does NOT switch branch resolution — the command still reads the current working directory's checked-out branch. To open a PR in repo X, `cd` into X's checkout first, or pass `--head <branch>` explicitly.
+- **`gh issue create` with heredoc bodies fails on prose containing special shell characters** (apostrophes, dollar signs, backticks). Use `--body-file /tmp/issue.md` instead — every project's `newgraph.md` convention specifies this; codified here for the underlying class.
+- **Before `gh pr merge`, verify the branch is fully pushed.** `gh pr merge` merges the REMOTE branch — commits made locally but never pushed are silently excluded, so the PR merges "successfully" while `main` is missing work you know you committed. Check `git status -sb` shows no `ahead N` before merging (or that `git rev-list --count @{u}..HEAD` is 0). Worse: if you then delete the local branch (`--delete-branch`, or a follow-up `git branch -D`), the unpushed commits become **dangling** — recoverable via `git reflog` / `git fsck --lost-found` then `git cherry-pick`, but only if you notice they're missing. Caught twice 2026-07 in `floodplains`: PR #6 merged 1 of 3 branch commits (the drift#34 `changes_only` fix + a CLAUDE.md update were unpushed → stranded as danglers → recovered and re-merged via a follow-up PR); a second branch sat 4-ahead-unpushed at compact time. The same check belongs in the `gh-pr-merge` skill's pre-merge step.
+
 ### Process Visibility
 - Secrets passed as command-line args are visible in `ps aux`
 - Use env files, stdin pipes, or temp files with `chmod 600` instead
@@ -351,13 +340,43 @@ Add new checks here when a bug class is discovered — they compound over time.
 - Must be pure ASCII — em dashes, curly quotes, arrows cause silent parse failure
 - Check with: `perl -ne 'print "$.: $_" if /[^\x00-\x7F]/' file.yaml`
 
+### YAML flow-mapping in runcmd
+- Any runcmd item containing both `{` and `:` is at risk of being parsed as a YAML flow-mapping (dict), not a literal string. Cloud-init's shellify hits a non-string and throws TypeError, **aborting all subsequent runcmd steps silently** while `final_message` still fires.
+- Don't write: `- test -s /file || { echo "FATAL: ..." }` — the `:` inside braces makes YAML see a dict.
+- Do write: use `- |` block scalar with explicit `if/then/fi`:
+  ```yaml
+  - |
+    if [ ! -s /file ]; then
+      echo "FATAL: ..." >&2
+      exit 1
+    fi
+  ```
+- Validate post-edit: `python3 -c "import yaml; runcmd=yaml.safe_load(open('cloud-init.yaml').read().split(chr(10),1)[1])['runcmd']; print([type(x).__name__ for x in runcmd if not isinstance(x,str)] or 'all strings')"`. If the output is anything other than `all strings`, the runcmd will fail.
+
 ### State
 - `cloud-init clean` causes full re-provisioning on next boot — almost never what you want before snapshot
 - Use `tailscale logout` not `tailscale down` before snapshot (deregister vs disconnect)
+- Wipe `/var/lib/tailscale/*` before snapshot too — `tailscale logout` deauthorizes server-side but local node identity blob persists in tailscaled.state. Snapshot restored elsewhere inherits prior key material until `tailscale up` runs again.
+- Wipe `/etc/ssh/ssh_host_*` before snapshot — otherwise droplets spawned from the same image share host identity.
 
 ### Template Variables
 - Secrets rendered via `templatefile()` are readable at `169.254.169.254` metadata endpoint
 - Acceptable for ephemeral machines, document the tradeoff
+- Heredocs in runcmd that write secrets: `<<'EOF'` (quoted) prevents bash from re-expanding `$X` sequences in already-substituted credential strings. AWS keys rarely contain `$` but base64-padded secrets might.
+
+### Repo + key install ordering
+- `apt-key adv --keyserver` is deprecated on Ubuntu 24.04 noble — silently fails AND APT ignores resulting keyring. Use `gpg --dearmor` + `signed-by=` keyring file pattern.
+- Repo .list files in `write_files:` trigger the implicit `package_update` BEFORE runcmd installs the keyring → first apt-get update fails with NO_PUBKEY. Put the repo line in runcmd alongside the key install, not in write_files.
+
+### Cloud-init users vs DO SSH key injection
+- DO injects `ssh_key_ids` only into `/root/.ssh/authorized_keys` (cloud-init's `cc_ssh` module). Cloud-init `users:` block with `ssh_authorized_keys: []` does NOT pick those up.
+- Non-root users that need SSH access must copy from root's keys in runcmd:
+  ```yaml
+  - mkdir -p /home/<user>/.ssh
+  - cp /root/.ssh/authorized_keys /home/<user>/.ssh/authorized_keys
+  - chown -R <user>:<user> /home/<user>/.ssh
+  ```
+- Guard with `test -s /root/.ssh/authorized_keys` to fail loudly if `cc_ssh` hasn't run before runcmd (rare race).
 
 ## OpenTofu / Terraform
 
@@ -369,7 +388,88 @@ Add new checks here when a bug class is discovered — they compound over time.
 ### Destructive Operations
 - Validate resource IDs before destroy: `[ -n "$ID" ] || exit 1`
 - `tofu destroy` without `-target` destroys everything including reserved IPs
-- Snapshot ID extraction: use `--resource droplet` and `grep -F` for exact match
+- Snapshot ID extraction by name: use `awk -v n="$NAME" '$2 == n {print $1}'` (exact match on column 2). `grep -F "$NAME"` is substring-match and can grab a stale snapshot whose name contains the new name as a substring.
+
+### "Has been deleted" in plan output is not authoritative — verify against the cloud API first
+- The AWS provider (5.x and some 6.x) has a known class of bug where a transient read error (false 404, regional-endpoint hiccup) is interpreted as "resource deleted outside of OpenTofu." The plan will show the resource and any children scheduled for destroy + recreate (`forces replacement` cascades through children that interpolate the parent's id/arn).
+- If you didn't delete the resource and the plan says it's gone, **verify against the cloud API before applying**: `aws s3 head-bucket --bucket X`, `aws iam get-role --role-name X`, etc. A `tofu plan -refresh=true` re-run a moment later often reports "No changes."
+- Caught 2026-05-14 in rtj env/prod for stac-era5-land: bucket fully intact (60 objects, 307 MB) but plan said deleted with 5 child resources "must be replaced." Apply would have clobbered the policy + lifecycle configs against the still-existing bucket. Recovery via `-target` on the unrelated resource being added (rtj#157 then codifies `lifecycle { prevent_destroy = true }` on the bucket + load-bearing children).
+- **Belt-and-suspenders defense:** add `lifecycle { prevent_destroy = true }` to high-value resources (S3 buckets, RDS instances, anything irreplaceable) in their module. Tofu will refuse to plan a destroy until the lifecycle line itself is removed in config — converts the failure mode from "apply silently clobbers" into "plan errors with `Instance cannot be destroyed`." Don't apply it to count-based resources where `count: 1 → 0` is a legitimate transition.
+
+## DigitalOcean
+
+### Snapshot disk-size constraint
+- DO snapshots include the source droplet's disk size. New droplets from a snapshot must have disk **>=** snapshot disk. Resize **up** is fine; resize **down** below the snapshot disk is impossible without rebuilding.
+- Build the snapshot at the smallest droplet size you'd ever want to spin from it. Sizes vs disks at writing: `g-4vcpu-16gb` = 50 GB, `g-8vcpu-32gb` / `m-4vcpu-32gb` = 100 GB, `m-8vcpu-64gb` = 200 GB.
+- If your workload requires X GB RAM minimum, your snapshot floor is whatever droplet has X GB AND the smallest disk class.
+
+### Reserved IP detach behavior
+- Targeted destroy (`tofu destroy -target=module.droplet -target=...assignment...`) preserves the reserved IP at $4/mo. Full `tofu destroy` releases it (next apply gets a NEW IP).
+
+### Reserved IP assignment race (rtj#55, rtj#85)
+- DO returns 422 "Droplet already has a pending event" when reserved IP assignment fires immediately after droplet+firewall creation. The droplet's internal event queue takes time to drain.
+- **Every DO droplet module that uses a reserved IP MUST have:**
+  1. `time_sleep` resource between droplet creation and IP assignment, with `create_duration ≥ 60s` (10s and 30s have both been observed to race; 60s has more headroom)
+  2. `depends_on = [time_sleep.<name>]` on the `digitalocean_reserved_ip_assignment` resource
+  3. A retry fallback in the wrapping shell script (`up.sh` style) that detects the 422 in tofu output and uses `doctl compute reserved-ip-action assign <ip> <droplet-id>` to recover. Tofu doesn't retry; it leaves state half-applied (assignment recorded but DO didn't actually attach).
+- **Snapshot-based spins are MORE prone to the race** than first-boot from blank Ubuntu (more startup events compete for the droplet's event queue).
+- **Audit existing modules:** `grep -L 'time_sleep' env/do/*/<host>/main.tf` finds modules missing the gate. As of 2026-05-02, openclaw and geoserv have no `time_sleep` — they will race eventually.
+
+## Docker / Postgres
+
+### Postgis init time
+- `imresamu/postgis` (and similar postgis images) on first cold start (empty data volume) take **5-12 min** to install all extensions — varies with disk IO and noisy-neighbor lottery on cloud hosts. Health-wait scripts must allow 15 min minimum, ideally with hard-fail + log dump on timeout.
+
+### Tuning vs host RAM
+- fresh's `docker/docker-compose.yml` defaults are tuned for a 128 GB host (`shared_buffers=32GB`, `shm_size=36gb`). On smaller hosts, postgres OOMs at startup with "could not map anonymous shared memory".
+- 32 GB host floor: use the M1/cypher 32 GB-host preset (`scripts/fwapg/compose.override.m1.yml`) which sets `shared_buffers=8GB, shm_size=12gb`.
+- Below 32 GB: postgres can technically start with smaller `shared_buffers` but fwapg work becomes painful. Don't run fwapg pipelines on <32 GB hosts.
+
+### `search_path` is data, not config
+- `ALTER DATABASE <db> SET search_path TO ...` is a database-level setting **stored in the postgres data dir**. Wiped with `docker compose down -v`. Must be re-applied on every restore.
+- Codify in your restore script, not in cloud-init or compose env (those don't apply to db-level settings).
+
+### `pkill <R/Python/etc. client>` does NOT cancel its Postgres query
+- Killing the client (R, Python, psql) closes its connection. The libpq backend on the server keeps running the in-flight query until it finishes — **server-side orphan**. The orphaned backend holds whatever locks it had (table, view, advisory). Every later `DROP VIEW` / `LOCK TABLE` / `ALTER` on the same object blocks behind it indefinitely — *silent hangs* indistinguishable from a slow query.
+- Caught 2026-05-25 in link#205: a `pkill`'d `wsg_run_one.R` left a `frs_network_features` SELECT running 1h45m; subsequent recomputes wedged on `DROP VIEW barriers_bt_access` for 1h08m before someone noticed.
+- **Always terminate the server-side backend**, not just the client:
+  ```sql
+  SELECT pid, pg_terminate_backend(pid)
+  FROM pg_stat_activity
+  WHERE datname='<db>' AND state='active' AND now()-query_start > interval '3 minutes'
+    AND pid <> pg_backend_pid();
+  ```
+  Then kill the client. Order matters when you don't know which side will block.
+
+### Set `statement_timeout` + `lock_timeout` on long DB ops
+- Any long-running DB op from an R/Python/etc. client should set both at session start, ideally via env (`PGOPTIONS='-c statement_timeout=600000 -c lock_timeout=60000'`) or on the connection itself (`DBI::dbExecute(conn, "SET statement_timeout = '600000'")`). A runaway query then cancels server-side (no orphan); a blocked `DROP VIEW` gives up rather than wedging behind a zombie lock. Without it, silent hangs become indistinguishable from "still working" and you wait hours.
+- Pick a generous-but-bounded timeout (10× expected query time). The point isn't tight enforcement — it's "fail loud instead of fail silent."
+
+### Function-as-join-predicate: index visibility depends on inlineability
+- `JOIN b ON some_function(a.cols, b.cols)` — Postgres can only use the underlying indexes if `some_function` is `LANGUAGE sql` (inlineable). `plpgsql` functions are opaque and force per-row evaluation → seq scan / nested loop without indexes. Verify with `\df+ <function>` (look at `Language`) and `EXPLAIN` (look for the function body expanded into Filter / Index Cond).
+- Caught in link#205 with `whse_basemapping.fwa_downstream` — it IS `LANGUAGE sql` + the planner did inline it; the symptom was elsewhere (see below). But if a function-based join is slow and the function is plpgsql, that's the first thing to look at.
+
+### Joining on a per-tenant key (e.g. `id_segment` per-WSG) against a multi-tenant table is cartesian
+- `id_segment` in link's persist schema is unique *within* a WSG, not globally (link#203). `WHERE id_segment IN (SELECT id_segment FROM streams WHERE wsg=aoi)` against persist matches access rows from *every* WSG sharing those id_segment values → N(WSGs)× duplicates → PK violations downstream and 50× memory.
+- Fix: filter by the full tenant key (`watershed_group_code = aoi`) when the table has it. Pattern: introspect via `information_schema.columns` at runtime and branch — the same function can serve a working schema (single tenant, no WSG col) and persist (multi-tenant, with WSG col).
+
+### View vs. real table changes the planner's join direction
+- A `CREATE VIEW v AS SELECT * FROM big_table WHERE … ` carries no row-count statistics. Used as a join input, the planner may pick the other side (big) as the outer driver, blowing nested-loop cost ~1000× — the symptom looks like "the indexes aren't being used" but it's actually a wrong-direction nested loop.
+- Caught in link#205: AOI-scoping streams via a `VIEW` left Postgres thinking the 26k FINA segments were as big as the 800k persist barriers; it picked barriers as outer; 71M estimated result rows; >10 min wall.
+- Fix when AOI-scoping into a smaller dataset: **materialise as a real `CREATE TABLE` with indexes + `ANALYZE`**. The planner then sees the small row count and picks it as outer. Drop the table on `on.exit` if it's transient.
+
+### Two-statement DELETE/INSERT into a persist table is not atomic
+- A "DELETE WHERE wsg='X'; INSERT …" pair into a persist table from an orchestration script: if the INSERT fails (e.g. duplicate key from a subtle JOIN bug), the DELETE already ran → **data loss for that WSG**. Wrap in a single transaction (`BEGIN; … ; COMMIT`) when the persist table is the only source of truth, so a failed INSERT rolls back the DELETE. (link#205 lost FINA's `streams_mapping_code` to this; the surrounding cheap-recompute orchestration in `wsg_recompute_one.R` should wrap both statements in a tx.)
+
+## Tailscale
+
+### ACL "users" semantics
+- Tailscale SSH ACL `"users": ["autogroup:nonroot"]` for `tag:compute` blocks `ssh root@<node>` over the tailnet. Use `ssh <user>@<node>` + sudo for root operations.
+- For SSH-as-root from off-tailnet (regular OpenSSH on the public IP), the ACL doesn't apply — but you need the SSH key registered on the node.
+
+### Reusable + ephemeral auth keys
+- Cypher-style ephemeral compute droplets need both flags on the auth key: **Reusable** (same key works across destroy/recreate) + **Ephemeral** (tailnet entries auto-clean when offline >5 min).
+- Tag the key (e.g. `tag:compute`) at creation time. Nodes joining with that key inherit the tag automatically — no `--advertise-tags` needed at `tailscale up` time.
 
 ## Security
 
@@ -387,6 +487,14 @@ Add new checks here when a bug class is discovered — they compound over time.
 - `printf '%q'` escapes values for shell safety
 - Temp files for secrets: create with `chmod 600`, delete after use
 
+### Gitleaks pre-commit hook
+Configuration patterns and false-positive handling for the `gitleaks` pre-commit hook (kdot's Brewfile ships `gitleaks` + `pre-commit`; cyclops standardizes the hook):
+- **`.gitleaks.toml` schema in v8.30+**: top-level table is `[[allowlists]]` (PLURAL, array of tables). Each entry MUST include at least one of `commits` / `paths` / `regexes` / `stopwords`. The singular `[allowlist]` and `fingerprints = [...]` forms shown in older docs fail to validate. Use `paths` + `regexes` together for targeted file-and-content allowlists. Example in `soul/.gitleaks.toml`.
+- **PEM marker regex spans multi-line**: gitleaks's `private-key` rule is `(?i)-----BEGIN...PRIVATE KEY-----[\s\S]*-----END...-----`. It matches across comment prefixes, blank lines, and code-fence boundaries. **Commenting out the markers does NOT neutralize the match.** Only fix in content is to omit the literal `-----BEGIN/END...-----` strings entirely and replace with prose ("Paste your private key here, preserving headers" etc.). See the `rtj` cypher `tfvars.example` precedent.
+- **`curl-auth-header` rule false-positives on non-auth headers**: matches any `-H "X: Y"` shape, not just credential-bearing headers. Trips on docs with custom CORS or app-specific headers (e.g. `Zotero-Allowed-Request: true`). Fix: targeted `[[allowlists]]` with `paths` + `regexes`. Don't path-allowlist the whole file unless content is entirely safe.
+- **`pre-commit install` legacy-hook handling**: running `pre-commit install` on a repo with an existing `.git/hooks/pre-commit` renames it to `.legacy` and keeps invoking it after framework hooks. No breakage, but means hook surface is split between `.pre-commit-config.yaml` and `.git/hooks/pre-commit.legacy`. For full visibility, migrate the legacy check into `.pre-commit-config.yaml` as a `local` hook so the whole hook surface is declared in one place.
+- **AWS canonical example keys are allowlisted by default** (`AKIAIOSFODNN7EXAMPLE` etc.) — don't use those in test fixtures expecting a block. Use `ghp_`-shape PAT lookalikes or other non-allowlisted patterns for hook-trigger tests.
+
 ## R / Package Installation
 
 ### pak Behavior
@@ -398,7 +506,51 @@ Add new checks here when a bug class is discovered — they compound over time.
 - Branch pins (`pkg@branch`) are not reproducible — document why used
 - Pinned download URLs (RStudio .deb) go stale — document where to update
 
+### Base name shadowing in formal args
+- Avoid `names`, `length`, `data`, `c`, `t`, `T`, `F`, etc. as formal argument names. R's function-lookup fallback often rescues `names(x)` calls inside a function whose arg is also called `names` — but it's a confusing read, breaks under refactors, and generates a real "could not find function" error when the lookup heuristic misses (e.g. inside lapply/vapply/match.fun chains). Prefer descriptive alternatives: `label_names`, `n`, `df`, etc.
+- Caught in mc#33 round 1 — `mc_label_ensure(names)` worked by luck when calling `names(existing)` to read a named-vector's names; renamed to `label_names` for safety.
+
+### Cross-function consistency for label/string normalization
+- When two functions in the same package both decide whether a string is a "system value" (or any normalized form), they MUST use the same comparison. Mismatches are silent bugs that surface only on edge cases.
+- mc#33 example: `mc_label_ensure` used `toupper(nm) %in% sys` (case-insensitive system-label skip), but `resolve_label_names` used `nm %in% sys` (case-sensitive). Result: `add = "inbox"` with `create_missing = TRUE` was silently broken — ensure skipped creation, resolve couldn't match. Fix: both use `toupper(nm) %in% sys` and the resolver normalizes its return to the canonical case.
+- Generalized check: when reviewing a diff that adds normalization (case, whitespace, prefix-trim) on one side of an interaction, grep for the other side and align them.
+
+### Cache keys must cover every output-affecting input
+- A file cache keyed by fewer inputs than the write depends on returns silently wrong data — the worst failure class: no error, plausible-looking output. Enumerate every parameter that changes the written artifact and put each in the key (or its hash). The safe failure direction is over-keying (spurious refetch), never under-keying.
+- drift#25 example: `dft_stac_fetch()` cached STAC rasters as `<source>/<year>.nc` — no AOI in the key. A second watershed silently received the first watershed's raster masked to its own extent (~3% overlap looked plausible enough to almost ship). Fix: filename gains a hash over AOI geometry + `res`/`crs`/`dt`/`aggregation`/`resampling`/`stac_url`/`collection`/`asset`.
+- Hash *resolved* values, not raw args: defaults filled from config (`%||%`) must resolve before hashing, or `f(x)` and `f(x, url = <same-as-default>)` key differently for identical output.
+- R hashing gotchas (`rlang::hash()` serializes, so type and attributes matter):
+  - sf geometry: hash WKB (`sf::st_as_binary(sf::st_geometry(x), endian = "little")`), not the sfc object — sfc carries a PROJ-generated CRS WKT that drifts across PROJ versions (spurious cache misses), and hashing a whole sf data.frame leaks attribute columns into the key. Pass the CRS string as a separate key member.
+  - Coerce numeric types: `10L` and `10` hash differently — `as.numeric()` before hashing.
+- Check the cache's `force`/refresh escape hatch actually overwrites: drift#25's `force = TRUE` errored on the existing file ("File already exists"), broken exactly when needed. Prefer the writer's explicit `overwrite = TRUE` arg over a bare `unlink()` — unlink fails silently on Windows under an open file handle.
+
+### terra: operator dispatch and edge cases in package code
+- **SpatRaster `%in%` is not dispatched when terra is *imported* (only when *attached*).** Inside a package (terra in `Imports`, used via `::`), `some_raster %in% vec` falls through to base `match()` and errors with `'match' requires vector arguments`. A `library(terra)` smoke test passes (attaching installs the S4 method), so the bug hides until package context. Use `terra::subst(x, from, to, others = ...)` or `terra::classify()` for code-set membership/masking instead of the `%in%` operator. Same trap for any operator terra defines via S4 that base also defines as an ordinary function. (drift#34)
+- **`terra::freq()` errors on an all-NA raster** (`replacement has length zero`) rather than returning a 0-row table. Any path that can yield an all-NA layer (an impossible filter, everything masked out) must guard: `f <- tryCatch(terra::freq(r), error = function(e) NULL)`, then treat `NULL`/0 rows as "no values". Don't assume the empty case gives `nrow(freq(r)) == 0`. (drift#34)
+
+### sf: `st_join(largest = TRUE)` ignores the join predicate
+- `sf::st_join(x, y, join = predicate, largest = TRUE)` does **not** use `predicate` to decide matches — with `largest = TRUE`, sf runs `st_intersection(x, y)` and keeps the feature of greatest overlap area, so matching is *always* intersection-based regardless of what `join =` is set to. A function that exposes a configurable predicate AND a largest-overlap mode therefore silently mis-attributes when both are combined: pass `st_within` expecting containment, get anything that merely *overlaps*. Verify against sf source, not the argument list — the `join` arg is accepted and ignored, not rejected. Fix: abort when a non-default predicate is combined with the largest-overlap mode, rather than honouring one and dropping the other. (drift#42)
+- Corollary: `largest = TRUE` also drops zero-area geometries from consideration — so a predicate join against **point** or **line** overlays cannot use largest mode at all (no area to compare). Point/line attribution must go through the plain (`largest = FALSE`) predicate path.
+
+### sf: name validation must account for the geometry column
+- The active geometry column is a named entry in `names(x)`, but its name is **not fixed** — `"geometry"` from `sf::st_read()` of some sources, `"geom"` from a GeoPackage/PostGIS layer, `"geometry"` or `"_ogr_geometry_"` elsewhere. Code that validates user-supplied column names with `cols %in% names(x)` will happily accept the geometry column, then break downstream (`st_join` drops `y`'s geometry, so a requested "attribute" column silently never appears; a 0-row short-circuit path may instead attach a stray empty sfc). A same-name collision check across two sf objects also misses this when the two layers name their geometry differently. Guard explicitly with `attr(x, "sf_column")` — reject it from the caller-supplied column set. (drift#42)
+
 ## General
+
+### Adopting Existing Config
+
+When importing config from one location into a canonical one (legacy `~/.bash_profile` → dotfiles repo, old script's env → repo, another project's `settings.json` → soul):
+
+- **Verify every referenced path/binary exists.** Dead PATH exports, missing interpreters, stale env vars should be cut, not codified.
+  Shell paths: `for p in $(echo "$PATH" | tr ':' ' '); do [ -d "$p" ] || echo "DEAD: $p"; done`
+- **Ask before dropping a reference** — it may be something the user forgot to reinstall on this machine, not something to delete.
+- **Curated subset, not verbatim copy.** The diff should reflect what you verified, not the whole source.
+
+### Test the cold/create path of idempotent code, not just the warm no-op
+- Idempotent provisioning code (a resolver-file writer, a config installer, a "create unless present" block) has two paths: the **cold** path that actually creates/writes, and the **warm** path that detects "already present" and skips. They exercise almost-disjoint code.
+- Testing only on a host where the artifact already exists hits **only the warm no-op** — which cannot catch any cold-path bug: missing-directory, a derivation that returns empty, a pipefail abort before the write, wrong permissions, a flush that never runs. The warm path's job is literally to do nothing, so a green warm test proves almost nothing about onboarding.
+- Every fresh host runs the **cold** path — that's the one onboarding depends on. Test it deliberately: back up + remove the artifact, run cold, assert it was created correctly, then re-run to confirm the warm no-op. (Caught 2026-06-23 on rtj#75: the resolver-writer's first test plan only ran the warm path on a host that already had `/etc/resolver/<suffix>`; a Plan-agent review flagged that the cold path — the one every new host takes — was untested. Fixed by `sudo rm`-ing the file and running cold before close.)
+- Generalizes beyond shell: any "ensure X exists / converge to desired state" operation — Terraform resources, migrations, package installs — wants the from-absent path tested, not just the already-converged re-run.
 
 ### Documentation Staleness
 - Moving/renaming scripts: update CLAUDE.md, READMEs, usage comments
@@ -406,66 +558,36 @@ Add new checks here when a bug class is discovered — they compound over time.
 - New workflows: update relevant README
 
 
-# Communications Conventions
+# NGE Feature Workflow
 
-Standards for external communications across New Graph Environment.
+For non-trivial issue-driven work, follow this checklist. Each step exists for a reason — skipping leads to rework, broken builds, and avoidable bugs that we've hit repeatedly.
 
-[compost](https://github.com/NewGraphEnvironment/compost) is the working repo for email drafts, scripts, contact management, and Gmail utilities. These conventions capture the universal principles; compost has the implementation details.
+## The Sequence
 
-## Tone
+1. **Start with `/planning-init <N>`** — given an issue number, enters plan mode for codebase exploration, presents a phase breakdown for user approval, then scaffolds branch + PWF baseline with the approved phases. One command replaces the manual issue → explore → plan → branch → scaffold dance.
+2. **Write robust tests first** — failing tests that reproduce the issue or document the new behavior. Tests are the contract; they fail until the work makes them pass.
+3. **Name with intent** — functions, parameters, internal helpers carry the naming style of the package they live in. Look at existing exports as the guide; consistency over cleverness. (Per-package naming convention TBD — see soul issue tracking.)
+4. **Examples that run** — every exported function gets a runnable `@examples` block. Pkgdown renders them; CI executes them. An example that doesn't run is documentation rot.
+5. **Code-check before each commit** — `/code-check` on staged diff. Catches what tests miss: edge cases, hard-coded paths, unguarded variables, security issues.
+6. **Atomic commits** — each commit bundles code change + checkbox flip in `task_plan.md`. The diff and the progress live in the same commit; `git log -- planning/` tells the full story.
+7. **`/planning-archive` when complete** — moves PWF to `archive/YYYY-MM-issue-N-slug/`, creates a fresh `active/`. Then `/gh-pr-push` opens the PR; `/gh-pr-merge` handles the release bookkeeping.
 
-Three levels. Default to casual unless context dictates otherwise.
+## When to Skip
 
-| Level | When | Style |
-|-------|------|-------|
-| **Casual** | Established working relationships | Professional but warm. Direct, concise. No slang. |
-| **Very casual** | Close collaborators with rapport | Colloquial OK. Light humor. Slang acceptable. |
-| **Formal** | New contacts, senior officials, formal requests | Full sentences, no contractions, state purpose early. |
+For one-line typo fixes, version-bump-only PRs, or trivial documentation edits, the full workflow is overhead. Use judgment. The threshold is roughly: **multi-step issue, multi-file change, or anything that requires scoping** → use the workflow.
 
-**Collaborative, not directive.** Acknowledge their constraints:
+## Skills That Slot In
 
-- **Avoid:** "Work these in as makes sense for your lab"
-- **Better:** "If you're able to work these in when it fits your schedule that would be really helpful"
+- `/planning-init <N>` — start
+- `/planning-update` — sync checkboxes mid-session
+- `/code-check` — before every commit
+- `/planning-archive` — when issue closes
+- `/gh-pr-push` — open the PR
+- `/gh-pr-merge` — merge with release bookkeeping
 
-## Email Workflow
+## Why This Exists
 
-Draft in markdown, convert to HTML at send time via gmailr. See compost for script templates, OAuth setup, and `search_gmail.R`.
-
-**File naming:** `YYYYMMDD_recipient_topic_draft.md` + `YYYYMMDD_recipient_topic.R`
-
-**Key gotchas** (documented in detail in compost):
-- Gmail strips `<style>` blocks — use inline styles for tables
-- `gm_create_draft()` does NOT support `thread_id` — only `gm_send_message()` can reply into threads. Drafts land outside the conversation.
-- Always use `test_mode` and `create_draft` variables for safe workflows
-
-## Data in Emails
-
-- **Never manually type data into tables** — generate programmatically from source files
-- **Link to canonical sources** (GitHub repos, public reports) rather than embedding raw data
-- **Provide both CSV and Excel** when sharing tabular data
-- **Document ID codes** — when using compressed IDs (e.g., `id_lab`), include a reference sheet so recipients can decode
-
-## What Not to Expose Externally
-
-- Internal QA info (blanks, control samples, calibration data)
-- Internal tracking codes or SRED references
-- Draft status or revision history
-- Internal project management details
-
-Keep client-facing communications focused on deliverables and technical content.
-
-## Signature
-
-```
-Al Irvine B.Sc., R.P.Bio.
-New Graph Environment Ltd.
-
-Cell: 250-777-1518
-Email: al@newgraphenvironment.com
-Website: www.newgraphenvironment.com
-```
-
-In HTML emails, use `<br>` tags between lines.
+We've hit snags repeatedly when half-doing this — branches that mix concerns, tests bolted on after, code-check skipped (and then a bug ships in the diff), examples that fail in pkgdown. Each step is small; the cumulative reliability gain is real. The convention is here so it becomes the default expectation, not a thing the user has to remind every session about.
 
 
 # LLM Behavioral Guidelines
@@ -545,7 +667,7 @@ Core patterns for professional, efficient workflows across New Graph Environment
 
 ## Ecosystem Overview
 
-Five repos form the governance and operations layer across all New Graph Environment work:
+Six repos form the governance and operations layer across all New Graph Environment work:
 
 | Repo | Purpose | Analogy |
 |------|---------|---------|
@@ -554,18 +676,38 @@ Five repos form the governance and operations layer across all New Graph Environ
 | [compost](https://github.com/NewGraphEnvironment/compost) | Communications templates, email workflows, contact management | The "who" |
 | [rtj](https://github.com/NewGraphEnvironment/rtj) (formerly awshak) | Infrastructure as Code, deployment | The "where" |
 | [gq](https://github.com/NewGraphEnvironment/gq) | Cartographic style management across QGIS, tmap, leaflet, web | The "look" |
+| [crate](https://github.com/NewGraphEnvironment/crate) | Data governance: canonical schemas, data dictionary, QC rules (scoping; normalization functions are Year 2+) | The "what" |
 
 **Adaptive management:** Conventions evolve from real project work, not theory. When a pattern is learned or refined during project work, propagate it back to soul so all projects benefit. The `/claude-md-init` skill builds each project's `CLAUDE.md` from soul conventions.
 
-**Cross-references:** [sred-2025-2026](https://github.com/NewGraphEnvironment/sred-2025-2026) tracks R&D activities across repos. Compost cross-cuts all projects as the centralized communications workflow — email drafts, contact registry, and tone guidelines live there and are copied to individual project `communications/` folders as needed.
+**Cross-references:** [sred](https://github.com/NewGraphEnvironment/sred) tracks R&D activities across repos. Compost is the centralized communications workflow — all email drafts, contact registry, and external outreach are authored there, not in individual project repos.
+
+## Three-Layer Repo Architecture
+
+Repos live in one of three layers, distinguished by audience and what context they carry:
+
+| Layer | Role | Examples |
+|---|---|---|
+| **Public — tools** | Atomic, reusable, no NGE-specific context | R packages (`mc`, `crate`, `fresh`, `drift`, `flooded`, `gq`, `link`), `bcfishpass`, `fwapg`, STAC catalogs, post-publication reports |
+| **Private — coordination** | How tools compose into NGE workflows. The competitive moat. | `compost` (uses `mc`), `rfp` (uses `fresh`/`link`/etc.), `rtj` (uses `crate`, deploys), `fish_passage_template_reporting`, all proposals (never public) |
+| **Private — governance** | Strategy, values, conventions, R&D | `soul`, `logic`, `compass`, `sred` |
+
+**Rule:** tools don't know about each other or about NGE. Coordination repos know how to use tools. `mc/CLAUDE.md` does not know `compost` exists; `compost/CLAUDE.md` knows "for email use `mc`."
+
+**Publication flip:** when a private repo flips public (e.g., `crate` once `link` requires it; reports on publication), three things happen in the same commit: removed from comms peer list, `comms/` directory purged, `CLAUDE.md` scrubbed to public-safe form. Use `/claude-md-init --public-clean` for the scrub.
+
+**Per-repo classification** is recorded in `.claude/visibility` (one line: `public` or `internal`; default `internal` if missing). Soul conventions carry `visibility:` frontmatter (`public-safe` or `internal`); `/claude-md-init` filter skips internal-only conventions when repo is marked public.
+
+Strategic call recorded in `logic/comms/soul/20260428_public_vs_internal_repo_architecture.md`.
 
 ## Issue Workflow
 
 ### Before Creating an Issue (non-negotiable)
 
 1. **Check for duplicates:** `gh issue list --state open --search "<keywords>"` -- search before creating
-2. **Link to SRED:** If work involves infrastructure, R&D, tooling, or performance benchmarking, add `Relates to NewGraphEnvironment/sred-2025-2026#N` (match by repo name in SRED issue title)
-3. **One issue, one concern.** Keep focused.
+2. **One issue, one concern.** Keep focused.
+
+SRED cross-refs go in **PR bodies only** (via `/gh-pr-push`), not in issues or commits. PRs aggregate commits and are the merge unit; per-issue and per-commit SRED tags add noise without adding traceability.
 
 ### Professional Issue Writing
 
@@ -574,6 +716,20 @@ Write issues with clear technical focus:
 - **Use normal technical language** in titles and descriptions
 - **Focus on the problem and solution** approach
 - **Add tracking links at the end** (e.g., `Relates to Owner/repo#N`)
+
+#### Client-aware tone
+
+Issues, PR descriptions, and commit messages are client-visible deliverables, not internal notes.
+
+Avoid in these artifacts:
+- Framing work as unsolicited or unpaid ("not assigned by a client")
+- Self-justifying adjectives ("defensible", "rigorous") — show, don't claim
+- Internal workflow meta (PWF refs, SRED xrefs, planning context)
+- Performative effort language ("attempts were unsuccessful") — state factual current state
+
+**Integrity-preserving ≠ self-effacing.** Factual, not performatively humble.
+
+**Scope:** repo artifacts (issues, PRs, commits, reports). Does not apply to internal planning docs, CLAUDE.md, or chat.
 
 **Issue body structure:**
 ```markdown
@@ -584,8 +740,15 @@ Write issues with clear technical focus:
 <approach>
 
 Relates to #<local>
-Relates to NewGraphEnvironment/sred-2025-2026#<N>
 ```
+
+#### Infrastructure references
+
+Use **tailnet hostnames** (`cypher`, `m1`, `openclaw`) in issue and PR bodies, not public IPs. Within NGE infrastructure, those hostnames are how scripts and operators address machines anyway; the public IP is an implementation detail that belongs in gitignored `*.tfvars` and the Tailscale admin panel.
+
+Public IPs in issues are appropriate only when the IP itself is the subject — reserved-IP migrations, DNS records, firewall rules that key on a specific IP. For everything else, use a placeholder like `<cypher_public_ip>` if the shape of the value matters at all.
+
+Aggregation is the risk: any single IP in a private repo is fine, but issue bodies tend to collect IP + hostname + service description + access path into a coherent attack-surface map. Tailnet hostnames keep the map terse.
 
 ### GitHub Issue Creation - Always Use Files
 
@@ -632,7 +795,6 @@ Brief description (50 chars or less)
 Detailed explanation of changes and impact.
 
 Fixes #<issue> (or Relates to #<issue>)
-Relates to NewGraphEnvironment/sred-2025-2026#<N>
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
 ```
@@ -669,6 +831,25 @@ Rules learned from real project sessions. These apply across all repos.
 
 Scripts and logs live together: `scripts/<module>/logs/`
 
+### Which logs to commit
+
+Logs are R&D evidence — but only the curated ones. Distinguish two classes:
+
+- **Evidence logs** (commit): the dated, conventionally-named runs at the top of a `logs/` dir
+  (`yyyymmdd_noun_verb-detail_target.ext`). One benchmark/timing/run log per intentional run. These
+  are committed to the **default branch** — git gives free versioning and commit-provenance (the log
+  sits next to the change that produced it), and committed logs are discoverable cross-machine via the
+  GitHub API without cloning.
+- **Bulk run-output** (gitignore): archives, per-shard/per-watershed dumps, aborted/offline reruns, and
+  other machine-generated iteration output. Put these under a gitignored subdir (e.g. `logs/runs/`,
+  `logs/archive/`) so they never bloat the repo.
+
+Rules of thumb: if you'd hand it to an auditor as proof of an experiment, commit it. If it's hundreds of
+files a pipeline emitted, gitignore it. Don't reach for S3 for text logs — git is the right home;
+external object storage only earns its place for large binaries. Logs that aren't committed to the
+default branch are invisible to other machines and to evidence tooling — so commit evidence logs
+**before** moving machines, or it's stranded.
+
 ## Projects vs Milestones
 
 - **Projects** = daily cross-repo tracking (always add to relevant project)
@@ -704,10 +885,11 @@ Skip planning for single-file edits, quick fixes, or tasks with obvious next ste
    - `task_plan.md` — Phases with checkbox tasks
    - `findings.md` — Research, discoveries, technical analysis
    - `progress.md` — Session log with timestamps and commit refs
-3. **Commit the plan** — Commit the planning files before starting implementation. This is the baseline.
-4. **Work in atomic commits** — Each commit bundles code changes WITH checkbox updates in the planning files. The diff shows both what was done and the checkbox marking it done.
-5. **Code check before commit** — Run `/code-check` on staged diffs before committing. Don't mark a task done until the diff passes review.
-6. **Archive when complete** — Move `planning/active/` to `planning/archive/` via `/planning-archive`. Write a README.md in the archive directory with a one-paragraph outcome summary and closing commit/PR ref — future sessions scan these to catch up fast.
+3. **Plan-review with the Plan agent before committing the plan** — After scaffolding `task_plan.md` but BEFORE the baseline commit, spawn the Plan subagent (`Agent({subagent_type: "Plan", prompt: "..."}`) and ask it to critically review the task_plan against the issue body + actual codebase. Categorize findings as Blocker / Gap / Ordering / Assumption / Scope / Acceptance. Address each before committing. The agent reads files fresh — it catches what you miss when you've been thinking about the design too long. Real example: caught 21 issues including hardcoded literals across 4 files not listed in the plan, untested DB column mismatches, unfixable test-literal-string assertions, and a baseline-cache-shadow that would have produced a 6-second no-op run. Cost: ~5 min agent. Saves: hours of mid-implementation rework.
+4. **Commit the plan** — After Plan-agent review + fixes. This is the baseline.
+5. **Work in atomic commits** — Each commit bundles code changes WITH checkbox updates in the planning files. The diff shows both what was done and the checkbox marking it done.
+6. **Code check before commit** — Run `/code-check` on staged diffs before committing. Don't mark a task done until the diff passes review.
+7. **Archive when complete** — Move `planning/active/` to `planning/archive/` via `/planning-archive`. Write a README.md in the archive directory with a one-paragraph outcome summary and closing commit/PR ref — future sessions scan these to catch up fast.
 
 ## Atomic Commits (Critical)
 
@@ -798,6 +980,8 @@ Three tools, different purposes. Use the right one.
 **Citation keys vs item keys:** Citation keys (like `irvine2020ParsnipRiver`) come from Better BibTeX. Item keys (like `K7WALMSY`) are native Zotero. The MCP works with item keys. `/zotero-lookup` bridges citation keys to item data.
 
 **BBT citation key storage:** As of Feb 2025+, BBT stores citation keys as a `citationKey` field directly in `zotero.sqlite` (via Zotero's item data system), not in a separate BBT database. The old `better-bibtex.sqlite` and `better-bibtex.migrated` files are stale and no longer updated. Query citation keys with: `SELECT idv.value FROM items i JOIN itemData id ON i.itemID = id.itemID JOIN itemDataValues idv ON id.valueID = idv.valueID JOIN fields f ON id.fieldID = f.fieldID WHERE f.fieldName = 'citationKey'`.
+
+**BBT citekey format is locally patched to strip `&`:** the `citekeyFormat` pref (`extensions.zotero.translators.better-bibtex.citekeyFormat` in `~/Library/Application Support/Zotero/Profiles/*/prefs.js`) has a `.replace(find = "&", replace = "")` segment added by hand. Without it, institutional authors containing `&` (e.g. "BC Species & Ecosystem Explorer", "WA Dept of Fish & Wildlife") leak `&` into the citekey, and pandoc's `@key` parser stops at `&` — so cites render broken in any bookdown/quarto build even though biblatex accepts the key. Reapply via Zotero → Tools → Run JavaScript: `Zotero.Prefs.set("translators.better-bibtex.citekeyFormat", val)` (also patch `citekeyFormatEditing` to match). Survives Zotero/BBT auto-updates; reverts only on a profile reset or a manual edit via the BBT preferences UI. Detect drift: `grep citekeyFormat ~/Library/Application\ Support/Zotero/Profiles/*/prefs.js` should show the `.replace(find = "&", ...)` chain. Teammates on Skeena/Fraser/restoration machines that hit the same `@key`-breaks-at-`&` drift should run the same `Zotero.Prefs.set`.
 
 ## Adding References Workflow
 
@@ -922,21 +1106,17 @@ All SRED-eligible work across NGE falls under a **single continuous project**:
 - **Fiscal year:** May 1 – April 30
 - **Consultant:** Boast Capital (prepares final technical report)
 
-**Do not fragment work into separate claims.** Each fiscal year's work is structured as iterations within this one project. Internal tracking (experiment numbers in `sred-2025-2026`) maps to iterations — Boast assembles the final narrative.
+**Do not fragment work into separate claims.** Each fiscal year's work is structured as iterations within this one project. Internal tracking (experiment numbers in `sred`) maps to iterations — Boast assembles the final narrative.
 
 ## Tagging Work for SRED
 
-### Commits
+### PRs (single enforcement point)
 
-Use `Relates to NewGraphEnvironment/sred-2025-2026#N` in commit messages when work is SRED-eligible.
+SRED cross-references (`Relates to NewGraphEnvironment/sred#N`) go in **PR body templates only** — not in issue bodies, commit messages, or any other surface. The `/gh-pr-push` skill is the single enforcement point. PRs aggregate commits and are the merge unit, so per-issue and per-commit SRED tags only add noise.
 
 ### Time entries (rolex)
 
-Tag hours with `sred_ref` field linking to the relevant `sred-2025-2026` issue number.
-
-### GitHub issues
-
-Link SRED-eligible issues to the tracking repo: `Relates to NewGraphEnvironment/sred-2025-2026#N`
+Tag hours with `sred_ref` field linking to the relevant `sred` issue number.
 
 ## What Qualifies as SRED
 
