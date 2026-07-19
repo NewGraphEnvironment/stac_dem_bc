@@ -31,12 +31,12 @@ The catalog is five months stale: the source URL inventory was last refreshed 20
 - [x] Seed catch-up: `urls_reconcile.py --apply` committed to main (308a441) — urls_list.txt trimmed to 58,019 item-backed URLs
 - [x] Catch-up build ran LOCALLY 2026-07-18 18:03–21:39 PT (3.6 h): 40,021/40,021 items created (zero shortfall — parenthesized files included), validated, synced (items first, collection.json 17.7 MB last), caches committed (815d8f6). Count math exact: 58,019 prior + 40,021 new = 98,040 item links in the live collection.json
 - [x] `workflow_dispatch` from main verified the steady-state path end to end (run 29673672894, success): R + uv setup, OIDC auth, fresh listing 98,039 vs cache 98,039, New 0 / Deleted 0, clean early exit with item steps skipped. Full count reconciliation: 58,019 − 1 upstream-deleted + 40,021 new = 98,039 live files; collection holds 98,040 links (retains the item for the deleted source; urls_deleted.txt audit = 1 line)
-- [ ] Register on geoserv (`stac_register-pypgstac.sh stac-dem-bc ...`); verify pgstac count + API query at images.a11s.one returns a new item
-- [ ] Confirm cron live; close #23 via docs commit ("monthly automation live; Fixes #23")
+- [x] Register on geoserv — eventful: the register script's NDJSON concat died on ARG_MAX at 98k files (rtj#196 filed, fixed form used manually) and the 90 space-URL items needed %20-encoded refetch (#25 filed); load completed 2026-07-19, verified at API (new 2024 item, 2017 original, and a parenthesized item all HTTP 200)
+- [x] Cron live (workflow on main, dispatch-proven; next fire Aug 3); #23 closed via docs commit
 
 ## Validation
 
-- [ ] Cold-path rehearsal passed (dry-run: zero deletions, correct order)
-- [ ] `/code-check` clean on each commit
-- [ ] Catch-up run: new items on S3 + caches committed by bot + API returns a new item + count math documented in run log
+- [x] Cold-path rehearsal passed (dry-run: zero deletions, correct order)
+- [x] `/code-check` clean on each commit
+- [x] Catch-up run: new items on S3 + caches committed by bot + API returns a new item + count math documented in run log
 - [ ] PWF checkboxes match landed work; `/planning-archive` on completion

@@ -44,14 +44,14 @@ This project implements automated weekly updates of STAC DEM BC JSONs using VM-b
 - ✅ Incremental update capability (change detection working)
 - ✅ Validation caching (GeoTIFF validation)
 - ✅ STAC JSON validation layer (new)
-- ⏳ Manual execution (automation planned - Phase 3)
+- ✅ Monthly automation via GitHub Actions (`update.yml`: cron 3rd of month + workflow_dispatch, OIDC to S3; pgstac registration remains a manual geoserv step)
 - ✅ Spatial extent optimized (hardcoded BC bbox)
 
 **Goals:**
 1. ~~Reduce full processing time to ~1-1.5 hours~~ → **Reality: 5-6 hours** (network I/O limited)
 2. Enable weekly/monthly incremental updates (likely 30-60 min for 50-100 new files)
 3. ✅ Implement robust validation and error handling
-4. ⏳ Automate via VM cron jobs (Phase 3)
+4. ✅ Automated monthly updates — GitHub Actions, not VM cron (#23; catalog 98k items as of 2026-07)
 5. ✅ Maintain audit trail and benchmarking
 
 **Key Learning:** Performance is network I/O bound, not CPU bound. Future optimization: local metadata caching (Issue #10).

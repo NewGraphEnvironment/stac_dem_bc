@@ -17,3 +17,10 @@
 - PR #24 opened and merged (dca0298, merge commit); SRED xref corrected to NewGraphEnvironment/sred#8 (CLAUDE.md updated d4724ab)
 - Seed committed to main (308a441); LOCAL catch-up build launched 18:03 PT under caffeinate (log: logs/20260718_180343_catchup_build.log) — detect → build ~40k → validate → sync → cache commit, est ~5-6 h
 - Next: on build completion verify count math, run workflow_dispatch steady-state check, register on geoserv, close #23
+
+## Session 2026-07-19 (close-out)
+
+- Registration on geoserv: register script died at NDJSON concat (ARG_MAX, 98k files — rtj#196) after a complete download; rescued manually via find -exec concat. Count guard then caught 90 empty fetches = the parenthesized space-URL items (root cause filed as #25); refetched %20-encoded, 98,040 lines loaded via pypgstac upsert
+- API verified: new 2024 item, 2017 original, and a parenthesized item all resolve; catalog 58,019 → 98,040
+- Also filed rtj#193 (m1 lacks geoserv ssh access — diagnosis ran through m4)
+- #23 closed via docs commit; archiving PWF
