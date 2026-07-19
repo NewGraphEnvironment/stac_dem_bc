@@ -1,0 +1,7 @@
+# Issue #23 — Automate monthly incremental catalog updates via GitHub Actions
+
+## Outcome
+
+Replaced the never-built VM-cron plan (orphaned when #5 auto-closed) with the water-temp-bc pattern: a monthly GitHub Actions workflow (`update.yml`, cron + dispatch) that detects objectstore changes, builds/validates STAC items on a stateless runner, syncs to S3 items-before-collection with no `--delete`, and commits refreshed caches back to main — so failed runs persist nothing and self-heal. Companion OIDC role landed via rtj PR #189 (with bucket versioning). Along the way: a one-off reconciliation recovered 2,107 URLs stranded invisible in the cache (list refreshed post-build in Feb); the objectstore turned out to have grown +63% to ~98k files, pushing the catch-up to the documented local path (40,021/40,021 items built in 3.6 h, zero shortfall); and the geoserv registration surfaced two latent bugs — the register script's NDJSON concat dies on ARG_MAX at 98k files (rtj#196) and the 90 parenthesized items carry unencoded spaces in their hrefs (#25) — both rescued manually, catalog verified at 98,040 items on images.a11s.one. Key learnings: state-persists-only-via-commit gives CI atomicity for free; adversarial plan review before the baseline (2 blockers, 8 gaps) and per-commit fresh-eyes code-check (4 real defects) both paid for themselves; cache-update-before-work-completes is the drift class that stranded the 2,107.
+
+Closed by: commit 82a31a8 (Fixes #23) / PR #24 (merge dca0298)
