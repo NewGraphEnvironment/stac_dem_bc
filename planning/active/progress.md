@@ -13,5 +13,5 @@
 - Live ngr fetch: objectstore at 98,039 URLs (+37,900 since Feb) → catch-up moved to local run, dispatch verifies steady state (task_plan Phase 4 amended; findings.md has the numbers)
 - Phase 3 complete: DESCRIPTION (ngr@519c03b), update.yml (16 steps, ASCII-clean, YAML-validated, 2 code-check rounds — zero-created gate, artifact overwrite, shortfall warning), README Automation section, CLAUDE.md path fix
 - Phase 2 code done: rtj branch `184-gha-s3-role-stac-dem-bc` pushed (984d00b role module; c81bcf4 optional versioning rider as droppable commit); rtj checkout returned to main
-- Blocked on user: tofu plan/apply in rtj env/prod, then post role ARN to #23 and merge rtj branch
-- Next after apply: /gh-pr-push here, merge, then Phase 4 (reconcile seed + LOCAL catch-up ~40k items, dispatch verifies steady state, geoserv registration)
+- Phase 2 complete: user applied on M1; merged as rtj PR #189, rtj#184 closed, versioning live (no-expiry documented), ARN posted to #23
+- Next: /gh-pr-push here, merge, then Phase 4 (reconcile seed + LOCAL catch-up ~40k items, dispatch verifies steady state, geoserv registration)

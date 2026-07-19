@@ -15,8 +15,8 @@ The catalog is five months stale: the source URL inventory was last refreshed 20
 
 - [x] Add `module "stac_dem_bc_update"` + ARN output to `env/prod/main.tf` (rtj branch `184-gha-s3-role-stac-dem-bc`, commit 984d00b, pushed)
 - [x] Optional rider (user call): enable versioning on `stac-dem-bc` — committed separately (c81bcf4) so it can be dropped before apply if unwanted
-- [ ] `tofu plan` / `apply` in env/prod (apply is collaborative — user credentials)
-- [ ] Post role ARN to #23; merge rtj branch closing rtj#184
+- [x] `tofu plan` / `apply` in env/prod — user applied; merged as rtj PR #189 (with review commit 15e717f documenting the deliberate no-expiry-on-versioning decision); rtj#184 closed
+- [x] Post role ARN to #23 (issuecomment-5013597947) — matches the ARN already in update.yml
 
 ## Phase 3: Workflow
 
