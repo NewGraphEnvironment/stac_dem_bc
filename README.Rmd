@@ -43,14 +43,14 @@ rmarkdown::render(
 
 
 ![status](https://img.shields.io/badge/status-functional-green)
-![files](https://img.shields.io/badge/files-~58k-blue)
+![updates](https://img.shields.io/badge/updates-monthly-blue)
 ![api](https://img.shields.io/badge/api-images.a11s.one-orange)
 
-The goal of [`stac_dem_bc`](https://github.com/NewGraphEnvironment/stac_dem_bc) is to serve British Columbia's [LidarBC](https://lidar.gov.bc.ca/) digital elevation model collection (~58,000 GeoTIFFs hosted on the provincial objectstore) as a [SpatioTemporal Asset Catalog (STAC)](https://stacspec.org/), queryable by location and time via the [`rstac` R package](https://brazil-data-cube.github.io/rstac/), QGIS (v3.42+), or any STAC-compliant client. The API endpoint is <https://images.a11s.one>.
+[`stac_dem_bc`](https://github.com/NewGraphEnvironment/stac_dem_bc) serves British Columbia's [LidarBC](https://lidar.gov.bc.ca/) digital elevation model collection — nearly 100,000 GeoTIFFs on the provincial objectstore as of July 2026 — as a [SpatioTemporal Asset Catalog (STAC)](https://stacspec.org/), searchable by location and time from the [`rstac` R package](https://brazil-data-cube.github.io/rstac/), QGIS (v3.42+), or any STAC-compliant client. The API endpoint is <https://images.a11s.one>.
 
 <br>
 
-The build pipeline lives under [`scripts/`](scripts/README.md) — a six-step flow (fetch → validate-access → collection-create → item-create → item-validate → s3-sync) that turns the raw provincial GeoTIFF URLs into a searchable pgstac catalog. See the [scripts README](scripts/README.md) for the pipeline walkthrough; key concepts (COG, STAC, pgstac, date extraction from filenames, validation caching for incremental rebuilds) are explained there in plain language.
+The catalog refreshes monthly: a scheduled [GitHub Actions workflow](.github/workflows/update.yml) detects new tiles on the objectstore and appends them incrementally. The build pipeline — and a plain-language guide to the concepts behind it (COG, STAC, pgstac, validation caching) — lives in [`scripts/`](scripts/README.md).
 
 <br>
 
