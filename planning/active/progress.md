@@ -1,22 +1,17 @@
-# Progress: Issue #13 - Source URL Accessibility Validation
+# Progress — Automate monthly incremental catalog updates via GitHub Actions (#23)
 
-## Session: 2026-02-17
+## Session 2026-07-18
 
-### Completed
-- [x] Archived issue #7 planning files
-- [x] Created fresh planning files for issue #13
-- [x] Explored pipeline and validation patterns
-- [x] Step 2: Added `check_url_accessible()` to stac_utils.py
-- [x] Step 3: Created `scripts/urls_check_access.py`
-- [x] Step 4: Updated `scripts/build_safe.sh` with Step 3.5
-- [x] Step 5: Tested — 5 URLs (3 good + 2 known-bad 092p045) all return 200
-  - Note: 092p045 permissions appear to be fixed upstream by GeoBC
-  - CSV output format verified, incremental cache working
-
-### Findings
-- The 6 known-bad 092p045 URLs now return HTTP 200 (permissions fixed upstream)
-- Script still valuable for ongoing monitoring of new URLs
-
----
-
-**Last updated:** 2026-02-17
+- Investigated why #5 closed (PR #9 "Closes #5" auto-close with Phases 3–4 unbuilt); filed #23 + companion rtj#184
+- Plan-mode exploration of pipeline contracts, water-temp-bc reference workflow, rtj infra (subagent survey)
+- Adversarial Plan-agent review: 2 blockers + 8 gaps, all absorbed (see findings.md disposition)
+- Phases approved by user via plan mode
+- Pushed main (CLAUDE.md sync commit), created branch `23-automate-monthly-incremental-catalog-upd`
+- Archived issue #13 PWF → `planning/archive/2026-02-issue-13-url-accessibility/` (commit c72ecf0)
+- Scaffolded PWF baseline from issue #23 with approved phases
+- Phase 1 complete: STAC_OUTPUT_DIR override, detect_changes exit contract + plausibility guard, environment.yml deps, s3_sync-ci.sh, urls_reconcile.py; cold-path rehearsal passed (zero deletes, correct order, dedupe verified)
+- Live ngr fetch: objectstore at 98,039 URLs (+37,900 since Feb) → catch-up moved to local run, dispatch verifies steady state (task_plan Phase 4 amended; findings.md has the numbers)
+- Phase 3 complete: DESCRIPTION (ngr@519c03b), update.yml (16 steps, ASCII-clean, YAML-validated, 2 code-check rounds — zero-created gate, artifact overwrite, shortfall warning), README Automation section, CLAUDE.md path fix
+- Phase 2 code done: rtj branch `184-gha-s3-role-stac-dem-bc` pushed (984d00b role module; c81bcf4 optional versioning rider as droppable commit); rtj checkout returned to main
+- Phase 2 complete: user applied on M1; merged as rtj PR #189, rtj#184 closed, versioning live (no-expiry documented), ARN posted to #23
+- Next: /gh-pr-push here, merge, then Phase 4 (reconcile seed + LOCAL catch-up ~40k items, dispatch verifies steady state, geoserv registration)

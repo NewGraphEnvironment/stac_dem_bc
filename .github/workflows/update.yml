@@ -1,0 +1,160 @@
+name: Monthly incremental update
+
+# Detect new DEM GeoTIFFs on the BC objectstore, build STAC items for them,
+# sync to s3://stac-dem-bc, and commit refreshed data/ caches back to main.
+# Modeled on water-temp-bc's snapshot.yml: monthly cron on a GitHub-hosted
+# runner, AWS auth via OIDC against role_gha_stac_dem_bc (provisioned by
+# NewGraphEnvironment/rtj#184, trust scoped to main).
+#
+# detect step exit contract: 0 = no changes (skip rest, succeed),
+# 1 = changes detected (continue), 2 = error (fail). A deletions-only month
+# exits 1 with no urls_new.txt - item steps are skipped but the cache commit
+# still records the deletions.
+#
+# State model: data/ caches persist only via the end-of-job commit, so a
+# failed run discards its partial state and the next run re-detects cleanly.
+# pgstac registration is a separate manual step on geoserv - see
+# scripts/README.md.
+
+on:
+  schedule:
+    # 3rd of the month, 09:23 UTC - staggered from water-temp-bc (1st) and
+    # off the top of the hour. GitHub may delay scheduled runs under load.
+    - cron: '23 9 3 * *'
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # OIDC token for AWS
+  contents: write   # commit refreshed data/ caches back to main
+
+concurrency:
+  group: stac-update
+  cancel-in-progress: false
+
+env:
+  STAC_OUTPUT_DIR: ${{ github.workspace }}/stac_out
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    # Recent growth averages ~7.6k files/month ~ 75-90 min at observed rates.
+    # Oversized batches (>~35k) cannot fit any timeout - see README triage.
+    timeout-minutes: 330
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::sessioninfo
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install Python dependencies
+        run: |
+          uv venv --python 3.12 .venv
+          uv pip install --python .venv/bin/python \
+            "pystac[validation]>=1.12.0" "pystac-client>=0.8.0" \
+            "rio-stac>=0.11.0" "rasterio>=1.4.0" rio-cogeo shapely \
+            pandas requests tqdm deepdiff
+          .venv/bin/python -c "import rasterio, rio_stac, pystac, jsonschema; print('imports OK, rasterio', rasterio.__version__)"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::414155577829:role/role_gha_stac_dem_bc
+          aws-region: us-west-2
+
+      - name: Detect changes
+        id: detect
+        shell: bash
+        run: |
+          set +e
+          Rscript scripts/detect_changes.R
+          code=$?
+          set -e
+          echo "detect exit code: $code"
+          case "$code" in
+            0) echo "changes=false" >> "$GITHUB_OUTPUT" ;;
+            1) echo "changes=true"  >> "$GITHUB_OUTPUT" ;;
+            *) exit "$code" ;;
+          esac
+          if [ -s data/urls_new.txt ]; then
+            echo "new URLs: $(wc -l < data/urls_new.txt)"
+            echo "new_urls=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no new URLs (no changes, or deletions only)"
+            echo "new_urls=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check source URL access (warn-only)
+        if: steps.detect.outputs.new_urls == 'true'
+        continue-on-error: true
+        run: .venv/bin/python scripts/urls_check_access.py --urls-file data/urls_new.txt
+
+      - name: Fetch current collection from S3
+        if: steps.detect.outputs.new_urls == 'true'
+        run: |
+          mkdir -p "$STAC_OUTPUT_DIR"
+          curl -fsSL https://stac-dem-bc.s3.amazonaws.com/collection.json \
+            -o "$STAC_OUTPUT_DIR/collection.json"
+
+      - name: Create STAC items (incremental)
+        if: steps.detect.outputs.new_urls == 'true'
+        run: .venv/bin/python scripts/item_create.py --incremental
+
+      - name: Count created items (warn on shortfall)
+        id: created
+        if: steps.detect.outputs.new_urls == 'true'
+        run: |
+          NEW=$(wc -l < data/urls_new.txt | tr -d ' ')
+          CREATED=$(find "$STAC_OUTPUT_DIR" -maxdepth 1 -type f -name "*.json" ! -name "collection.json" | wc -l | tr -d ' ')
+          echo "expected $NEW new items, created $CREATED"
+          echo "count=$CREATED" >> "$GITHUB_OUTPUT"
+          if [ "$CREATED" -lt "$NEW" ]; then
+            echo "::warning title=Item shortfall::created $CREATED of $NEW new items - some source URLs failed metadata extraction or were invalid; see run-logs artifact and the triage notes in scripts/README.md"
+          fi
+
+      # created == 0 (an all-invalid batch, precedent: the 90 parenthesized
+      # files arrived as one such delta) must not wedge the month: skip
+      # validate/sync, stay green with the shortfall warning, and let the
+      # cache commit record the batch as attempted.
+      - name: Validate new items (gate)
+        if: steps.detect.outputs.new_urls == 'true' && steps.created.outputs.count != '0'
+        run: .venv/bin/python scripts/item_validate.py --items-dir "$STAC_OUTPUT_DIR" --incremental
+
+      - name: Sync catalog to S3
+        if: steps.detect.outputs.new_urls == 'true' && steps.created.outputs.count != '0'
+        run: bash scripts/s3_sync-ci.sh
+
+      - name: Commit refreshed caches
+        if: steps.detect.outputs.changes == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A data/
+          if git diff --cached --quiet; then
+            echo "no cache changes to commit"
+            exit 0
+          fi
+          git commit -m "Monthly incremental update: refresh caches ($(date -u +%Y-%m))"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Upload run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-logs
+          overwrite: true   # re-runs of failed jobs otherwise 409 on the existing artifact
+          path: |
+            logs/*.log
+            data/urls_access_checks.csv
+          if-no-files-found: ignore
+
+      - name: Session info
+        if: always()
+        run: Rscript -e 'sessioninfo::session_info()'

@@ -115,10 +115,8 @@ Source URLs → GeoTIFF Validation → Item Creation → JSON Validation → Reg
 - No R dependency for core workflows
 
 ### SRED Tracking
-- Primary: https://github.com/NewGraphEnvironment/sred-2025-2026/issues/8
-- Secondary: https://github.com/NewGraphEnvironment/sred-2025-2026/issues/3
-- Repo issue: https://github.com/NewGraphEnvironment/stac_dem_bc/issues/3
-- Milestone: https://github.com/NewGraphEnvironment/sred-2025-2026/milestone/1
+- Primary: https://github.com/NewGraphEnvironment/sred/issues/8 — PR-body xref form: `Relates to NewGraphEnvironment/sred#8`
+- (The old `sred-2025-2026` repo refs are superseded — SRED tracking lives in the `sred` repo)
 
 ---
 
@@ -220,10 +218,8 @@ WHY: Reprocessing same URLs (e.g., after failures, testing) would create duplica
 ### File Locations
 - **Main repo:** `/Users/airvine/Projects/repo/stac_dem_bc`
 - **Phase 1-2 worktree:** `/Users/airvine/Projects/repo/stac_dem_bc-phase1-2-modernization`
-- **Infrastructure repo:** `/Users/airvine/Projects/repo/awshak` (future migration)
-- **Local STAC output:** `/Users/airvine/Projects/gis/stac_dem_bc/stac/prod/stac_dem_bc`
-- **S3 bucket:** `s3://stac-dem-bc/`
-- **VM path:** `/home/airvine/stac_dem_bc/`
+- **Infrastructure repo:** `/Users/airvine/Projects/repo/rtj` (formerly awshak; provisions the bucket, OIDC role, and geoserv STAC host)
+- **STAC catalog:** `s3://stac-dem-bc/` is the only complete copy. Local builds write to a scratch workspace via the `STAC_OUTPUT_DIR` env override in `scripts/stac_utils.py` (the old `/Users/airvine/Projects/gis/.../stac/prod` dir is empty/historical)
 
 <\!-- BEGIN SOUL CONVENTIONS — DO NOT EDIT BELOW THIS LINE -->
 
