@@ -14,4 +14,6 @@
 - Phase 3 complete: DESCRIPTION (ngr@519c03b), update.yml (16 steps, ASCII-clean, YAML-validated, 2 code-check rounds — zero-created gate, artifact overwrite, shortfall warning), README Automation section, CLAUDE.md path fix
 - Phase 2 code done: rtj branch `184-gha-s3-role-stac-dem-bc` pushed (984d00b role module; c81bcf4 optional versioning rider as droppable commit); rtj checkout returned to main
 - Phase 2 complete: user applied on M1; merged as rtj PR #189, rtj#184 closed, versioning live (no-expiry documented), ARN posted to #23
-- Next: /gh-pr-push here, merge, then Phase 4 (reconcile seed + LOCAL catch-up ~40k items, dispatch verifies steady state, geoserv registration)
+- PR #24 opened and merged (dca0298, merge commit); SRED xref corrected to NewGraphEnvironment/sred#8 (CLAUDE.md updated d4724ab)
+- Seed committed to main (308a441); LOCAL catch-up build launched 18:03 PT under caffeinate (log: logs/20260718_180343_catchup_build.log) — detect → build ~40k → validate → sync → cache commit, est ~5-6 h
+- Next: on build completion verify count math, run workflow_dispatch steady-state check, register on geoserv, close #23

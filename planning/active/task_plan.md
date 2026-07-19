@@ -27,9 +27,9 @@ The catalog is five months stale: the source URL inventory was last refreshed 20
 
 ## Phase 4: Catch-up run + verification (post-merge)
 
-- [ ] PR via `/gh-pr-push` (body: Relates to #23, why urls_fetch.R is bypassed in CI), merge
-- [ ] Seed catch-up: run `urls_reconcile.py --apply`, commit trimmed `urls_list.txt` to main — next detection re-flags the 2,107 never-built URLs plus 5 months of growth
-- [ ] Catch-up build runs LOCALLY, not via dispatch (live fetch 2026-07-18: objectstore now at 98,039 URLs → ~40k new+reconciled items ≈ 6+ h at Feb rates, beyond the GHA timeout — this is the plan's documented oversized-batch path): detect_changes → incremental pipeline with `STAC_OUTPUT_DIR` workspace → `s3_sync-ci.sh` → commit caches
+- [x] PR via `/gh-pr-push` (PR #24), merged 2026-07-18 as dca0298 (merge commit, branch deleted); SRED xref corrected to sred#8 per user
+- [x] Seed catch-up: `urls_reconcile.py --apply` committed to main (308a441) — urls_list.txt trimmed to 58,019 item-backed URLs
+- [~] Catch-up build runs LOCALLY, not via dispatch (live fetch 2026-07-18: objectstore now at 98,039 URLs → ~40k new+reconciled items ≈ 6+ h at Feb rates, beyond the GHA timeout — this is the plan's documented oversized-batch path): detect_changes → incremental pipeline with `STAC_OUTPUT_DIR` workspace → `s3_sync-ci.sh` → commit caches
 - [ ] `workflow_dispatch` from main verifies the steady-state path end to end (post-catch-up delta or clean no-change exit); count math: S3 objects ≈ valid-item count + collection.json; residual URL-vs-item gap fully explained by known-invalid entries in `stac_geotiff_checks.csv`
 - [ ] Register on geoserv (`stac_register-pypgstac.sh stac-dem-bc ...`); verify pgstac count + API query at images.a11s.one returns a new item
 - [ ] Confirm cron live; close #23 via docs commit ("monthly automation live; Fixes #23")
