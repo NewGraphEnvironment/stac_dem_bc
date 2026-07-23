@@ -120,7 +120,13 @@ def process_item(path_item: str, collection_id: str, path_local: str,
         path_item_json = f"{path_local}/{item_id}.json"
         item.save_object(dest_href=path_item_json, include_self_link=False)
 
-        return {"id": item_id, "item": item}
+        # Create the item href with proper URL encoding for spaces
+        item_href = f"{PATH_S3_STAC}/{item_id}.json"
+        encoded_item_href = encode_url_for_gdal(item_href)
+        # Set the item's self-href to the encoded version
+        item.set_self_href(encoded_item_href)
+
+        return {"id": item_id, "item": item, "href": encoded_item_href}
     except Exception as e:
         logger.error("Error processing %s: %s", href_item, e)
         return None
@@ -292,12 +298,12 @@ def main():
 
     # Add item links to collection (with duplicate prevention)
     if results:
-        existing_item_hrefs = {link.target for link in collection.links if link.rel == 'item'}
+        existing_item_hrefs = {encode_url_for_gdal(link.target) for link in collection.links if link.rel == 'item'}
 
         added_count = 0
         skipped_count = 0
         for result in results:
-            item_href = f"{PATH_S3_STAC}/{result['id']}.json"
+            item_href = result["href"]
             if item_href not in existing_item_hrefs:
                 collection.add_link(Link(
                     rel=RelType.ITEM,
