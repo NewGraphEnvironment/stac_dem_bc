@@ -154,7 +154,14 @@ The bottleneck is network: each GeoTIFF must be partially read over HTTP to extr
 1. Detects changes against the committed `data/urls_list.txt` cache (exit 0 = no changes → clean early exit; 1 = changes; 2 = error)
 2. Builds and validates STAC items for new URLs only, in a runner workspace (`STAC_OUTPUT_DIR`) seeded with the live `collection.json` from S3
 3. Syncs item JSONs then `collection.json` (in that order, never `--delete`) via `s3_sync-ci.sh`
-4. Commits the refreshed `data/` caches back to `main` — a failed run therefore persists nothing and the next run re-detects cleanly
+4. Commits the refreshed `data/` caches back to `main` — a failed run therefore persists nothing and the next run re-detects cleanly. A deletions-only month (e.g. 2026-08: 0 new, 43 removed upstream) skips the build steps but still records the audit trail
+
+**Where the evidence lives:**
+
+- **Run history** — the [Actions tab](https://github.com/NewGraphEnvironment/stac_dem_bc/actions/workflows/update.yml) keeps every run's logs, and each run uploads a `run-logs` artifact (change-detection log + access-check CSV). Artifacts expire after ~90 days — they are the working record, not the archive.
+- **The durable ledger is git** — a successful run with changes ends in one bot commit on `main` ("Monthly incremental update: refresh caches (YYYY-MM)") touching only `data/`. `git log --oneline --author=github-actions -- data/` is the complete month-by-month history. Within those commits: `urls_list.txt` is the current source inventory, `urls_deleted.txt` the cumulative audit of sources removed upstream (their catalog items are retained), and the two CSVs the validation state for sources and outputs. A month absent from the ledger either had no changes or failed — and a failed month self-heals, because nothing was committed to mark its files as seen.
+- **The catalog itself** — `s3://stac-dem-bc/` is the only complete copy (`collection.json` plus one JSON per item, bucket versioned). The API at `images.a11s.one` serves whatever was last *registered*, so it can trail S3 between a sync and the manual registration step below.
+- **Design history and one-time events** — `planning/archive/2026-07-issue-23-monthly-automation/` records how this system was built, the pre-build review findings, and the July 2026 catch-up (58k → 98k items).
 
 **Failure triage:**
 

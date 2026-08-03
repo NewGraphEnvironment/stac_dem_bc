@@ -50,7 +50,7 @@ rmarkdown::render(
 
 <br>
 
-The catalog refreshes monthly: a scheduled [GitHub Actions workflow](.github/workflows/update.yml) detects new tiles on the objectstore and appends them incrementally. The build pipeline — and a plain-language guide to the concepts behind it (COG, STAC, pgstac, validation caching) — lives in [`scripts/`](scripts/README.md).
+The catalog refreshes monthly: a scheduled [GitHub Actions workflow](.github/workflows/update.yml) detects new tiles on the objectstore and appends them incrementally, with each month's changes landing as a commit to [`data/`](data/) — a git audit trail of what was added, removed, and validated. How the automation works, its failure modes, and where the evidence lives are documented in [`scripts/`](scripts/README.md), alongside a plain-language guide to the concepts behind the pipeline (COG, STAC, pgstac, validation caching).
 
 <br>
 
