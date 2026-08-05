@@ -123,22 +123,37 @@ collections:
 
 ## Roadmap
 
-- **uv-based Python dependency management**
-  ([\#16](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/16))
-  — migrate from conda to uv for faster, more reproducible Python
-  environments.
-- **Structured logging + performance benchmarking**
-  ([\#6](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/6)) —
-  instrument the pipeline so build performance is quantifiable across
-  runs.
+The big one landed in 2026: the catalog is now **self-updating**
+([\#23](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/23)) —
+the goal open since the first build — and the July catch-up grew the
+collection from 58k to ~98k fully-validated items. Still ahead:
+
+- **Incremental registration** — the post-sync pgstac registration is a
+  full reload today (~80 minutes at current scale); upserting only each
+  month’s new items brings it to seconds. Tracked in the infrastructure
+  repo.
+- **Upstream-deletion handling**
+  ([\#28](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/28))
+  — propagate objectstore removals to the catalog; on hold until the
+  September run shows whether recent removals were renames.
+- **URL-encoded item hrefs**
+  ([\#25](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/25),
+  fix in review as [PR
+  \#26](https://github.com/NewGraphEnvironment/stac_dem_bc/pull/26)) —
+  90 legacy items carry literal spaces in their download links, which
+  strict HTTP clients reject.
 - **True footprint geometry**
   ([\#2](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/2)) —
   recalculate per-item footprints to exclude no-data pixels rather than
   using bounding boxes; gives accurate spatial-overlap queries.
-- **Validation-failure triage**
-  ([\#11](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/11))
-  — STACError on specific item JSONs; underlying root cause + automated
-  retry.
+- **Structured logging + performance benchmarking**
+  ([\#6](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/6)) —
+  instrument the pipeline so build performance is quantifiable across
+  runs.
+- **uv-based Python dependency management**
+  ([\#16](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/16))
+  — the CI workflow already installs with uv; migrate the local conda
+  environment to match.
 
 Browse [open
 issues](https://github.com/NewGraphEnvironment/stac_dem_bc/issues) for

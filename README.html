@@ -706,19 +706,31 @@ complementary BC collections:</p>
 — historic airphoto thumbnails (1963–2019)</li>
 </ul>
 <h2 id="roadmap">Roadmap</h2>
+<p>The big one landed in 2026: the catalog is now
+<strong>self-updating</strong> (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/23">#23</a>)
+— the goal open since the first build — and the July catch-up grew the
+collection from 58k to ~98k fully-validated items. Still ahead:</p>
 <ul>
-<li><strong>uv-based Python dependency management</strong> (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/16">#16</a>)
-— migrate from conda to uv for faster, more reproducible Python
-environments.</li>
-<li><strong>Structured logging + performance benchmarking</strong> (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/6">#6</a>)
-— instrument the pipeline so build performance is quantifiable across
-runs.</li>
+<li><strong>Incremental registration</strong> — the post-sync pgstac
+registration is a full reload today (~80 minutes at current scale);
+upserting only each month’s new items brings it to seconds. Tracked in
+the infrastructure repo.</li>
+<li><strong>Upstream-deletion handling</strong> (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/28">#28</a>)
+— propagate objectstore removals to the catalog; on hold until the
+September run shows whether recent removals were renames.</li>
+<li><strong>URL-encoded item hrefs</strong> (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/25">#25</a>,
+fix in review as <a href="https://github.com/NewGraphEnvironment/stac_dem_bc/pull/26">PR
+#26</a>) — 90 legacy items carry literal spaces in their download links,
+which strict HTTP clients reject.</li>
 <li><strong>True footprint geometry</strong> (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/2">#2</a>)
 — recalculate per-item footprints to exclude no-data pixels rather than
 using bounding boxes; gives accurate spatial-overlap queries.</li>
-<li><strong>Validation-failure triage</strong> (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/11">#11</a>)
-— STACError on specific item JSONs; underlying root cause + automated
-retry.</li>
+<li><strong>Structured logging + performance benchmarking</strong> (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/6">#6</a>)
+— instrument the pipeline so build performance is quantifiable across
+runs.</li>
+<li><strong>uv-based Python dependency management</strong> (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/16">#16</a>)
+— the CI workflow already installs with uv; migrate the local conda
+environment to match.</li>
 </ul>
 <p>Browse <a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues">open
 issues</a> for the full backlog.</p>
