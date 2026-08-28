@@ -84,6 +84,10 @@ Reported rather than guessed at. Sample:
 - `092/092g/2021/dsm/bc_092g099_xli1m_utm10_2021_dsm.tif`
 - `092/092o/2024/dsm/bc_092o095_3_3_3_xli1m_utm10_20230918_20240510_dsm.tif`
 
+## DSM keys with no parseable tile id (0)
+
+None.
+
 ## DSM rasters claimed by more than one DEM (3)
 
 Two DEM keys matched one DSM. Known benign causes: a re-issued
@@ -118,22 +122,3 @@ one mapsheet-year. The first is used; review these.
 - `('102/102i/2023', '102i060_1_3_3', 'utm9', ('20231028', '20231030'))`: 102/102i/2023/dsm/bc_102i060_1_3_3_xli1m_utm09_20231028_20231030_dsm.tif, 102/102i/2023/dsm/bc_102i060_1_3_3_xli1m_utm9_20231028_20231030_dsm.tif
 - `('102/102i/2023', '102i060_1_3_4', 'utm9', ('20231028', '20231030'))`: 102/102i/2023/dsm/bc_102i060_1_3_4_xli1m_utm09_20231028_20231030_dsm.tif, 102/102i/2023/dsm/bc_102i060_1_3_4_xli1m_utm9_20231028_20231030_dsm.tif
 - `('102/102i/2023', '102i060_1_4_1', 'utm9', ('20231028', '20231030'))`: 102/102i/2023/dsm/bc_102i060_1_4_1_xli1m_utm09_20231028_20231030_dsm.tif, 102/102i/2023/dsm/bc_102i060_1_4_1_xli1m_utm9_20231028_20231030_dsm.tif
-
-## Inherited media type - sample verification
-
-Items carry the DSM's media type inherited from the paired DEM
-rather than measured. This is the evidence for that.
-
-| | |
-|---|---|
-| sampled | 500 |
-| readable | 500 |
-| COG status agreement | 0.9980 over 500 (threshold 0.99) |
-| footprint agreement | 1.0000 over 115 (threshold 1.0) |
-| footprint not comparable | 385 tiles whose DEM predates spatial-metadata caching |
-| verdict | PASS |
-
-Sample is stratified across naming convention and acquisition
-year, seed 31, so the 117 identical-basename tiles and
-the 2 unknown-convention ones are exercised rather than rounded
-out of a proportional draw.

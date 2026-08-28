@@ -93,6 +93,18 @@ def keys_load(path: str, label: str) -> list[str]:
     return keys
 
 
+def dsm_group_of(key: str) -> str | None:
+    """Mapsheet-year containing a `dsm/` key, derived from the path alone.
+
+    Used for keys whose FILENAME will not parse. The group still has a raster
+    DSM, and losing it would push that mapsheet-year's DEM tiles into
+    `no_raster_dsm` -- reporting "published as point cloud only" for a delivery
+    that shipped rasters we simply could not name.
+    """
+    rel = key_relative(key)
+    return rel.split("/dsm/")[0] if "/dsm/" in rel else None
+
+
 def key_relative(key: str) -> str:
     """Object key relative to the bucket root, for compact storage in the csv."""
     key = fix_url(key)
@@ -125,6 +137,14 @@ def pairs_build(dem_keys: list[str], dsm_keys: list[str],
         parsed = tile_key_parse(key)
         if parsed is None:
             dsm_unparseable.append(key)
+            # The group still holds a raster DSM even though this filename does
+            # not parse, so it must stay in dsm_groups. Otherwise a group whose
+            # rasters were all unnameable would report `no_raster_dsm` -- a
+            # declared "point cloud only" gap for a delivery that shipped
+            # rasters, which is the reclassification this design forbids.
+            group = dsm_group_of(key)
+            if group:
+                dsm_groups.add(group)
             continue
         parsed["key"] = key
         dsm_by_key[pair_key(parsed)].append(parsed)
@@ -329,6 +349,23 @@ def report_render(summary: dict, result: dict) -> str:
         lines.append("None.")
     lines.append("")
 
+    dsm_unparse = result.get("dsm_unparseable") or []
+    lines += [f"## DSM keys with no parseable tile id ({len(dsm_unparse):,})", ""]
+    if dsm_unparse:
+        lines += [
+            "These rasters exist but could not be named, so they pair with",
+            "nothing. Their mapsheet-year still counts as having a raster DSM,",
+            "so its DEM tiles report as `unpaired` rather than as a point-cloud",
+            "-only coverage gap. Sample:",
+            "",
+        ]
+        lines += [f"- `{key_relative(k)}`" for k in dsm_unparse[:10]]
+        if len(dsm_unparse) > 10:
+            lines.append(f"- ... and {len(dsm_unparse) - 10:,} more")
+    else:
+        lines.append("None.")
+    lines.append("")
+
     shared = result.get("dsm_shared") or {}
     lines += [f"## DSM rasters claimed by more than one DEM ({len(shared)})", ""]
     if shared:
@@ -402,6 +439,9 @@ def main() -> int:
     if result["collisions"]:
         logger.warning("%d ambiguous DSM match keys - see the report",
                        len(result["collisions"]))
+    if result["dsm_unparseable"]:
+        logger.warning("%d DSM keys have no parseable tile id - see the report",
+                       len(result["dsm_unparseable"]))
 
     if args.dry_run:
         logger.info("Dry run - no files written")

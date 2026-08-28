@@ -411,3 +411,34 @@ def test_cache_lookup_normalises_both_url_forms():
     single = "https:/nrs.objectstore.gov.bc.ca/gdwuts/082/082f/2022/dem/x.tif"
     double = "https://nrs.objectstore.gov.bc.ca/gdwuts/082/082f/2022/dem/x.tif"
     assert fix_url(single) == fix_url(double) == double
+
+
+def test_an_unparseable_dsm_keeps_its_group_marked_as_having_a_raster():
+    """A DSM raster we cannot name must not turn its group into a coverage gap.
+
+    `dsm_groups` was built only from parseable DSM keys, so a mapsheet-year
+    whose rasters all failed to parse would drop out and its DEM tiles would
+    report `no_raster_dsm` -- claiming the delivery published point cloud only,
+    when in fact it shipped rasters we simply could not name. `unpaired` is the
+    honest answer there.
+    """
+    dem = ["094/094o/2026/dem/bc_094o056_2_1_4_xli1m_utm10_20260506_20260506.tif"]
+    dsm = ["094/094o/2026/dsm/surface_model_final.tif"]  # no mapsheet tile id
+    result = pairs_build(dem, dsm, groups_of(dsm))
+
+    assert len(result["dsm_unparseable"]) == 1
+    assert result["rows"][0]["status"] == UNPAIRED, (
+        "must be unpaired, not a point-cloud-only coverage gap"
+    )
+
+
+def test_unparseable_dsm_keys_appear_in_the_report():
+    """Collected but never surfaced is the same as dropped silently."""
+    from dsm_pair import report_render
+    dem = ["094/094o/2026/dem/bc_094o056_2_1_4_xli1m_utm10_20260506_20260506.tif"]
+    dsm = ["094/094o/2026/dsm/surface_model_final.tif"]
+    result = pairs_build(dem, dsm, groups_of(dsm))
+    report = report_render(summarize(result), result)
+
+    assert "DSM keys with no parseable tile id (1)" in report
+    assert "surface_model_final.tif" in report

@@ -102,3 +102,25 @@ byte-identical.
 End-to-end proof: 6 items built, both `image` and `dsm` assets present, 6/6 valid
 under `item_validate.py`, collection carries providers/keywords with all 98,040
 item links preserved.
+
+### PR auto-review findings folded in — 2026-08-28
+
+Two findings from the Claude Code review on PR #32, both real:
+
+1. **I regressed the item-shortfall warning.** `Count created items` counts every
+   JSON in `$STAC_OUTPUT_DIR`, and the new rebuild step writes into the same
+   directory before it ran — so 20-of-100 new items failing could be masked by 30
+   unrelated rebuilds and the warning would never fire. Now two separate counts:
+   `Count new items` runs *before* the rebuild and owns the shortfall warning;
+   `Count items to publish` runs after and gates validate/sync, since a
+   pairing-only month produces item JSONs and no new URLs at all.
+2. **`dsm_unparseable` was collected and never surfaced** — neither logged nor in
+   the report, contradicting this PR's own "nothing is dropped silently" claim.
+   Sharper second-order point: `dsm_groups` was built only from *parseable* DSM
+   keys, so a mapsheet-year whose rasters all failed to parse would drop out and
+   its DEM tiles would report `no_raster_dsm` — claiming point-cloud-only for a
+   delivery that shipped rasters we merely could not name. The group is now
+   derived from the path for unparseable keys too, and `unpaired` is the reported
+   answer. Count is 0 against today's bucket, so this was latent, not wrong.
+
+Both now have tests (35 total).

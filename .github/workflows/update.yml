@@ -128,6 +128,22 @@ jobs:
         if: steps.detect.outputs.new_urls == 'true'
         run: .venv/bin/python scripts/item_create.py --incremental
 
+      # Counted BEFORE the pairing rebuild writes into the same directory.
+      # Otherwise CREATED is new + rebuilt, and a real shortfall in new items
+      # (20 of 100 failed) is masked by an unrelated batch of rebuilds (30),
+      # suppressing the very warning this step exists to raise.
+      - name: Count new items (warn on shortfall)
+        id: created
+        if: steps.detect.outputs.new_urls == 'true'
+        run: |
+          NEW=$(wc -l < data/urls_new.txt | tr -d ' ')
+          CREATED=$(find "$STAC_OUTPUT_DIR" -maxdepth 1 -type f -name "*.json" ! -name "collection.json" | wc -l | tr -d ' ')
+          echo "expected $NEW new items, created $CREATED"
+          echo "count=$CREATED" >> "$GITHUB_OUTPUT"
+          if [ "$CREATED" -lt "$NEW" ]; then
+            echo "::warning title=Item shortfall::created $CREATED of $NEW new items - some source URLs failed metadata extraction or were invalid; see run-logs artifact and the triage notes in scripts/README.md"
+          fi
+
       # A DSM can arrive for a DEM already in the catalog. Nothing else would
       # rebuild that item -- item_create.py otherwise only ever sees newly-listed
       # DEM URLs -- so the pairing diff drives an explicit rebuild pass. The file
@@ -148,32 +164,30 @@ jobs:
             echo "no pairing changes"
           fi
 
-      - name: Count created items (warn on shortfall)
-        id: created
+      # Separate from the shortfall count above: this one gates validate/sync and
+      # must include rebuilt items, since a pairing-only month produces item
+      # JSONs and no new URLs at all.
+      - name: Count items to publish
+        id: publish
         if: steps.detect.outputs.changes == 'true'
         run: |
-          NEW=$(wc -l < data/urls_new.txt 2>/dev/null | tr -d ' ' || echo 0)
-          NEW=${NEW:-0}
-          CREATED=$(find "$STAC_OUTPUT_DIR" -maxdepth 1 -type f -name "*.json" ! -name "collection.json" | wc -l | tr -d ' ')
-          echo "expected $NEW new items, created $CREATED"
-          echo "count=$CREATED" >> "$GITHUB_OUTPUT"
-          if [ "$CREATED" -lt "$NEW" ]; then
-            echo "::warning title=Item shortfall::created $CREATED of $NEW new items - some source URLs failed metadata extraction or were invalid; see run-logs artifact and the triage notes in scripts/README.md"
-          fi
+          TOTAL=$(find "$STAC_OUTPUT_DIR" -maxdepth 1 -type f -name "*.json" ! -name "collection.json" | wc -l | tr -d ' ')
+          echo "items staged for publish: $TOTAL"
+          echo "count=$TOTAL" >> "$GITHUB_OUTPUT"
 
       # created == 0 (an all-invalid batch, precedent: the 90 parenthesized
       # files arrived as one such delta) must not wedge the month: skip
       # validate/sync, stay green with the shortfall warning, and let the
       # cache commit record the batch as attempted.
       - name: Validate new items (gate)
-        if: steps.detect.outputs.changes == 'true' && steps.created.outputs.count != '0'
+        if: steps.publish.outputs.count != '0' && steps.publish.outputs.count != ''
         run: .venv/bin/python scripts/item_validate.py --items-dir "$STAC_OUTPUT_DIR" --incremental
 
       # Runs when there are new items OR only rebuilt ones: a pairing-only month
       # produces item JSONs and no new URLs, and skipping the sync would leave
       # them on the runner.
       - name: Sync catalog to S3
-        if: steps.detect.outputs.changes == 'true' && steps.created.outputs.count != '0'
+        if: steps.publish.outputs.count != '0' && steps.publish.outputs.count != ''
         run: bash scripts/s3_sync-ci.sh
 
       - name: Commit refreshed caches
