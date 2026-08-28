@@ -1,19 +1,19 @@
 # CLAUDE.md - STAC DEM BC Project Guidelines
 
-## Project Overview: Automated Weekly STAC DEM BC Updates
+## Project Overview: Automated Monthly STAC DEM BC Updates
 
-This project implements automated weekly updates of STAC DEM BC JSONs using VM-based cron automation with incremental change detection. The implementation adopts proven performance improvements from stac_orthophoto_bc (parallel processing, pre-validation) before building automation infrastructure.
+This project maintains the STAC catalog for BC's LidarBC DEM collection with automated monthly updates: a GitHub Actions workflow (`update.yml` — cron + workflow_dispatch, OIDC to S3) runs change detection and an incremental build, then commits refreshed caches back to main. Performance patterns (parallel processing, pre-validation) were ported from stac_orthophoto_bc.
 
-**Architecture:** VM-based cron → Change detection → Parallel validation/processing → S3 sync → PgSTAC registration
+**Architecture:** GitHub Actions cron → Change detection → Parallel validation/processing → S3 sync → PgSTAC registration (manual step on geoserv; incremental upsert tracked in the infrastructure repo)
 
 **Expected Performance:**
 - First run (full): ~1-1.5 hours (down from 5-6 hours)
-- Weekly runs (incremental): 5-15 minutes for typical 10-50 new files
+- Monthly runs (incremental): scale with volume — a typical ~8k-file month is ~75–90 min on the runner; a no-change month exits in ~6 min
 - Cost: $0 additional (uses existing VM)
 
 ### Key Implementation Phases
 
-**Phase 1-2: Modernization ✅ COMPLETE (phase1-2-modernization worktree)**
+**Phase 1-2: Modernization ✅ COMPLETE (2026-02)**
 - Port stac_orthophoto_bc performance improvements
 - Pre-validation system with COG detection
 - Parallel item creation using ThreadPoolExecutor
@@ -21,16 +21,15 @@ This project implements automated weekly updates of STAC DEM BC JSONs using VM-b
 - Optimize spatial extent calculation
 - **Result:** 100-item test passed, ready for VM automation
 
-**Phase 3: VM Automation (phase3-automation worktree - future)**
-- Master automation script (stac_update_weekly.sh)
-- Cron configuration on stac-prod VM
-- Benchmarking and monitoring system
-- Logging infrastructure
+**Phase 3: Automation ✅ COMPLETE (2026-07, #23)**
+- Landed as the monthly GitHub Actions workflow (`.github/workflows/update.yml`), not the originally-planned VM cron (that VM was never built)
+- First scheduled run 2026-08-03 handled a deletions-only month correctly
+- Remaining follow-ups: incremental pgstac registration (infrastructure repo), upstream-deletion pruning (#28)
 
 ### Project Context
 
-**Dataset:** 58,109 DEM GeoTIFFs from BC provincial objectstore (nrs.objectstore.gov.bc.ca/gdwuts)
-- Grew 158% from initial 22,548 files (discovered in Phase 2.1 change detection)
+**Dataset:** ~98,000 DEM GeoTIFFs from BC provincial objectstore (nrs.objectstore.gov.bc.ca/gdwuts), as of 2026-08
+- History of large undocumented growth: 22,548 → 58,109 (discovered Feb 2026), then +63% to 98,039 in five months (July 2026 catch-up, #23) — arrival may be bulk loads, not steady monthly
 - ~90 files with parentheses in filename excluded (all fail validation - see issue #8)
 
 **Actual Performance (Feb 2026 - Full Build):**
@@ -49,7 +48,7 @@ This project implements automated weekly updates of STAC DEM BC JSONs using VM-b
 
 **Goals:**
 1. ~~Reduce full processing time to ~1-1.5 hours~~ → **Reality: 5-6 hours** (network I/O limited)
-2. Enable weekly/monthly incremental updates (likely 30-60 min for 50-100 new files)
+2. ✅ Monthly incremental updates via GitHub Actions (typical month fits the runner comfortably; oversized batches fall back to a local run)
 3. ✅ Implement robust validation and error handling
 4. ✅ Automated monthly updates — GitHub Actions, not VM cron (#23; catalog 98k items as of 2026-07)
 5. ✅ Maintain audit trail and benchmarking
@@ -67,7 +66,7 @@ This project implements automated weekly updates of STAC DEM BC JSONs using VM-b
 
 ```
 data/
-├── urls_list.txt              # Master URL list from BC objectstore (58,109 URLs)
+├── urls_list.txt              # Master URL list from BC objectstore (~98k URLs)
 ├── urls_new.txt               # New URLs detected by change detection
 ├── urls_deleted.txt           # Deleted URLs (audit trail)
 ├── stac_geotiff_checks.csv    # Source validation (url, is_geotiff, is_cog)
@@ -113,10 +112,6 @@ Source URLs → GeoTIFF Validation → Item Creation → JSON Validation → Reg
 - Cleaner for cron/automation
 - Standard Python packaging and distribution
 - No R dependency for core workflows
-
-### SRED Tracking
-- Primary: https://github.com/NewGraphEnvironment/sred/issues/8 — PR-body xref form: `Relates to NewGraphEnvironment/sred#8`
-- (The old `sred-2025-2026` repo refs are superseded — SRED tracking lives in the `sred` repo)
 
 ---
 
@@ -206,14 +201,14 @@ WHY: Reprocessing same URLs (e.g., after failures, testing) would create duplica
 - Server provisioning: Scripts similar to stac_uav_bc setup
 
 **Future Migration (Post-Phase 3):**
-- **awshak repository:** `/Users/airvine/Projects/repo/awshak`
+- **rtj repository:** `/Users/airvine/Projects/repo/rtj` (formerly awshak)
 - OpenTofu/Terraform-based infrastructure management
 - S3 buckets already IaC-managed: `stac-dem-bc` (prod), can easily create `dev-stac-dem-bc` for testing
 - Other managed buckets: imagery-uav-bc, stac-orthophoto-bc, water-temp-bc, backup-imagery-uav
 - Features: versioning, lifecycle policies, CORS, public access controls
 - Reproducible, version-controlled server setups (future)
 
-**Note:** Phase 3 VM automation uses current manual deployment approach. S3 buckets already IaC-managed. Future phases should migrate VM provisioning to awshak for full reproducibility.
+**Note:** The monthly update runs on GitHub-hosted runners (no VM). S3 buckets and the OIDC role are IaC-managed in rtj; the pgstac host (geoserv) is rtj-provisioned.
 
 ### File Locations
 - **Main repo:** `/Users/airvine/Projects/repo/stac_dem_bc`
