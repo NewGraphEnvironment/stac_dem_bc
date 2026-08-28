@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # Change Detection: Compare BC DEM objectstore with cached URL list
 # Outputs: urls_new.txt, urls_deleted.txt
-# Updates: urls_list.txt
+# Updates: urls_list.txt, urls_dsm.txt, dsm_groups.txt
 # Exit: 0 = no changes, 1 = changes detected, 2 = error (including the
 #       plausibility guard — a suspiciously short listing refuses to touch
 #       the cache or outputs, since a truncated fetch committed into
@@ -10,6 +10,13 @@
 # NOTE: no library() calls here — everything is namespaced (ngr::, readr::,
 # fs::) so a missing package fails inside the tryCatch and exits 2 (error),
 # not 1 (which the workflow reads as "changes detected").
+#
+# The DSM listing rides along on the same bucket walk (scripts/urls_listing.R).
+# It is refreshed on every run and is not part of the exit contract: DSM keys
+# feed scripts/dsm_pair.py, which decides which DEM items gain a dsm asset.
+# That source() happens INSIDE the tryCatch below, deliberately — sourcing at
+# top level would let a missing or broken helper abort with Rscript's default
+# status 1, which the workflow reads as "changes detected" rather than "error".
 
 # Setup logging
 timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
@@ -21,28 +28,28 @@ result <- tryCatch({
   cat("=== STAC DEM BC Change Detection ===\n")
   cat(sprintf("Started: %s\n\n", Sys.time()))
 
+  source("scripts/urls_listing.R")
+
   # Paths
   url_bucket <- "https://nrs.objectstore.gov.bc.ca/gdwuts"
   cache_file <- "data/urls_list.txt"
   new_file <- "data/urls_new.txt"
   deleted_file <- "data/urls_deleted.txt"
+  dsm_file <- "data/urls_dsm.txt"
+  dsm_groups_file <- "data/dsm_groups.txt"
 
-  # Step 1: Fetch fresh URL list from objectstore
+  # Step 1: Fetch fresh listing from objectstore (one walk, DEM + DSM)
   cat("Fetching fresh URL list from BC objectstore...\n")
-  cat(sprintf("  Bucket: %s\n", url_bucket))
-  cat(sprintf("  Pattern: dem + *.tif\n\n"))
+  cat(sprintf("  Bucket: %s\n\n", url_bucket))
 
   start_time <- Sys.time()
 
-  fresh_urls <- ngr::ngr_s3_keys_get(
-    url_bucket = url_bucket,
-    prefix = "",
-    pattern = c("dem", "*.tif")
-  )
+  listing <- urls_listing_fetch(url_bucket = url_bucket)
+  fresh_urls <- listing$dem
 
   fetch_time <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
 
-  cat(sprintf("Fetched %d URLs in %.1f seconds (%.1f URLs/sec)\n\n",
+  cat(sprintf("Fetched %d DEM URLs in %.1f seconds (%.1f URLs/sec)\n\n",
               length(fresh_urls), fetch_time, length(fresh_urls) / fetch_time))
 
   # Step 2: Load cached URL list
@@ -95,16 +102,26 @@ result <- tryCatch({
     }
   }
 
+  # urls_deleted.txt is an APPEND-ONLY audit trail, not current state. It is
+  # the standing evidence for #28 (upstream deletions are retained in the
+  # catalog, so the record of what vanished is the only trace), and a month
+  # with no deletions says nothing about earlier ones.
+  #
+  # It used to be rewritten with the current month's set, and removed outright
+  # when a month had none — which deleted 43 entries on 2026-08-28. Those 43
+  # were all under `albers10k2m_new/`, and stac_geotiff_checks.csv still holds
+  # 4,490 albers rows against 2,245 live URLs: a prefix rename, which is #28's
+  # hypothesis. Losing that would have lost the evidence for it.
+  prior_deleted <- if (file.exists(deleted_file)) readr::read_lines(deleted_file) else character(0)
   if (length(deleted_urls) > 0) {
-    cat(sprintf("Writing deleted URLs to %s...\n", deleted_file))
-    readr::write_lines(deleted_urls, deleted_file)
-    cat(sprintf("  Wrote %d URLs\n", length(deleted_urls)))
+    merged <- unique(c(prior_deleted, deleted_urls))
+    cat(sprintf("Appending deleted URLs to %s...\n", deleted_file))
+    readr::write_lines(merged, deleted_file)
+    cat(sprintf("  %d new, %d total in the audit trail\n",
+                length(setdiff(deleted_urls, prior_deleted)), length(merged)))
   } else {
-    cat("No deleted URLs - not creating urls_deleted.txt\n")
-    if (file.exists(deleted_file)) {
-      file.remove(deleted_file)
-      cat("  Removed old urls_deleted.txt\n")
-    }
+    cat(sprintf("No deletions this run - %s left untouched (%d entries)\n",
+                deleted_file, length(prior_deleted)))
   }
 
   # Step 5: Update cache with fresh URLs
@@ -112,12 +129,42 @@ result <- tryCatch({
   readr::write_lines(fresh_set, cache_file)
   cat(sprintf("  Wrote %d URLs to cache\n", length(fresh_set)))
 
+  # Step 5b: Refresh the DSM listing artifacts from the same walk.
+  #
+  # The DEM side has a 90%-of-cached ratchet above; without the same guard here
+  # a DSM-heavy truncation would pass the whole-walk floor, overwrite
+  # urls_dsm.txt with a short list, and strip the dsm asset off every item whose
+  # DSM fell out of the listing. The walk succeeding says nothing about the DSM
+  # count specifically.
+  cat("\nRefreshing DSM listing artifacts...\n")
+  if (file.exists(dsm_file)) {
+    cached_dsm <- readr::read_lines(dsm_file)
+    if (length(cached_dsm) > 0 && length(listing$dsm) < 0.9 * length(cached_dsm)) {
+      stop(sprintf(
+        "fresh DSM listing (%d URLs) is < 90%% of cached (%d) - refusing to update (truncated fetch?)",
+        length(listing$dsm), length(cached_dsm)
+      ))
+    }
+    dsm_changed <- !identical(sort(as.character(listing$dsm)), sort(as.character(cached_dsm)))
+  } else {
+    cached_dsm <- character(0)
+    dsm_changed <- TRUE
+  }
+
+  readr::write_lines(listing$dsm, dsm_file)
+  readr::write_lines(listing$dsm_groups, dsm_groups_file)
+  cat(sprintf("  Wrote %d DSM URLs to %s (was %d, changed: %s)\n",
+              length(listing$dsm), dsm_file, length(cached_dsm), dsm_changed))
+  cat(sprintf("  Wrote %d dsm/ directories to %s\n",
+              length(listing$dsm_groups), dsm_groups_file))
+
   # Summary
   cat("\n=== SUMMARY ===\n")
   cat(sprintf("Fresh URLs: %d\n", length(fresh_set)))
   cat(sprintf("Cached URLs: %d\n", length(cached_set)))
   cat(sprintf("New: %d\n", length(new_urls)))
   cat(sprintf("Deleted: %d\n", length(deleted_urls)))
+  cat(sprintf("DSM listing changed: %s\n", dsm_changed))
   cat(sprintf("Total changes: %d\n", length(new_urls) + length(deleted_urls)))
 
   # Show sample of new URLs if any
@@ -134,7 +181,11 @@ result <- tryCatch({
   cat(sprintf("\nCompleted: %s\n", Sys.time()))
   cat(sprintf("Log saved to: %s\n", log_file))
 
-  length(new_urls) > 0 || length(deleted_urls) > 0
+  # A DSM-only month is a real change: a surface model can arrive for a DEM
+  # already in the catalog. Reporting exit 0 there would skip the pairing step
+  # AND the cache commit, so the refreshed listings would die with the runner
+  # and the item would never gain its asset.
+  length(new_urls) > 0 || length(deleted_urls) > 0 || isTRUE(dsm_changed)
 }, error = function(e) {
   cat(sprintf("\nERROR: %s\n", conditionMessage(e)))
   "error"

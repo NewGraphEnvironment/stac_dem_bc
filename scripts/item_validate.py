@@ -132,6 +132,12 @@ def main():
         help=f"Path to collection.json (default: {DEFAULT_COLLECTION_PATH})"
     )
     parser.add_argument(
+        '--allow-shrink', action='store_true',
+        help='Permit a full run to replace the ledger with fewer rows than it has. '
+             'Only for a deliberate rebuild - the default refusal exists because a '
+             'subset run against a scratch dir silently destroys the audit trail.'
+    )
+    parser.add_argument(
         '--incremental',
         action='store_true',
         help="Only validate items not in existing results (faster)"
@@ -199,6 +205,23 @@ def main():
         all_results = list(existing_results.values()) + validation_results
     else:
         all_results = validation_results
+
+    # A full run REPLACES the ledger. Refuse when that would shrink an existing
+    # one: data/stac_item_validation.csv is the durable output-validation audit
+    # trail AND the input scripts/urls_reconcile.py uses to decide which URLs
+    # are item-backed, so a small ad-hoc run pointed at a scratch directory can
+    # destroy both at once. Caught the hard way on 2026-08-28: a 6-item smoke
+    # test replaced a 98,048-row ledger, and --apply on the reconcile script
+    # would then have truncated urls_list.txt to those 6.
+    if not args.incremental and os.path.exists(args.output):
+        existing_count = len(load_existing_results(args.output))
+        if len(all_results) < existing_count and not args.allow_shrink:
+            print(f"❌ Refusing to write {len(all_results)} rows over an existing "
+                  f"{existing_count}-row ledger at {args.output}.")
+            print("   A full run replaces the file. If you are validating a subset, "
+                  "use --incremental; if you really mean to shrink it, "
+                  "pass --allow-shrink.")
+            return 1
 
     # Save results
     save_results(all_results, args.output)

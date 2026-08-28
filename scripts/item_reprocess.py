@@ -39,9 +39,16 @@ PATH_LOCAL = get_output_dir(test_only=False)
 PATH_COLLECTION = f"{PATH_LOCAL}/collection.json"
 INVALID_URLS_FILE = "data/urls_invalid_items.txt"
 
-def process_item(path_item: str, collection, results_lookup) -> dict | None:
+def process_item(path_item: str, collection, results_lookup,
+                 dsm_lookup: dict | None = None) -> dict | None:
     """
     Process a single GeoTIFF URL to create a STAC item with datetime handling.
+
+    Attaches the paired DSM as a second asset, same as item_create.py. This
+    script is the documented remediation path for validation failures
+    (scripts/README.md), so without it any item reprocessed after a failure
+    would silently lose its `dsm` asset -- and the pairing-changed rebuild in
+    the workflow would not restore it, because the pairing did not change.
 
     Returns dict with item_id and item object, or None if processing fails.
     """
@@ -107,6 +114,18 @@ def process_item(path_item: str, collection, results_lookup) -> dict | None:
         if datetime_is_unknown:
             item.properties["datetime_unknown"] = True
 
+        dsm_href = (dsm_lookup or {}).get(href_item)
+        if dsm_href:
+            item.add_asset(
+                "dsm",
+                pystac.Asset(
+                    href=dsm_href,
+                    media_type=media_type,
+                    roles=["data"],
+                    title="Digital surface model",
+                ),
+            )
+
         # Save item JSON locally (overwrites invalid version)
         path_item_json = f"{PATH_LOCAL}/{item_id}.json"
         item.save_object(dest_href=path_item_json, include_self_link=False)
@@ -162,6 +181,12 @@ def main():
         urls_to_process = f.read().splitlines()
 
     print(f"✓ Loaded {len(urls_to_process)} URLs to re-process")
+
+    # Same pairing lookup item_create.py uses, so a reprocessed item keeps its
+    # dsm asset instead of silently losing it.
+    from item_create import dsm_lookup_load
+    dsm_lookup = dsm_lookup_load()
+    print(f"✓ Loaded {len(dsm_lookup)} DEM->DSM pairs")
     print()
 
     # Process items in parallel
@@ -175,7 +200,8 @@ def main():
                 None,
                 tqdm(
                     executor.map(
-                        lambda url: process_item(url, collection, results_lookup),
+                        lambda url: process_item(url, collection, results_lookup,
+                                                 dsm_lookup),
                         urls_to_process
                     ),
                     total=len(urls_to_process),

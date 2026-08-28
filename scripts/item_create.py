@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import concurrent.futures
+import csv
 import glob
 import logging
 import os
@@ -27,6 +28,7 @@ from datetime import datetime, timezone
 from pystac import Link, RelType
 from tqdm import tqdm
 
+from dsm_pair import PAIRED, PAIRS_CSV
 from stac_utils import (
     geotiff_extract_metadata,
     item_create_from_cache,
@@ -46,15 +48,55 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# DSM Pairing
+# =============================================================================
+
+def dsm_lookup_load(path: str = PAIRS_CSV) -> dict[str, str]:
+    """Map each DEM URL to its paired DSM URL, from scripts/dsm_pair.py output.
+
+    A missing pairs file returns an empty lookup and logs a warning rather than
+    aborting: items are still valid without the second asset, and the DEM build
+    is the more important of the two. It is a warning and not silence because
+    "every item lost its dsm asset" and "there genuinely are no pairs" must not
+    look the same in a log.
+
+    Only `paired` rows yield an asset. Every other status - no_raster_dsm,
+    no_dsm_dir, unpaired, unparseable - is a declared gap recorded in
+    data/dsm_pairing_report.md, not something to guess at here.
+    """
+    if not os.path.exists(path):
+        logger.warning("No DSM pairs file at %s - items will be built with no "
+                       "dsm asset. Run scripts/dsm_pair.py first.", path)
+        return {}
+
+    lookup = {}
+    with open(path, newline="") as fh:
+        for row in csv.DictReader(fh):
+            if row["status"] != PAIRED or not row["dsm_key"]:
+                continue
+            lookup[f"{PATH_S3}/{row['dem_key']}"] = f"{PATH_S3}/{row['dsm_key']}"
+
+    if not lookup:
+        logger.warning("DSM pairs file %s contained no paired rows", path)
+    else:
+        logger.info("Loaded %d DEM->DSM pairs from %s", len(lookup), path)
+    return lookup
+
+
+# =============================================================================
 # Item Processing
 # =============================================================================
 
 def process_item(path_item: str, collection_id: str, path_local: str,
-                 results_lookup: dict) -> dict | None:
+                 results_lookup: dict, dsm_lookup: dict | None = None) -> dict | None:
     """Process a single GeoTIFF URL to create a STAC item.
 
     Uses cached metadata when available (no remote read). Falls back to
     rio_stac for cache misses (should not happen if validation ran first).
+
+    Where `dsm_lookup` names a paired DSM, it is attached as a second asset
+    after the item is built - which covers the cached and rio_stac branches
+    with one piece of code rather than two that could drift.
 
     Returns dict with item_id and item object, or None if processing fails.
     """
@@ -117,6 +159,26 @@ def process_item(path_item: str, collection_id: str, path_local: str,
         if datetime_is_unknown:
             item.properties["datetime_unknown"] = True
 
+        # Second asset: the digital surface model from the same flight.
+        #
+        # The media type is inherited from the DEM's COG status rather than
+        # measured. The two rasters come from one delivery and one processing
+        # run, so they share it - verified on a stratified sample by
+        # scripts/dsm_verify.py, because "same delivery" is an argument and the
+        # sample is the evidence. Measuring all ~96k directly would be a 15-20h
+        # network pass that cannot fit the monthly runner.
+        dsm_href = (dsm_lookup or {}).get(href_item)
+        if dsm_href:
+            item.add_asset(
+                "dsm",
+                pystac.Asset(
+                    href=dsm_href,
+                    media_type=media_type,
+                    roles=["data"],
+                    title="Digital surface model",
+                ),
+            )
+
         path_item_json = f"{path_local}/{item_id}.json"
         item.save_object(dest_href=path_item_json, include_self_link=False)
 
@@ -144,9 +206,15 @@ def load_validation_cache(urls_to_check: list[str]) -> dict:
     """
     all_columns = ["url", "is_geotiff", "is_cog", "epsg", "height", "width", "transform", "bounds"]
 
+    # Normalise both sides before comparing. data/urls_list.txt carries the
+    # single-slash `https:/` form that fs::path() produces, and any other URL
+    # source (data/urls_pairing_changed.txt, a hand-written --urls-file) carries
+    # the real double-slash form. Comparing raw strings makes an already-cached
+    # tile look new, which re-reads it over the network AND appends a duplicate
+    # row to the cache on every run.
     if os.path.exists(PATH_RESULTS_CSV):
         df_existing = pd.read_csv(PATH_RESULTS_CSV)
-        existing_urls = set(df_existing["url"])
+        existing_urls = {fix_url(u) for u in df_existing["url"]}
         logger.info("Loaded %d existing validation results", len(df_existing))
     else:
         df_existing = pd.DataFrame(columns=all_columns)
@@ -160,17 +228,21 @@ def load_validation_cache(urls_to_check: list[str]) -> dict:
     if "transform" in df_existing.columns:
         for _, row in df_existing.iterrows():
             if row.get("is_geotiff") and pd.isna(row.get("transform")):
-                needs_upgrade.add(row["url"])
+                needs_upgrade.add(fix_url(row["url"]))
     else:
-        needs_upgrade = {row["url"] for _, row in df_existing.iterrows() if row["is_geotiff"]}
+        needs_upgrade = {fix_url(row["url"]) for _, row in df_existing.iterrows()
+                         if row["is_geotiff"]}
 
     urls_to_validate = [url for url in urls_to_check
-                        if url not in existing_urls or url in needs_upgrade]
+                        if fix_url(url) not in existing_urls
+                        or fix_url(url) in needs_upgrade]
     if needs_upgrade:
         # Drop old rows that will be re-extracted with spatial metadata
-        urls_upgrading = needs_upgrade & set(urls_to_validate)
+        urls_upgrading = needs_upgrade & {fix_url(u) for u in urls_to_validate}
         if urls_upgrading:
-            df_existing = df_existing[~df_existing["url"].isin(urls_upgrading)]
+            df_existing = df_existing[
+                ~df_existing["url"].map(fix_url).isin(urls_upgrading)
+            ]
             logger.info("%d cached URLs need spatial metadata upgrade", len(urls_upgrading))
 
     logger.info("%d URLs need metadata extraction (%d already cached with full metadata)",
@@ -216,6 +288,9 @@ def main():
     parser.add_argument("--test-count", type=int, default=10, help="Number of items in test mode (default: 10)")
     parser.add_argument("--incremental", action="store_true", help="Process only new URLs from data/urls_new.txt")
     parser.add_argument("--reprocess-invalid", action="store_true", help="Re-process items from data/urls_invalid_items.txt")
+    parser.add_argument("--urls-file", default=None,
+                        help="Explicit URL list to build (e.g. data/urls_pairing_changed.txt). "
+                             "Behaves like --incremental: appends to the existing collection.")
     parser.add_argument("--workers", type=int, default=32, help="Number of parallel workers (default: 32)")
     args = parser.parse_args()
 
@@ -236,7 +311,10 @@ def main():
     collection.set_self_href(PATH_S3_JSON)
 
     # Select URL source based on mode
-    if args.reprocess_invalid:
+    if args.urls_file:
+        urls_file = args.urls_file
+        mode_desc = f"explicit ({args.urls_file})"
+    elif args.reprocess_invalid:
         urls_file = "data/urls_invalid_items.txt"
         mode_desc = "reprocess_invalid"
     elif args.incremental:
@@ -261,7 +339,7 @@ def main():
         existing_item_count = len([l for l in collection.links if l.rel == 'item'])
         logger.info("Reprocess mode: Updating %d items (collection has %d total)",
                      len(urls_to_check), existing_item_count)
-    elif args.test and not args.incremental:
+    elif args.test and not args.incremental and not args.urls_file:
         # Clean slate for test runs
         collection.links = [link for link in collection.links if link.rel != 'item']
         logger.info("Test mode: Cleared existing item links")
@@ -271,12 +349,15 @@ def main():
             for json_file in old_jsons:
                 os.remove(json_file)
             logger.info("Test mode: Deleted %d old item JSON files", len(old_jsons))
-    elif args.incremental:
+    elif args.incremental or args.urls_file:
         existing_item_count = len([l for l in collection.links if l.rel == 'item'])
-        logger.info("Incremental mode: Appending to %d existing items", existing_item_count)
+        logger.info("Appending to %d existing items", existing_item_count)
 
     # Pre-validation
     results_lookup = load_validation_cache(urls_to_check)
+
+    # DEM -> DSM pairing (scripts/dsm_pair.py)
+    dsm_lookup = dsm_lookup_load()
 
     # Parallel item creation
     logger.info("Creating STAC items with %d workers...", args.workers)
@@ -284,7 +365,8 @@ def main():
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
             results = list(filter(None, tqdm(
                 executor.map(
-                    lambda url: process_item(url, collection.id, path_local, results_lookup),
+                    lambda url: process_item(url, collection.id, path_local,
+                                             results_lookup, dsm_lookup),
                     urls_to_check
                 ),
                 total=len(urls_to_check),

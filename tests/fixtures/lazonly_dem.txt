@@ -1,0 +1,9 @@
+082/082j/2018/dem/bc_082j001_xli1m_utm11_2018.tif
+082/082j/2018/dem/bc_082j002_xli1m_utm11_2018.tif
+082/082j/2018/dem/bc_082j011_xli1m_utm11_2018.tif
+082/082j/2018/dem/bc_082j012_xli1m_utm11_2018.tif
+082/082j/2018/dem/bc_082j021_xli1m_utm11_2018.tif
+082/082j/2018/dem/bc_082j022_xli1m_utm11_2018.tif
+082/082j/2018/dem/bc_082j031_xli1m_utm11_2018.tif
+082/082j/2018/dem/bc_082j041_xli1m_utm11_2018.tif
+082/082j/2018/dem/bc_082j051_xli1m_utm11_2018.tif

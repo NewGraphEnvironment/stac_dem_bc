@@ -39,10 +39,12 @@ Rscript scripts/s3_sync.R
 
 | Step | Script | What it does |
 |------|--------|--------------|
-| 0 | `detect_changes.R` | Compare the cached URL list against a fresh objectstore listing to find new or deleted files — this drives incremental updates |
-| 1 | `urls_fetch.R` | Fetch the master list of DEM GeoTIFF URLs from the BC objectstore (~58,000 files), filtering out filenames with parentheses that fail validation |
+| 0 | `detect_changes.R` | Compare the cached URL list against a fresh objectstore listing to find new or deleted files — this drives incremental updates. Also refreshes the DSM listing from the same walk |
+| 1 | `urls_fetch.R` | Fetch the master list of DEM and DSM GeoTIFF URLs from the BC objectstore (~100,000 DEM, ~96,000 DSM) in one bucket walk |
+| 1b | `dsm_pair.py` | Pair each DEM tile with its DSM sibling on tile id and acquisition date, and report every tile that did not pair |
 | 2 | `urls_check_access.py` | Verify source URLs are actually reachable (parallel HTTP HEAD checks), flagging 403s or other access problems |
-| 3 | `collection_create.py` | Create the top-level STAC collection record (`collection.json`) with spatial and temporal extent metadata |
+| 3 | `collection_create.py` | Create the top-level STAC collection record (`collection.json`) with extent, providers and keywords |
+| 3b | `collection_patch.py` | Apply collection metadata (providers, keywords, description) to an **existing** `collection.json` — the monthly run fetches the published collection rather than regenerating it, so `collection_create.py` never runs there |
 | 4 | `item_create.py` | The main workhorse — read each GeoTIFF's metadata remotely, cache it, and generate a STAC JSON record for each file (32 parallel workers) |
 | 5 | `item_validate.py` | Check every generated STAC JSON against the spec using pystac, producing a pass/fail report |
 | 6 | `s3_sync.R` | Sync the local catalog to the S3 bucket, uploading only new or changed files |
@@ -57,12 +59,14 @@ When validation finds problems, these scripts help:
 |--------|--------------|
 | `item_extract_invalid.py` | Pull failed item IDs from the validation report and convert them back to source URLs |
 | `item_reprocess.py` | Re-create invalid items with improved handling (e.g. placeholder dates for files missing date information) |
+| `dsm_verify.py` | Verify on a stratified sample that a DSM really does share its paired DEM's COG status and footprint — the evidence behind inheriting the media type rather than measuring all ~96k |
 
 ### Supporting Scripts
 
 | Script | What it does |
 |--------|--------------|
-| `stac_utils.py` | Shared Python utilities — metadata extraction, date parsing, URL encoding, constants (paths, BC bounding box) |
+| `stac_utils.py` | Shared Python utilities — metadata extraction, date parsing, URL encoding, tile-key parsing for DEM/DSM pairing, constants (paths, BC bounding box) |
+| `urls_listing.R` | Shared objectstore listing — one bucket walk yielding DEM keys, DSM keys and `dsm/` directory membership |
 | `functions.R` | R utilities for VM deployment and table formatting |
 | `staticimports.R` | Auto-generated R helper functions |
 | `utils.R` | Minimal R utilities |
@@ -74,8 +78,13 @@ When validation finds problems, these scripts help:
 
 ```
 BC Objectstore (nrs.objectstore.gov.bc.ca/gdwuts)
-  ↓ urls_fetch.R — list all GeoTIFF URLs
-data/urls_list.txt
+  ↓ urls_fetch.R / detect_changes.R — ONE bucket walk
+data/urls_list.txt        (DEM .tif)
+data/urls_dsm.txt         (DSM .tif)
+data/dsm_groups.txt       (mapsheet-years having a dsm/ directory, .laz-only included)
+  ↓ dsm_pair.py — match on tile id + acquisition date
+data/dem_dsm_pairs.csv          (one row per DEM, always)
+data/dsm_pairing_report.md      (what paired, and every tile that did not)
   ↓ urls_check_access.py — verify URLs are reachable
 data/urls_access_checks.csv
   ↓ item_create.py — read metadata, cache it, generate STAC records
@@ -97,6 +106,7 @@ Every step checks for existing outputs and skips work already done. You can re-r
 | Step | What gets skipped |
 |------|-------------------|
 | `urls_fetch.R` | Reuses cached `urls_list.txt` in test mode |
+| `dsm_pair.py` | Nothing — it is pure and fast (~1 s over 100k tiles), and is re-run whenever the listing changes |
 | `urls_check_access.py` | URLs already checked (cached in CSV) |
 | `item_create.py` | GeoTIFFs with cached metadata skip the slow remote read; existing items skip creation |
 | `item_validate.py` | In `--incremental` mode, only validates items added since the last run |
@@ -180,3 +190,56 @@ ssh <geoserv> "bash stac_register-pypgstac.sh stac-dem-bc https://stac-dem-bc.s3
 ```
 
 This loads the STAC records into PostgreSQL, powering the search API at `images.a11s.one`. Once registered, the collection is browsable in QGIS (STAC Data Source Manager), through the API directly, or any STAC-compatible client. A full reload takes ~46 minutes (dominated by downloading item JSONs from S3; the database load itself is seconds) — an incremental `pypgstac` upsert path is a planned follow-up.
+
+## DEM/DSM Pairing
+
+A DEM and its DSM come from the same flight over the same footprint at the same
+time, so they belong on one STAC item as two assets — `image` (bare-earth DEM,
+named for backward compatibility) and `dsm` (digital surface model).
+
+There is no manifest, so the relationship is inferred from filenames, and the
+naming convention is not uniform across deliveries. **Matching is on parsed
+semantics** — tile id, acquisition date, utm zone, containing mapsheet-year — and
+the naming convention is recorded afterwards as an assertion on an already-matched
+pair. The inversion matters: a future delivery using a convention nobody has seen
+still pairs, and appears in the report as `convention=unknown` rather than quietly
+losing its DSM.
+
+Never construct a sibling path. `/dem/` → `/dsm/` URL swapping is what produced
+the documented finding that BC published no surface models: the swap resolves in
+the four 2022 mapsheet-years that use identical basenames and 404s in the other
+153 (issue #29).
+
+### What the pairing reports
+
+Every DEM lands in exactly one bucket, and the counts are asserted to sum to the
+input before anything is written:
+
+| status | meaning |
+|---|---|
+| `paired` | a DSM was found; the naming convention is recorded |
+| `no_raster_dsm` | the mapsheet-year's `dsm/` holds no `.tif` — published as `.laz` only |
+| `no_dsm_dir` | the mapsheet-year has no `dsm/` directory |
+| `unpaired` | a raster DSM exists in the group but not for this tile |
+| `unparseable` | no tile id could be parsed — reported, never guessed at |
+
+As of 2026-08-28, over 102,416 DEM tiles: 95,887 paired (95,768 `suffix`,
+117 `identical`, 2 `unknown`), 1,211 `no_raster_dsm` across 11 mapsheet-years,
+2,900 `no_dsm_dir`, 2,245 `unparseable` (the whole `albers10k2m` product family,
+which carries no mapsheet tile id), 173 `unpaired`.
+
+### The two listings are not redundant
+
+`urls_dsm.txt` holds raster DSM keys. `dsm_groups.txt` holds every mapsheet-year
+that has a `dsm/` directory *whatever it contains*. Without the second file a
+`.laz`-only delivery produces no keys at all and is indistinguishable from a
+delivery that shipped no DSM — which would misreport 1,211 real tiles.
+
+### Media type
+
+The DSM's media type is inherited from its paired DEM's COG status rather than
+measured: the two come from one delivery and one processing run. Measuring all
+~96k directly is a 15–20 hour network pass that cannot fit the monthly runner.
+`dsm_verify.py` is the evidence for the assumption — a stratified sample across
+naming convention and acquisition year, asserting exact footprint agreement and
+≥99% COG-status agreement, exiting non-zero if either threshold is missed.
