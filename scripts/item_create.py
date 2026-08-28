@@ -123,8 +123,6 @@ def process_item(path_item: str, collection_id: str, path_local: str,
         # Create the item href with proper URL encoding for spaces
         item_href = f"{PATH_S3_STAC}/{item_id}.json"
         encoded_item_href = encode_url_for_gdal(item_href)
-        # Set the item's self-href to the encoded version
-        item.set_self_href(encoded_item_href)
 
         return {"id": item_id, "item": item, "href": encoded_item_href}
     except Exception as e:
