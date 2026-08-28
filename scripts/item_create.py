@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import concurrent.futures
+import csv
 import glob
 import logging
 import os
@@ -27,6 +28,7 @@ from datetime import datetime, timezone
 from pystac import Link, RelType
 from tqdm import tqdm
 
+from dsm_pair import PAIRED, PAIRS_CSV
 from stac_utils import (
     geotiff_extract_metadata,
     item_create_from_cache,
@@ -46,15 +48,55 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# DSM Pairing
+# =============================================================================
+
+def dsm_lookup_load(path: str = PAIRS_CSV) -> dict[str, str]:
+    """Map each DEM URL to its paired DSM URL, from scripts/dsm_pair.py output.
+
+    A missing pairs file returns an empty lookup and logs a warning rather than
+    aborting: items are still valid without the second asset, and the DEM build
+    is the more important of the two. It is a warning and not silence because
+    "every item lost its dsm asset" and "there genuinely are no pairs" must not
+    look the same in a log.
+
+    Only `paired` rows yield an asset. Every other status - no_raster_dsm,
+    no_dsm_dir, unpaired, unparseable - is a declared gap recorded in
+    data/dsm_pairing_report.md, not something to guess at here.
+    """
+    if not os.path.exists(path):
+        logger.warning("No DSM pairs file at %s - items will be built with no "
+                       "dsm asset. Run scripts/dsm_pair.py first.", path)
+        return {}
+
+    lookup = {}
+    with open(path, newline="") as fh:
+        for row in csv.DictReader(fh):
+            if row["status"] != PAIRED or not row["dsm_key"]:
+                continue
+            lookup[f"{PATH_S3}/{row['dem_key']}"] = f"{PATH_S3}/{row['dsm_key']}"
+
+    if not lookup:
+        logger.warning("DSM pairs file %s contained no paired rows", path)
+    else:
+        logger.info("Loaded %d DEM->DSM pairs from %s", len(lookup), path)
+    return lookup
+
+
+# =============================================================================
 # Item Processing
 # =============================================================================
 
 def process_item(path_item: str, collection_id: str, path_local: str,
-                 results_lookup: dict) -> dict | None:
+                 results_lookup: dict, dsm_lookup: dict | None = None) -> dict | None:
     """Process a single GeoTIFF URL to create a STAC item.
 
     Uses cached metadata when available (no remote read). Falls back to
     rio_stac for cache misses (should not happen if validation ran first).
+
+    Where `dsm_lookup` names a paired DSM, it is attached as a second asset
+    after the item is built - which covers the cached and rio_stac branches
+    with one piece of code rather than two that could drift.
 
     Returns dict with item_id and item object, or None if processing fails.
     """
@@ -116,6 +158,26 @@ def process_item(path_item: str, collection_id: str, path_local: str,
 
         if datetime_is_unknown:
             item.properties["datetime_unknown"] = True
+
+        # Second asset: the digital surface model from the same flight.
+        #
+        # The media type is inherited from the DEM's COG status rather than
+        # measured. The two rasters come from one delivery and one processing
+        # run, so they share it - verified on a stratified sample by
+        # scripts/dsm_verify.py, because "same delivery" is an argument and the
+        # sample is the evidence. Measuring all ~96k directly would be a 15-20h
+        # network pass that cannot fit the monthly runner.
+        dsm_href = (dsm_lookup or {}).get(href_item)
+        if dsm_href:
+            item.add_asset(
+                "dsm",
+                pystac.Asset(
+                    href=dsm_href,
+                    media_type=media_type,
+                    roles=["data"],
+                    title="Digital surface model",
+                ),
+            )
 
         path_item_json = f"{path_local}/{item_id}.json"
         item.save_object(dest_href=path_item_json, include_self_link=False)
@@ -278,13 +340,17 @@ def main():
     # Pre-validation
     results_lookup = load_validation_cache(urls_to_check)
 
+    # DEM -> DSM pairing (scripts/dsm_pair.py)
+    dsm_lookup = dsm_lookup_load()
+
     # Parallel item creation
     logger.info("Creating STAC items with %d workers...", args.workers)
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
             results = list(filter(None, tqdm(
                 executor.map(
-                    lambda url: process_item(url, collection.id, path_local, results_lookup),
+                    lambda url: process_item(url, collection.id, path_local,
+                                             results_lookup, dsm_lookup),
                     urls_to_check
                 ),
                 total=len(urls_to_check),

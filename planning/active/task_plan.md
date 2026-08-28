@@ -55,11 +55,11 @@ Listings also return `_$folder$` marker keys, which must be filtered.
 
 ## Phase 1: Reconcile the DEM listing gap
 
-- [ ] Measure the 97,996 vs 100,171 shortfall: full-bucket listing of `.tif` under
+- [x] Measure the 97,996 vs 100,171 shortfall: full-bucket listing of `.tif` under
       `dem/` prefixes vs `data/urls_list.txt`; classify the difference (the
       `pattern = c("dem", "*.tif")` filter in `scripts/urls_fetch.R`, `_$folder$`
       markers, parenthesized filenames per #8, or genuinely new arrivals)
-- [ ] Fix the listing in `scripts/urls_fetch.R` and `scripts/detect_changes.R` if
+- [x] Fix the listing in `scripts/urls_fetch.R` and `scripts/detect_changes.R` if
       the filter is the cause; leave the plausibility guard intact
 - [ ] Post a comment on #31 (xref #29, #27) recording that 60,126 is the pgstac
       count and the catalog holds 98,040 — so the "catch up 60,126 → 100,171"
@@ -67,17 +67,17 @@ Listings also return `_$folder$` marker keys, which must be filtered.
 
 ## Phase 2: List DSM keys
 
-- [ ] Add DSM listing (`ngr::ngr_s3_keys_get(pattern = c("dsm", "*.tif"))`) writing
+- [x] Add DSM listing (`ngr::ngr_s3_keys_get(pattern = c("dsm", "*.tif"))`) writing
       `data/urls_dsm.txt`; filter `_$folder$` markers and non-`.tif` keys
-- [ ] Guard: assign, test exit status, **then** test emptiness — a failed listing
+- [x] Guard: assign, test exit status, **then** test emptiness — a failed listing
       must exit non-zero, never write an empty file that reads as "no DSM here"
       (mirrors the plausibility guard in `detect_changes.R`)
 
 ## Phase 3: Pairing contract — tests first
 
-- [ ] Scaffold `tests/` + pytest (add to `environment.yml` and the workflow's
+- [x] Scaffold `tests/` + pytest (add to `environment.yml` and the workflow's
       `uv pip install`); repo currently has no Python test suite
-- [ ] `tests/test_dsm_pair.py` — failing tests encoding #29's three known answers,
+- [x] `tests/test_dsm_pair.py` — failing tests encoding #29's three known answers,
       run against committed fixture listings (no network):
       1. a `_dsm`-suffix mapsheet-year (`094/094o/2026`) → full pairing,
          `convention == "suffix"`
@@ -85,7 +85,7 @@ Listings also return `_$folder$` marker keys, which must be filtered.
          `convention == "identical"`
       3. a `.laz`-only mapsheet-year (`082/082f/2017`) → **zero** pairs and an
          explicit "no raster DSM" record, not an empty success
-- [ ] Two more tests for the failure modes the issue names:
+- [x] Two more tests for the failure modes the issue names:
       4. a synthetic unknown convention (`..._surface.tif`) → emitted as UNPAIRED
          with the DEM named, never dropped
       5. a listing error → reported as an error, distinguishable from an empty
@@ -93,16 +93,16 @@ Listings also return `_$folder$` marker keys, which must be filtered.
 
 ## Phase 4: Pairing implementation + report
 
-- [ ] `tile_key_parse()` in `scripts/stac_utils.py` — parse a key into
+- [x] `tile_key_parse()` in `scripts/stac_utils.py` — parse a key into
       `(mapsheet_year, tile_id, utm, date_tokens, suffix)`; return `None` (not a
       guess) on an unparseable name
-- [ ] `scripts/dsm_pair.py` — match DEM to DSM on `(mapsheet_year, tile_id,
+- [x] `scripts/dsm_pair.py` — match DEM to DSM on `(mapsheet_year, tile_id,
       date_tokens)`, then assert the matched name against the known conventions and
       **record which one matched**
-- [ ] Write `data/dem_dsm_pairs.csv` (keys relative to `PATH_S3`, not full URLs —
+- [x] Write `data/dem_dsm_pairs.csv` (keys relative to `PATH_S3`, not full URLs —
       halves a ~96k-row file) and `data/dsm_pairing_report.md`: paired count by
       convention, unpaired tiles, mapsheet-years with no raster DSM
-- [ ] Reconcile the report against #29's numbers (95,768 suffix / 117 identical /
+- [x] Reconcile the report against #29's numbers (95,768 suffix / 117 identical /
       1,211 stranded across 11 `.laz`-only mapsheet-years) and explain any drift
 
 ## Phase 5: Verify the inherited-media-type assumption
@@ -127,13 +127,13 @@ Listings also return `_$folder$` marker keys, which must be filtered.
 
 ## Phase 7: `providers` and `keywords` (#30)
 
-- [ ] Add `providers` (Province of BC — producer/licensor/host; New Graph
+- [x] Add `providers` (Province of BC — producer/licensor/host; New Graph
       Environment — processor) and `keywords` to `scripts/collection_create.py`
-- [ ] `scripts/collection_patch.py` — idempotent patch applying the same metadata to
+- [x] `scripts/collection_patch.py` — idempotent patch applying the same metadata to
       an existing `collection.json`. Needed because `update.yml` **fetches**
       collection.json from S3 rather than regenerating it, so `collection_create.py`
       alone would never reach the live collection
-- [ ] Note in the collection description that `image` is the bare-earth DEM
+- [x] Note in the collection description that `image` is the bare-earth DEM
 - [ ] Raise the CC-BY-4.0 vs BC OGL question on #30 — flag, do not silently change
 
 ## Phase 8: Wire in and document

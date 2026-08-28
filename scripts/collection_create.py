@@ -20,6 +20,7 @@ import sys
 import pystac
 from pystac import Collection, Extent, SpatialExtent, TemporalExtent
 
+from collection_patch import DESCRIPTION, KEYWORDS, PROVIDERS
 from stac_utils import (
     BBOX_BC,
     date_extract_from_path,
@@ -92,13 +93,18 @@ def main():
 
     # Create collection
     extent = Extent(spatial=spatial_extent, temporal=temporal_extent)
+    # providers/keywords/description come from collection_patch so a full
+    # rebuild and an in-place patch of the published collection cannot drift.
+    # See issue #30: CC-BY-4.0 obliges attribution the metadata did not carry.
     collection = Collection(
         id=collection_id,
-        description="A collection of Digital Elevation Models from British Columbia - as served on lidarbc",
+        description=DESCRIPTION,
         extent=extent,
         license="CC-BY-4.0",
         title=f"Digital Elevation Models from British Columbia - {collection_id}",
-        href=path_collection
+        href=path_collection,
+        providers=[pystac.Provider.from_dict(p) for p in PROVIDERS],
+        keywords=list(KEYWORDS),
     )
 
     # Save with correct hrefs

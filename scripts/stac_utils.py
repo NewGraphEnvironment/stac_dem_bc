@@ -101,6 +101,124 @@ def datetime_parse_item(s: str | None) -> datetime | None:
 
 
 # =============================================================================
+# Tile Key Parsing (DEM/DSM pairing)
+# =============================================================================
+
+# A tile identifier is an NTS mapsheet code optionally followed by 1-2 digit
+# subdivision tokens (e.g. 094o056_2_1_4). Two code widths exist in the bucket
+# and both are load-bearing:
+#   082e003     3 digits  - 89,024 DEM tiles
+#   092h001212  6 digits  - 1,659 DEM tiles, the older whole-mapsheet deliveries
+# Accepting only the 3-digit form left 901 of the 1,211 .laz-only stranded tiles
+# reported as `unparseable` instead of as the coverage gap they actually are.
+RE_MAPSHEET = re.compile(r"^\d{3}[a-z](?:\d{3}|\d{6})$")
+RE_SUBDIVISION = re.compile(r"^\d{1,2}$")
+RE_UTM = re.compile(r"^utm\d{1,2}$")
+# 4-digit year or 8-digit YYYYMMDD. Deliberately excludes 5-6 digit project
+# numbers such as the 17603 in bc_082e003_1_4_4_xl1m_17603.
+RE_DATE = re.compile(r"^(?:19|20)\d{2}(?:[01]\d[0-3]\d)?$")
+
+# Trailing tokens that name the product rather than the tile. Stripped before
+# the stem is compared, so the same tile pairs across all three observed
+# naming conventions.
+PRODUCT_TOKENS = ("dem", "dsm", "chm")
+
+
+def tile_key_parse(key: str) -> dict | None:
+    """Parse an objectstore key into the fields DEM/DSM pairing matches on.
+
+    Returns a dict with:
+        group     - the containing mapsheet-year directory (e.g. "082/082f/2022"),
+                    i.e. the key's path with the product directory and filename
+                    removed. Pairing never crosses a group.
+        tile_id   - NTS mapsheet code plus any subdivision (e.g. "094o056_2_1_4")
+        utm       - utm zone token if present, else None
+        dates     - tuple of date tokens found after the tile id (YYYY or YYYYMMDD)
+        product   - trailing product token ("dem"/"dsm"/"chm") if present, else None
+        stem      - basename with the extension and any product token removed
+        basename  - basename with the extension removed
+
+    Returns None when no mapsheet tile id can be found, rather than guessing.
+    Callers must treat None as "report this key", never as "no match here".
+
+    The pairing key is (group, tile_id, utm, dates) — parsed semantics, not a
+    name transform. `stem` and `product` are used only to classify which naming
+    convention a matched pair used, so an unrecognised convention surfaces as a
+    reported row instead of a silent drop.
+    """
+    if not key or not key.lower().endswith(".tif"):
+        return None
+
+    # Accept a bare object key, a full URL, or the single-slash "https:/" form
+    # that fs::path() produces in data/urls_list.txt - all three must yield the
+    # same group, or DEM and DSM would never match.
+    path = fix_url(key)
+    if path.startswith(PATH_S3):
+        path = path[len(PATH_S3):]
+    path = path.lstrip("/")
+    parts = path.split("/")
+    if len(parts) < 2:
+        return None
+
+    basename = parts[-1][: -len(".tif")]
+    group = "/".join(parts[:-2])
+
+    tokens = basename.split("_")
+    product = tokens[-1].lower() if tokens[-1].lower() in PRODUCT_TOKENS else None
+    if product:
+        tokens = tokens[:-1]
+    if not tokens:
+        return None
+    stem = "_".join(tokens)
+
+    idx = next((i for i, t in enumerate(tokens) if RE_MAPSHEET.match(t.lower())), None)
+    if idx is None:
+        return None
+
+    tile_parts = [tokens[idx].lower()]
+    j = idx + 1
+    while j < len(tokens) and RE_SUBDIVISION.match(tokens[j]):
+        tile_parts.append(tokens[j])
+        j += 1
+
+    tail = tokens[j:]
+    utm = next((t.lower() for t in tail if RE_UTM.match(t.lower())), None)
+    dates = tuple(t for t in tail if RE_DATE.match(t))
+
+    return {
+        "group": group,
+        "tile_id": "_".join(tile_parts),
+        "utm": utm,
+        "dates": dates,
+        "product": product,
+        "stem": stem,
+        "basename": basename,
+    }
+
+
+def pair_key(parsed: dict) -> tuple:
+    """Match key for a parsed tile: pairing never crosses these four fields."""
+    return (parsed["group"], parsed["tile_id"], parsed["utm"], parsed["dates"])
+
+
+def convention_classify(dem_basename: str, dsm_basename: str) -> str:
+    """Name which naming convention relates a matched DEM/DSM basename pair.
+
+    Classification is an assertion on an already-matched pair, not the means of
+    matching. "unknown" is a real, reportable outcome - a future delivery using
+    a convention we have not seen still pairs on tile id and date, and shows up
+    here so it can be reviewed.
+    """
+    if dsm_basename == dem_basename:
+        return "identical"
+    if dsm_basename == f"{dem_basename}_dsm":
+        return "suffix"
+    if dem_basename.endswith("_dem") and dsm_basename == f"{dem_basename[: -len('_dem')]}_dsm":
+        return "product_token"
+    return "unknown"
+
+
+# =============================================================================
 # GeoTIFF Validation
 # =============================================================================
 

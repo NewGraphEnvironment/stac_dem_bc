@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # Change Detection: Compare BC DEM objectstore with cached URL list
 # Outputs: urls_new.txt, urls_deleted.txt
-# Updates: urls_list.txt
+# Updates: urls_list.txt, urls_dsm.txt, dsm_groups.txt
 # Exit: 0 = no changes, 1 = changes detected, 2 = error (including the
 #       plausibility guard — a suspiciously short listing refuses to touch
 #       the cache or outputs, since a truncated fetch committed into
@@ -10,6 +10,13 @@
 # NOTE: no library() calls here — everything is namespaced (ngr::, readr::,
 # fs::) so a missing package fails inside the tryCatch and exits 2 (error),
 # not 1 (which the workflow reads as "changes detected").
+#
+# The DSM listing rides along on the same bucket walk (scripts/urls_listing.R).
+# It is refreshed on every run and is not part of the exit contract: DSM keys
+# feed scripts/dsm_pair.py, which decides which DEM items gain a dsm asset.
+# That source() happens INSIDE the tryCatch below, deliberately — sourcing at
+# top level would let a missing or broken helper abort with Rscript's default
+# status 1, which the workflow reads as "changes detected" rather than "error".
 
 # Setup logging
 timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
@@ -21,28 +28,28 @@ result <- tryCatch({
   cat("=== STAC DEM BC Change Detection ===\n")
   cat(sprintf("Started: %s\n\n", Sys.time()))
 
+  source("scripts/urls_listing.R")
+
   # Paths
   url_bucket <- "https://nrs.objectstore.gov.bc.ca/gdwuts"
   cache_file <- "data/urls_list.txt"
   new_file <- "data/urls_new.txt"
   deleted_file <- "data/urls_deleted.txt"
+  dsm_file <- "data/urls_dsm.txt"
+  dsm_groups_file <- "data/dsm_groups.txt"
 
-  # Step 1: Fetch fresh URL list from objectstore
+  # Step 1: Fetch fresh listing from objectstore (one walk, DEM + DSM)
   cat("Fetching fresh URL list from BC objectstore...\n")
-  cat(sprintf("  Bucket: %s\n", url_bucket))
-  cat(sprintf("  Pattern: dem + *.tif\n\n"))
+  cat(sprintf("  Bucket: %s\n\n", url_bucket))
 
   start_time <- Sys.time()
 
-  fresh_urls <- ngr::ngr_s3_keys_get(
-    url_bucket = url_bucket,
-    prefix = "",
-    pattern = c("dem", "*.tif")
-  )
+  listing <- urls_listing_fetch(url_bucket = url_bucket)
+  fresh_urls <- listing$dem
 
   fetch_time <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
 
-  cat(sprintf("Fetched %d URLs in %.1f seconds (%.1f URLs/sec)\n\n",
+  cat(sprintf("Fetched %d DEM URLs in %.1f seconds (%.1f URLs/sec)\n\n",
               length(fresh_urls), fetch_time, length(fresh_urls) / fetch_time))
 
   # Step 2: Load cached URL list
@@ -111,6 +118,18 @@ result <- tryCatch({
   cat(sprintf("\nUpdating cache (%s) with fresh URL list...\n", cache_file))
   readr::write_lines(fresh_set, cache_file)
   cat(sprintf("  Wrote %d URLs to cache\n", length(fresh_set)))
+
+  # Step 5b: Refresh the DSM listing artifacts from the same walk. Both are
+  # rewritten unconditionally — urls_listing_fetch() has already refused to
+  # return on a truncated or filter-broken walk, so reaching here means the
+  # values are trustworthy. Writing them only on change would leave a stale
+  # pairing input after a partial run.
+  cat("\nRefreshing DSM listing artifacts...\n")
+  readr::write_lines(listing$dsm, dsm_file)
+  readr::write_lines(listing$dsm_groups, dsm_groups_file)
+  cat(sprintf("  Wrote %d DSM URLs to %s\n", length(listing$dsm), dsm_file))
+  cat(sprintf("  Wrote %d dsm/ directories to %s\n",
+              length(listing$dsm_groups), dsm_groups_file))
 
   # Summary
   cat("\n=== SUMMARY ===\n")
