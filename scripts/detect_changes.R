@@ -119,15 +119,32 @@ result <- tryCatch({
   readr::write_lines(fresh_set, cache_file)
   cat(sprintf("  Wrote %d URLs to cache\n", length(fresh_set)))
 
-  # Step 5b: Refresh the DSM listing artifacts from the same walk. Both are
-  # rewritten unconditionally — urls_listing_fetch() has already refused to
-  # return on a truncated or filter-broken walk, so reaching here means the
-  # values are trustworthy. Writing them only on change would leave a stale
-  # pairing input after a partial run.
+  # Step 5b: Refresh the DSM listing artifacts from the same walk.
+  #
+  # The DEM side has a 90%-of-cached ratchet above; without the same guard here
+  # a DSM-heavy truncation would pass the whole-walk floor, overwrite
+  # urls_dsm.txt with a short list, and strip the dsm asset off every item whose
+  # DSM fell out of the listing. The walk succeeding says nothing about the DSM
+  # count specifically.
   cat("\nRefreshing DSM listing artifacts...\n")
+  if (file.exists(dsm_file)) {
+    cached_dsm <- readr::read_lines(dsm_file)
+    if (length(cached_dsm) > 0 && length(listing$dsm) < 0.9 * length(cached_dsm)) {
+      stop(sprintf(
+        "fresh DSM listing (%d URLs) is < 90%% of cached (%d) - refusing to update (truncated fetch?)",
+        length(listing$dsm), length(cached_dsm)
+      ))
+    }
+    dsm_changed <- !identical(sort(as.character(listing$dsm)), sort(as.character(cached_dsm)))
+  } else {
+    cached_dsm <- character(0)
+    dsm_changed <- TRUE
+  }
+
   readr::write_lines(listing$dsm, dsm_file)
   readr::write_lines(listing$dsm_groups, dsm_groups_file)
-  cat(sprintf("  Wrote %d DSM URLs to %s\n", length(listing$dsm), dsm_file))
+  cat(sprintf("  Wrote %d DSM URLs to %s (was %d, changed: %s)\n",
+              length(listing$dsm), dsm_file, length(cached_dsm), dsm_changed))
   cat(sprintf("  Wrote %d dsm/ directories to %s\n",
               length(listing$dsm_groups), dsm_groups_file))
 
@@ -137,6 +154,7 @@ result <- tryCatch({
   cat(sprintf("Cached URLs: %d\n", length(cached_set)))
   cat(sprintf("New: %d\n", length(new_urls)))
   cat(sprintf("Deleted: %d\n", length(deleted_urls)))
+  cat(sprintf("DSM listing changed: %s\n", dsm_changed))
   cat(sprintf("Total changes: %d\n", length(new_urls) + length(deleted_urls)))
 
   # Show sample of new URLs if any
@@ -153,7 +171,11 @@ result <- tryCatch({
   cat(sprintf("\nCompleted: %s\n", Sys.time()))
   cat(sprintf("Log saved to: %s\n", log_file))
 
-  length(new_urls) > 0 || length(deleted_urls) > 0
+  # A DSM-only month is a real change: a surface model can arrive for a DEM
+  # already in the catalog. Reporting exit 0 there would skip the pairing step
+  # AND the cache commit, so the refreshed listings would die with the runner
+  # and the item would never gain its asset.
+  length(new_urls) > 0 || length(deleted_urls) > 0 || isTRUE(dsm_changed)
 }, error = function(e) {
   cat(sprintf("\nERROR: %s\n", conditionMessage(e)))
   "error"

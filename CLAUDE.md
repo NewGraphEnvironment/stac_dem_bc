@@ -66,12 +66,26 @@ This project maintains the STAC catalog for BC's LidarBC DEM collection with aut
 
 ```
 data/
-├── urls_list.txt              # Master URL list from BC objectstore (~98k URLs)
+├── urls_list.txt              # Master DEM URL list from BC objectstore (~102k URLs)
+├── urls_dsm.txt               # DSM URL list (~96k) — second asset source
+├── dsm_groups.txt             # Mapsheet-years having a dsm/ dir, .laz-only included
 ├── urls_new.txt               # New URLs detected by change detection
 ├── urls_deleted.txt           # Deleted URLs (audit trail)
+├── dem_dsm_pairs.csv          # DEM→DSM pairing (dem_key, dsm_key, convention, status)
+├── dsm_pairing_report.md      # What paired, and every tile that did not
 ├── stac_geotiff_checks.csv    # Source validation (url, is_geotiff, is_cog)
 └── stac_item_validation.csv   # Output validation (item_id, json_valid, error)
 ```
+
+**DEM/DSM pairing (#31):** matching is on parsed semantics — tile id, acquisition
+date, utm zone, mapsheet-year — and the naming convention is recorded *afterwards*
+as an assertion on an already-matched pair. An unfamiliar convention therefore
+still pairs and surfaces as `convention=unknown`, rather than dropping a DSM.
+Never construct a sibling path: `/dem/` → `/dsm/` swapping resolves in 4 of 157
+mapsheet-years and is what produced the earlier finding that BC published no
+surface models. `dsm_groups.txt` is not redundant with `urls_dsm.txt` — without it
+a `.laz`-only delivery is indistinguishable from "no DSM was delivered", which
+would misreport 1,211 real tiles.
 
 **Validation layers:**
 1. **GeoTIFF validation** (`stac_geotiff_checks.csv`) - Validates source data quality
@@ -87,10 +101,17 @@ data/
    - Filters items before PgSTAC registration
    - Script: `scripts/item_validate.py`
 
+3. **DSM pairing** (`dem_dsm_pairs.csv`) - Which tiles get a second asset
+   - Every DEM lands in exactly one of five statuses; counts are asserted to sum
+     to the input before anything is written
+   - `dsm_verify.py` samples the inherited-media-type assumption rather than
+     measuring all ~96k (a 15-20h pass that cannot fit the runner)
+   - Script: `scripts/dsm_pair.py`
+
 **Workflow integration:**
 ```
-Source URLs → GeoTIFF Validation → Item Creation → JSON Validation → Registration
- (urls_list)   (geotiff_checks)      (.qmd/.py)    (item_validation)   (pgstac)
+Source URLs → GeoTIFF Validation → DSM Pairing → Item Creation → JSON Validation → Registration
+ (urls_list)   (geotiff_checks)   (dem_dsm_pairs)   (.qmd/.py)    (item_validation)   (pgstac)
 ```
 
 **Key insight:** Separation of source quality (can we read it?) from output quality (is STAC valid?) enables better debugging and incremental processing.

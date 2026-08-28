@@ -64,6 +64,19 @@ urls_listing_fetch <- function(url_bucket = URL_BUCKET, keys_min = KEYS_MIN) {
   dsm_any <- all_urls[grepl("/dsm/", all_urls, fixed = TRUE)]
   dsm_groups <- sort(unique(sub("/dsm/.*$", "", sub("^.*/gdwuts/", "", dsm_any))))
 
+  # sub() returns its input UNCHANGED when the pattern does not match, so a
+  # change to the URL shape would silently emit full URLs as group names. Those
+  # match no DEM group, which flips every .laz-only tile from "no raster DSM"
+  # to "no dsm/ directory" — a wrong answer, with nothing to signal it. Assert
+  # the derived shape instead of trusting the substitution.
+  bad_groups <- dsm_groups[!grepl("^[0-9]{3}/[0-9]{3}[a-z]/[0-9]{4}$", dsm_groups)]
+  if (length(bad_groups) > 0) {
+    stop(sprintf(
+      "%d dsm/ group names are not <block>/<mapsheet>/<year> (e.g. '%s') - URL shape changed?",
+      length(bad_groups), bad_groups[1]
+    ))
+  }
+
   if (length(dem) == 0) {
     stop("bucket walk succeeded but yielded 0 DEM .tif keys - filter is broken")
   }

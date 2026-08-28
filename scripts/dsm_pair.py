@@ -54,6 +54,10 @@ DSM_KEYS_FILE = "data/urls_dsm.txt"
 DSM_GROUPS_FILE = "data/dsm_groups.txt"
 PAIRS_CSV = "data/dem_dsm_pairs.csv"
 REPORT_MD = "data/dsm_pairing_report.md"
+# DEM URLs whose paired DSM changed since the last run. A surface model can
+# arrive for a DEM that is already in the catalog, and nothing else would ever
+# rebuild that item -- item_create.py only ever sees newly-listed DEM URLs.
+CHANGED_URLS_FILE = "data/urls_pairing_changed.txt"
 
 # Statuses. `paired` is the only one that yields a dsm asset; the rest are
 # declared gaps that appear in the report.
@@ -146,7 +150,17 @@ def pairs_build(dem_keys: list[str], dsm_keys: list[str],
         group = parsed["group"]
         matches = dsm_by_key.get(pair_key(parsed), [])
         if matches:
-            dsm = matches[0]
+            # Several DSMs can share one match key where the bucket holds the
+            # same tile under two spellings -- 121 tiles carry both a `utm09`
+            # and a `utm9` DSM. Prefer the one whose name relates to this DEM's
+            # by a convention we recognise, so the choice among equals is
+            # deterministic and the recorded convention stays accurate instead
+            # of degrading to `unknown` on an arbitrary pick.
+            dsm = next(
+                (m for m in matches
+                 if convention_classify(parsed["basename"], m["basename"]) != "unknown"),
+                matches[0],
+            )
             claimed[dsm["key"]].append(key)
             rows.append({
                 "dem_key": key_relative(key),
@@ -182,10 +196,14 @@ def pairs_build(dem_keys: list[str], dsm_keys: list[str],
     # were too coarse.
     dsm_shared = {k: v for k, v in claimed.items() if len(v) > 1}
 
-    # Nothing may vanish between input and output.
-    assert len(rows) == len(dem_keys), (
-        f"row count {len(rows)} != dem input {len(dem_keys)}"
-    )
+    # Nothing may vanish between input and output. An explicit raise rather
+    # than an assert: `python -O` strips asserts, and this is the invariant the
+    # whole script exists to uphold.
+    if len(rows) != len(dem_keys):
+        raise RuntimeError(
+            f"row count {len(rows)} != dem input {len(dem_keys)} - "
+            "a DEM key was dropped, which must never happen silently"
+        )
 
     return {
         "rows": rows,
@@ -194,6 +212,23 @@ def pairs_build(dem_keys: list[str], dsm_keys: list[str],
         "dsm_unparseable": dsm_unparseable,
         "dsm_shared": dsm_shared,
     }
+
+
+def pairing_changed(rows: list[dict], previous_csv: str) -> list[str]:
+    """DEM keys whose paired DSM differs from the previous run's pairing.
+
+    Returns [] when there is no previous file -- a first run has nothing to
+    compare against, and treating every tile as changed would queue a 100k-item
+    rebuild. That is a deliberate asymmetry, noted in the log by the caller.
+    """
+    if not os.path.exists(previous_csv):
+        return []
+    with open(previous_csv, newline="") as fh:
+        before = {r["dem_key"]: r["dsm_key"] for r in csv.DictReader(fh)}
+    return [
+        r["dem_key"] for r in rows
+        if r["dem_key"] in before and before[r["dem_key"]] != r["dsm_key"]
+    ]
 
 
 def summarize(result: dict) -> dict:
@@ -298,10 +333,12 @@ def report_render(summary: dict, result: dict) -> str:
     lines += [f"## DSM rasters claimed by more than one DEM ({len(shared)})", ""]
     if shared:
         lines += [
-            "A re-issued DEM beside its original: both describe the same",
-            "footprint and both carry the asset. Listed so the alternative",
-            "explanation -- a match key too coarse to separate two real tiles --",
-            "cannot pass unnoticed.",
+            "Two DEM keys matched one DSM. Known benign causes: a re-issued",
+            "DEM beside its original (`..._2019.tif` and `..._2019_1.tif`), and",
+            "the same tile spelled with a padded and an unpadded utm zone. Both",
+            "carry the asset. Listed rather than assumed, because a match key",
+            "too coarse to separate two genuinely different tiles would produce",
+            "exactly this shape, and the two must not look the same.",
             "",
         ]
         for dsm_key, dems in list(shared.items())[:10]:
@@ -335,6 +372,7 @@ def main() -> int:
     parser.add_argument("--dsm-groups", default=DSM_GROUPS_FILE)
     parser.add_argument("--pairs-csv", default=PAIRS_CSV)
     parser.add_argument("--report", default=REPORT_MD)
+    parser.add_argument("--changed-urls", default=CHANGED_URLS_FILE)
     parser.add_argument("--dry-run", action="store_true",
                         help="Print the summary without writing outputs")
     args = parser.parse_args()
@@ -369,7 +407,21 @@ def main() -> int:
         logger.info("Dry run - no files written")
         return 0
 
+    # Compute this BEFORE the csv is overwritten -- it is a diff against the
+    # previous run, and the previous run's file is the only record of it.
+    changed = pairing_changed(result["rows"], args.pairs_csv)
+    if not os.path.exists(args.pairs_csv):
+        logger.info("No previous pairing to diff against - not queueing rebuilds")
+    elif changed:
+        logger.info("%d DEM items need rebuilding: their paired DSM changed",
+                    len(changed))
+    else:
+        logger.info("No pairing changes since the last run")
+
     os.makedirs(os.path.dirname(args.pairs_csv) or ".", exist_ok=True)
+    with open(args.changed_urls, "w") as fh:
+        fh.write("".join(f"{PATH_S3}/{k}\n" for k in changed))
+
     with open(args.pairs_csv, "w", newline="") as fh:
         writer = csv.DictWriter(
             fh, fieldnames=["dem_key", "dsm_key", "group", "tile_id", "convention", "status"]

@@ -54,3 +54,51 @@
   and date, and surfaced in the report rather than dropping a DSM.
 - Guards mutation-tested: collapsing `no_raster_dsm`, treating an empty listing as
   no-DSM, and dropping unpaired DEMs each fail the suite (1, 1 and 4 tests).
+
+### Review findings folded in, verification passed — 2026-08-28
+
+Concurrent code review returned six findings; all six were reproduced before
+acting, and all six were real:
+
+1. **A DSM-only month exited 0**, skipping the pairing step *and* the cache
+   commit — the refreshed listings would have died with the runner. The exit
+   contract now counts a DSM listing change as a change.
+2. **No ratchet on the DSM listing.** DEM had a 90%-of-cached guard; DSM had only
+   `== 0`. A DSM-heavy truncation passed both guards and would have stripped the
+   asset off every item whose DSM fell out. Same ratchet added.
+3. **utm zone padding.** The bucket spells it both ways — 26,042 `utm09` against
+   8,049 `utm9` — and `092/092l/2023` carries a `utm09` DEM whose only DSM is
+   spelled `utm9`. Confirmed reported as `unpaired`. Zone now normalised.
+4. **`YYMMDD` dates were not recognised**, so `bc_082l024_2_3_3_..._170529` and
+   `..._170607` — the same tile flown twice — collapsed to one match key. A
+   bucket-wide sweep found exactly 40 DEM match-key collisions; 34 are the known
+   parenthesized duplicates (#8), 2 are these flights, 2 the 083d re-issues.
+5. **`sub("^.*/gdwuts/")` returns its input unchanged on no match**, so a URL
+   shape change would silently emit full URLs as group names and flip every
+   `.laz`-only tile to `no_dsm_dir`. Now asserts the derived shape.
+6. **The conservation invariant was a bare `assert`**, stripped by `python -O`.
+   Now an explicit raise.
+
+Normalising utm exposed 121 tiles carrying *both* spellings as separate DSM
+files. An arbitrary pick recorded them as `convention=unknown`, burying the 3
+real unknowns in noise; the tie-break now prefers a DSM whose name relates to
+the DEM's by a recognised convention. Final: 95,768 `suffix` (matching #29
+exactly), 117 `identical`, 3 `unknown`.
+
+**Sample verification passed** — 500 tiles stratified across convention and year:
+COG-status agreement 0.9980 (threshold 0.99), footprint agreement 1.0000 over the
+115 tiles whose DEM footprint is cached (threshold 1.00). The footprint rate is
+computed over a smaller population on purpose: 60,324 of 100,345 cache rows
+predate spatial-metadata caching and carry NaN, and scoring "never recorded" as
+"differs" reported a false 15% agreement on the first run.
+
+**A pre-existing bug surfaced by the end-to-end test**: cache lookups compared raw
+URL strings, but `urls_list.txt` carries fs::path's single-slash `https:/` form
+while every other source carries `https://`. A 6-URL build re-read all six over
+the network and appended 6 duplicate rows to `stac_geotiff_checks.csv`. Both
+sides now normalise; re-running the same build extracts 0 and leaves the cache
+byte-identical.
+
+End-to-end proof: 6 items built, both `image` and `dsm` assets present, 6/6 valid
+under `item_validate.py`, collection carries providers/keywords with all 98,040
+item links preserved.

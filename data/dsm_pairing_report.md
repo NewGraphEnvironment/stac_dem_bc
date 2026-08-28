@@ -10,10 +10,10 @@ a tile's DSM silently.
 
 | outcome | tiles | share |
 |---|---|---|
-| `paired` | 95,887 | 93.63% |
+| `paired` | 95,888 | 93.63% |
 | `no_raster_dsm` | 1,211 | 1.18% |
 | `no_dsm_dir` | 2,900 | 2.83% |
-| `unpaired` | 173 | 0.17% |
+| `unpaired` | 172 | 0.17% |
 | `unparseable` | 2,245 | 2.19% |
 | **total** | **102,416** | |
 
@@ -21,9 +21,9 @@ a tile's DSM silently.
 
 | convention | tiles | share of paired |
 |---|---|---|
-| `suffix` | 95,768 | 99.88% |
+| `suffix` | 95,768 | 99.87% |
 | `identical` | 117 | 0.12% |
-| `unknown` | 2 | 0.00% |
+| `unknown` | 3 | 0.00% |
 
 ## Mapsheet-years with a `dsm/` directory but no raster (11)
 
@@ -42,7 +42,7 @@ is a declared coverage gap, not a pairing failure.
 - `092/092h/2016`
 - `092/092j/2016`
 
-## Unpaired tiles in groups that do have a raster DSM (173)
+## Unpaired tiles in groups that do have a raster DSM (172)
 
 A DSM raster exists in the mapsheet-year but none matched this tile.
 Review these -- an unfamiliar naming convention lands here.
@@ -59,7 +59,6 @@ Review these -- an unfamiliar naming convention lands here.
 | `092/092j/2019` | 2 |
 | `082/082g/2022` | 1 |
 | `092/092b/2021` | 1 |
-| `092/092l/2023` | 1 |
 | `103/103i/2021` | 1 |
 
 ## DEM keys with no parseable tile id (2,245)
@@ -85,12 +84,14 @@ Reported rather than guessed at. Sample:
 - `092/092g/2021/dsm/bc_092g099_xli1m_utm10_2021_dsm.tif`
 - `092/092o/2024/dsm/bc_092o095_3_3_3_xli1m_utm10_20230918_20240510_dsm.tif`
 
-## DSM rasters claimed by more than one DEM (2)
+## DSM rasters claimed by more than one DEM (3)
 
-A re-issued DEM beside its original: both describe the same
-footprint and both carry the asset. Listed so the alternative
-explanation -- a match key too coarse to separate two real tiles --
-cannot pass unnoticed.
+Two DEM keys matched one DSM. Known benign causes: a re-issued
+DEM beside its original (`..._2019.tif` and `..._2019_1.tif`), and
+the same tile spelled with a padded and an unpadded utm zone. Both
+carry the asset. Listed rather than assumed, because a match key
+too coarse to separate two genuinely different tiles would produce
+exactly this shape, and the two must not look the same.
 
 - `083/083d/2019/dsm/bc_083d014_xli1m_utm11_2019_dsm.tif`
     - `083/083d/2019/dem/bc_083d014_xli1m_utm11_2019.tif`
@@ -98,3 +99,41 @@ cannot pass unnoticed.
 - `083/083d/2019/dsm/bc_083d015_xli1m_utm11_2019_dsm.tif`
     - `083/083d/2019/dem/bc_083d015_xli1m_utm11_2019.tif`
     - `083/083d/2019/dem/bc_083d015_xli1m_utm11_2019_1.tif`
+- `092/092l/2023/dsm/bc_092l061_2_1_2_xli1m_utm9_20231027_20231031_dsm.tif`
+    - `092/092l/2023/dem/bc_092l061_2_1_2_xli1m_utm09_20231027_20231031.tif`
+    - `092/092l/2023/dem/bc_092l061_2_1_2_xli1m_utm9_20231027_20231031.tif`
+
+## Ambiguous DSM match keys (121)
+
+More than one DSM raster shares a tile id, date and utm zone within
+one mapsheet-year. The first is used; review these.
+
+- `('102/102i/2023', '102i060_1_1_4', 'utm9', ('20231028', '20231028'))`: 102/102i/2023/dsm/bc_102i060_1_1_4_xli1m_utm09_20231028_20231028_dsm.tif, 102/102i/2023/dsm/bc_102i060_1_1_4_xli1m_utm9_20231028_20231028_dsm.tif
+- `('102/102i/2023', '102i060_1_2_1', 'utm9', ('20231028', '20231028'))`: 102/102i/2023/dsm/bc_102i060_1_2_1_xli1m_utm09_20231028_20231028_dsm.tif, 102/102i/2023/dsm/bc_102i060_1_2_1_xli1m_utm9_20231028_20231028_dsm.tif
+- `('102/102i/2023', '102i060_1_2_2', 'utm9', ('20231028', '20231028'))`: 102/102i/2023/dsm/bc_102i060_1_2_2_xli1m_utm09_20231028_20231028_dsm.tif, 102/102i/2023/dsm/bc_102i060_1_2_2_xli1m_utm9_20231028_20231028_dsm.tif
+- `('102/102i/2023', '102i060_1_2_3', 'utm9', ('20231028', '20231030'))`: 102/102i/2023/dsm/bc_102i060_1_2_3_xli1m_utm09_20231028_20231030_dsm.tif, 102/102i/2023/dsm/bc_102i060_1_2_3_xli1m_utm9_20231028_20231030_dsm.tif
+- `('102/102i/2023', '102i060_1_2_4', 'utm9', ('20231028', '20231030'))`: 102/102i/2023/dsm/bc_102i060_1_2_4_xli1m_utm09_20231028_20231030_dsm.tif, 102/102i/2023/dsm/bc_102i060_1_2_4_xli1m_utm9_20231028_20231030_dsm.tif
+- `('102/102i/2023', '102i060_1_3_1', 'utm9', ('20231028', '20231030'))`: 102/102i/2023/dsm/bc_102i060_1_3_1_xli1m_utm09_20231028_20231030_dsm.tif, 102/102i/2023/dsm/bc_102i060_1_3_1_xli1m_utm9_20231028_20231030_dsm.tif
+- `('102/102i/2023', '102i060_1_3_2', 'utm9', ('20231028', '20231030'))`: 102/102i/2023/dsm/bc_102i060_1_3_2_xli1m_utm09_20231028_20231030_dsm.tif, 102/102i/2023/dsm/bc_102i060_1_3_2_xli1m_utm9_20231028_20231030_dsm.tif
+- `('102/102i/2023', '102i060_1_3_3', 'utm9', ('20231028', '20231030'))`: 102/102i/2023/dsm/bc_102i060_1_3_3_xli1m_utm09_20231028_20231030_dsm.tif, 102/102i/2023/dsm/bc_102i060_1_3_3_xli1m_utm9_20231028_20231030_dsm.tif
+- `('102/102i/2023', '102i060_1_3_4', 'utm9', ('20231028', '20231030'))`: 102/102i/2023/dsm/bc_102i060_1_3_4_xli1m_utm09_20231028_20231030_dsm.tif, 102/102i/2023/dsm/bc_102i060_1_3_4_xli1m_utm9_20231028_20231030_dsm.tif
+- `('102/102i/2023', '102i060_1_4_1', 'utm9', ('20231028', '20231030'))`: 102/102i/2023/dsm/bc_102i060_1_4_1_xli1m_utm09_20231028_20231030_dsm.tif, 102/102i/2023/dsm/bc_102i060_1_4_1_xli1m_utm9_20231028_20231030_dsm.tif
+
+## Inherited media type - sample verification
+
+Items carry the DSM's media type inherited from the paired DEM
+rather than measured. This is the evidence for that.
+
+| | |
+|---|---|
+| sampled | 500 |
+| readable | 500 |
+| COG status agreement | 0.9980 over 500 (threshold 0.99) |
+| footprint agreement | 1.0000 over 115 (threshold 1.0) |
+| footprint not comparable | 385 tiles whose DEM predates spatial-metadata caching |
+| verdict | PASS |
+
+Sample is stratified across naming convention and acquisition
+year, seed 31, so the 117 identical-basename tiles and
+the 2 unknown-convention ones are exercised rather than rounded
+out of a proportional draw.

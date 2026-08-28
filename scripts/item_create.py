@@ -206,9 +206,15 @@ def load_validation_cache(urls_to_check: list[str]) -> dict:
     """
     all_columns = ["url", "is_geotiff", "is_cog", "epsg", "height", "width", "transform", "bounds"]
 
+    # Normalise both sides before comparing. data/urls_list.txt carries the
+    # single-slash `https:/` form that fs::path() produces, and any other URL
+    # source (data/urls_pairing_changed.txt, a hand-written --urls-file) carries
+    # the real double-slash form. Comparing raw strings makes an already-cached
+    # tile look new, which re-reads it over the network AND appends a duplicate
+    # row to the cache on every run.
     if os.path.exists(PATH_RESULTS_CSV):
         df_existing = pd.read_csv(PATH_RESULTS_CSV)
-        existing_urls = set(df_existing["url"])
+        existing_urls = {fix_url(u) for u in df_existing["url"]}
         logger.info("Loaded %d existing validation results", len(df_existing))
     else:
         df_existing = pd.DataFrame(columns=all_columns)
@@ -222,17 +228,21 @@ def load_validation_cache(urls_to_check: list[str]) -> dict:
     if "transform" in df_existing.columns:
         for _, row in df_existing.iterrows():
             if row.get("is_geotiff") and pd.isna(row.get("transform")):
-                needs_upgrade.add(row["url"])
+                needs_upgrade.add(fix_url(row["url"]))
     else:
-        needs_upgrade = {row["url"] for _, row in df_existing.iterrows() if row["is_geotiff"]}
+        needs_upgrade = {fix_url(row["url"]) for _, row in df_existing.iterrows()
+                         if row["is_geotiff"]}
 
     urls_to_validate = [url for url in urls_to_check
-                        if url not in existing_urls or url in needs_upgrade]
+                        if fix_url(url) not in existing_urls
+                        or fix_url(url) in needs_upgrade]
     if needs_upgrade:
         # Drop old rows that will be re-extracted with spatial metadata
-        urls_upgrading = needs_upgrade & set(urls_to_validate)
+        urls_upgrading = needs_upgrade & {fix_url(u) for u in urls_to_validate}
         if urls_upgrading:
-            df_existing = df_existing[~df_existing["url"].isin(urls_upgrading)]
+            df_existing = df_existing[
+                ~df_existing["url"].map(fix_url).isin(urls_upgrading)
+            ]
             logger.info("%d cached URLs need spatial metadata upgrade", len(urls_upgrading))
 
     logger.info("%d URLs need metadata extraction (%d already cached with full metadata)",
@@ -278,6 +288,9 @@ def main():
     parser.add_argument("--test-count", type=int, default=10, help="Number of items in test mode (default: 10)")
     parser.add_argument("--incremental", action="store_true", help="Process only new URLs from data/urls_new.txt")
     parser.add_argument("--reprocess-invalid", action="store_true", help="Re-process items from data/urls_invalid_items.txt")
+    parser.add_argument("--urls-file", default=None,
+                        help="Explicit URL list to build (e.g. data/urls_pairing_changed.txt). "
+                             "Behaves like --incremental: appends to the existing collection.")
     parser.add_argument("--workers", type=int, default=32, help="Number of parallel workers (default: 32)")
     args = parser.parse_args()
 
@@ -298,7 +311,10 @@ def main():
     collection.set_self_href(PATH_S3_JSON)
 
     # Select URL source based on mode
-    if args.reprocess_invalid:
+    if args.urls_file:
+        urls_file = args.urls_file
+        mode_desc = f"explicit ({args.urls_file})"
+    elif args.reprocess_invalid:
         urls_file = "data/urls_invalid_items.txt"
         mode_desc = "reprocess_invalid"
     elif args.incremental:
@@ -323,7 +339,7 @@ def main():
         existing_item_count = len([l for l in collection.links if l.rel == 'item'])
         logger.info("Reprocess mode: Updating %d items (collection has %d total)",
                      len(urls_to_check), existing_item_count)
-    elif args.test and not args.incremental:
+    elif args.test and not args.incremental and not args.urls_file:
         # Clean slate for test runs
         collection.links = [link for link in collection.links if link.rel != 'item']
         logger.info("Test mode: Cleared existing item links")
@@ -333,9 +349,9 @@ def main():
             for json_file in old_jsons:
                 os.remove(json_file)
             logger.info("Test mode: Deleted %d old item JSON files", len(old_jsons))
-    elif args.incremental:
+    elif args.incremental or args.urls_file:
         existing_item_count = len([l for l in collection.links if l.rel == 'item'])
-        logger.info("Incremental mode: Appending to %d existing items", existing_item_count)
+        logger.info("Appending to %d existing items", existing_item_count)
 
     # Pre-validation
     results_lookup = load_validation_cache(urls_to_check)

@@ -113,10 +113,27 @@ def datetime_parse_item(s: str | None) -> datetime | None:
 # reported as `unparseable` instead of as the coverage gap they actually are.
 RE_MAPSHEET = re.compile(r"^\d{3}[a-z](?:\d{3}|\d{6})$")
 RE_SUBDIVISION = re.compile(r"^\d{1,2}$")
-RE_UTM = re.compile(r"^utm\d{1,2}$")
-# 4-digit year or 8-digit YYYYMMDD. Deliberately excludes 5-6 digit project
-# numbers such as the 17603 in bc_082e003_1_4_4_xl1m_17603.
-RE_DATE = re.compile(r"^(?:19|20)\d{2}(?:[01]\d[0-3]\d)?$")
+# The bucket spells the zone both padded and unpadded -- 26,042 `utm09` against
+# 8,049 `utm9` -- and 092/092l/2023 carries a `utm09` DEM whose only DSM is
+# spelled `utm9`. Matching on the raw token reported that tile as unpaired, so
+# the zone is normalised to its integer form.
+RE_UTM = re.compile(r"^utm(\d{1,2})$")
+
+# Three date spellings, all present:
+#   2022      4-digit year
+#   20260506  YYYYMMDD
+#   170529    YYMMDD, the 2017-era deliveries
+# The YYMMDD branch validates month and day so a 6-digit project number cannot
+# pass, and 5-digit numbers (the 17603 in bc_082e003_1_4_4_xl1m_17603) never do.
+# It is load-bearing rather than cosmetic: bc_082l024_2_3_3_xl1m_utm11_170529
+# and ..._170607 are the same tile flown twice, and without the YYMMDD branch
+# they collapse to one match key.
+RE_DATE = re.compile(
+    r"^(?:"
+    r"(?:19|20)\d{2}(?:[01]\d[0-3]\d)?"          # 2022 | 20260506
+    r"|\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])"  # 170529
+    r")$"
+)
 
 # Trailing tokens that name the product rather than the tile. Stripped before
 # the stem is compared, so the same tile pairs across all three observed
@@ -182,7 +199,10 @@ def tile_key_parse(key: str) -> dict | None:
         j += 1
 
     tail = tokens[j:]
-    utm = next((t.lower() for t in tail if RE_UTM.match(t.lower())), None)
+    utm = next(
+        (f"utm{int(m.group(1))}" for m in (RE_UTM.match(t.lower()) for t in tail) if m),
+        None,
+    )
     dates = tuple(t for t in tail if RE_DATE.match(t))
 
     return {

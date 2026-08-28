@@ -36,7 +36,7 @@ from dsm_pair import (  # noqa: E402
     pairs_build,
     summarize,
 )
-from stac_utils import convention_classify, tile_key_parse  # noqa: E402
+from stac_utils import convention_classify, pair_key, tile_key_parse  # noqa: E402
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -318,3 +318,96 @@ def test_dsm_shared_is_empty_when_each_dem_has_its_own():
     dsm = fixture("suffix_dsm.txt")
     result = pairs_build(fixture("suffix_dem.txt"), dsm, groups_of(dsm))
     assert result["dsm_shared"] == {}
+
+
+def test_utm_zone_padding_does_not_prevent_pairing():
+    """The bucket spells the zone both ways: 26,042 `utm09` against 8,049 `utm9`.
+
+    092/092l/2023 carries a `utm09` DEM whose only DSM is spelled `utm9`.
+    Matching on the raw token reported that tile as unpaired.
+    """
+    dem = ["092/092l/2023/dem/bc_092l061_2_1_2_xli1m_utm09_20231027_20231031.tif"]
+    dsm = ["092/092l/2023/dsm/bc_092l061_2_1_2_xli1m_utm9_20231027_20231031_dsm.tif"]
+    result = pairs_build(dem, dsm, groups_of(dsm))
+    assert result["rows"][0]["status"] == PAIRED
+
+
+def test_yymmdd_dates_separate_two_flights_of_one_tile():
+    """`..._170529` and `..._170607` are the same tile flown twice.
+
+    Without a YYMMDD branch in the date pattern both collapse to one match key,
+    so one flight's DEM would take the other's DSM.
+    """
+    a = tile_key_parse("082/082l/2017/dem/bc_082l024_2_3_3_xl1m_utm11_170529.tif")
+    b = tile_key_parse("082/082l/2017/dem/bc_082l024_2_3_3_xl1m_utm11_170607.tif")
+    assert a["dates"] == ("170529",)
+    assert b["dates"] == ("170607",)
+    assert pair_key(a) != pair_key(b)
+
+
+def test_a_five_digit_project_number_is_not_read_as_a_date():
+    """17603 in bc_082e003_1_4_4_xl1m_17603 is a project number, not a date."""
+    parsed = tile_key_parse("082/082e/2017/dem/bc_082e003_1_4_4_xl1m_17603.tif")
+    assert parsed["dates"] == ()
+
+
+def test_ambiguous_dsm_match_prefers_a_recognised_convention():
+    """Two DSM spellings of one tile: pick the one that names a convention.
+
+    An arbitrary pick would record `unknown` for tiles whose naming is in fact
+    perfectly ordinary, burying the real unknowns in noise.
+    """
+    dem = ["092/092l/2023/dem/bc_092l061_xli1m_utm09_20231027.tif"]
+    dsm = [
+        "092/092l/2023/dsm/bc_092l061_xli1m_utm9_20231027_dsm.tif",
+        "092/092l/2023/dsm/bc_092l061_xli1m_utm09_20231027_dsm.tif",
+    ]
+    result = pairs_build(dem, dsm, groups_of(dsm))
+    row = result["rows"][0]
+    assert row["convention"] == "suffix"
+    assert row["dsm_key"].endswith("utm09_20231027_dsm.tif")
+
+
+# ---------------------------------------------------------------------------
+# The DEM/DSM lookup that item_create.py builds from the pairs csv
+# ---------------------------------------------------------------------------
+
+def test_only_paired_rows_yield_a_dsm_asset(tmp_path):
+    """A declared gap must never become an asset pointing at nothing."""
+    import csv as _csv
+    from item_create import dsm_lookup_load
+    from stac_utils import PATH_S3
+
+    path = tmp_path / "pairs.csv"
+    with open(path, "w", newline="") as fh:
+        w = _csv.DictWriter(fh, fieldnames=["dem_key", "dsm_key", "group",
+                                            "tile_id", "convention", "status"])
+        w.writeheader()
+        w.writerow({"dem_key": "a/b/dem/x.tif", "dsm_key": "a/b/dsm/x_dsm.tif",
+                    "group": "a/b", "tile_id": "t", "convention": "suffix",
+                    "status": PAIRED})
+        for status in (NO_RASTER_DSM, NO_DSM_DIR, UNPAIRED, UNPARSEABLE):
+            w.writerow({"dem_key": f"a/b/dem/{status}.tif", "dsm_key": "",
+                        "group": "a/b", "tile_id": "t", "convention": "",
+                        "status": status})
+
+    lookup = dsm_lookup_load(str(path))
+    assert lookup == {f"{PATH_S3}/a/b/dem/x.tif": f"{PATH_S3}/a/b/dsm/x_dsm.tif"}
+
+
+def test_a_missing_pairs_file_yields_an_empty_lookup_not_a_crash(tmp_path):
+    from item_create import dsm_lookup_load
+    assert dsm_lookup_load(str(tmp_path / "absent.csv")) == {}
+
+
+def test_cache_lookup_normalises_both_url_forms():
+    """data/urls_list.txt uses `https:/`; every other URL source uses `https://`.
+
+    Comparing them raw made an already-cached tile look new, which re-read it
+    over the network AND appended a duplicate row to the cache on every run.
+    Observed: a 6-URL build grew stac_geotiff_checks.csv by 6 rows.
+    """
+    from stac_utils import fix_url
+    single = "https:/nrs.objectstore.gov.bc.ca/gdwuts/082/082f/2022/dem/x.tif"
+    double = "https://nrs.objectstore.gov.bc.ca/gdwuts/082/082f/2022/dem/x.tif"
+    assert fix_url(single) == fix_url(double) == double

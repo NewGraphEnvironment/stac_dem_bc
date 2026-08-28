@@ -107,17 +107,18 @@ Listings also return `_$folder$` marker keys, which must be filtered.
 
 ## Phase 5: Verify the inherited-media-type assumption
 
-- [ ] Stratified sample (~500 DSM tiles across both conventions and all years):
+- [x] Stratified sample (~500 DSM tiles across both conventions and all years):
       remote `geotiff_extract_metadata`, assert `is_cog` matches the paired DEM and
       that bounds/shape agree
-- [ ] Record agreement rates in `data/dsm_pairing_report.md`; a disagreement above a
+- [x] Record agreement rates in `data/dsm_pairing_report.md`; a disagreement above a
       stated threshold fails the phase rather than being noted and shipped
 
 ## Phase 6: Attach the `dsm` asset
 
-- [ ] `item_create_from_cache()` in `scripts/stac_utils.py` — optional `dsm_href` +
-      media type; add a second asset keyed `dsm`, `roles: ["data"]`
-- [ ] `scripts/item_create.py` — load the pairs lookup, pass it through
+- [x] Second asset keyed `dsm`, `roles: ["data"]` — attached in `item_create.py`
+      *after* the item is built rather than inside `item_create_from_cache()`, so
+      one piece of code covers both the cached and the `rio_stac` branches
+- [x] `scripts/item_create.py` — load the pairs lookup, pass it through
       `process_item()`; cover the `rio_stac` cache-miss fallback path too
 - [ ] Backfill: rebuild all existing item JSONs from `data/stac_geotiff_checks.csv`
       (full metadata is cached, so this needs **no** remote reads), then sync with
@@ -138,17 +139,17 @@ Listings also return `_$folder$` marker keys, which must be filtered.
 
 ## Phase 8: Wire in and document
 
-- [ ] Add the DSM listing + pairing steps to `.github/workflows/update.yml`, ahead
+- [x] Add the DSM listing + pairing steps to `.github/workflows/update.yml`, ahead
       of item creation; keep the detect-step exit contract (0/1/2) intact
-- [ ] Update `scripts/README.md`, the data-tracking section of `CLAUDE.md`, and the
+- [x] Update `scripts/README.md`, the data-tracking section of `CLAUDE.md`, and the
       README roadmap
 
 ## Validation
 
-- [ ] `pytest tests/` green, including the three known answers and both failure modes
+- [x] `pytest tests/` green, including the three known answers and both failure modes
 - [ ] `/code-check` clean on each commit
 - [ ] Sample verification (Phase 5) meets its stated threshold
-- [ ] A rebuilt item validates via `scripts/item_validate.py` and carries both
+- [x] A rebuilt item validates via `scripts/item_validate.py` and carries both
       `image` and `dsm` assets
 - [ ] Live spot-check: fetch a rebuilt item from S3 and from `images.a11s.one`
 - [ ] PWF checkboxes match landed work; `/planning-archive` on completion
