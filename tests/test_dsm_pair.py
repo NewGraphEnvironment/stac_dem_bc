@@ -442,3 +442,38 @@ def test_unparseable_dsm_keys_appear_in_the_report():
 
     assert "DSM keys with no parseable tile id (1)" in report
     assert "surface_model_final.tif" in report
+
+
+# ---------------------------------------------------------------------------
+# The R listing and the Python parser must derive the same group namespace
+# ---------------------------------------------------------------------------
+
+def test_committed_dsm_groups_agree_with_the_python_parser():
+    """`dsm_groups.txt` is derived in R; pairing compares against Python's parse.
+
+    Nothing else checks the two agree. If they ever drift, every `.laz`-only
+    mapsheet-year flips from `no_raster_dsm` to `no_dsm_dir` — a wrong answer
+    with nothing to signal it. The tests elsewhere use their own `groups_of()`
+    helper, which cannot catch this: it would drift in the same direction.
+    """
+    repo = os.path.join(os.path.dirname(__file__), "..")
+    groups_file = os.path.join(repo, "data", "dsm_groups.txt")
+    dsm_file = os.path.join(repo, "data", "urls_dsm.txt")
+    if not (os.path.exists(groups_file) and os.path.exists(dsm_file)):
+        pytest.skip("committed listings not present")
+
+    with open(groups_file) as fh:
+        r_groups = {line.strip() for line in fh if line.strip()}
+    with open(dsm_file) as fh:
+        parsed = {p["group"] for p in
+                  (tile_key_parse(line.strip()) for line in fh if line.strip())
+                  if p is not None}
+
+    # Every group Python parses out of a raster DSM key must be one R recorded.
+    # The reverse does not hold: R also records the .laz-only directories, which
+    # is the entire point of the file.
+    assert parsed - r_groups == set(), (
+        f"{len(parsed - r_groups)} groups parsed from DSM keys are absent from "
+        f"dsm_groups.txt - the R and Python derivations have drifted"
+    )
+    assert len(r_groups) >= len(parsed)

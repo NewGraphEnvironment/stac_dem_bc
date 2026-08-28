@@ -207,7 +207,12 @@ def pairs_build(dem_keys: list[str], dsm_keys: list[str],
             "status": status,
         })
 
-    dsm_unmatched = [k for k in dsm_keys if k not in claimed]
+    # Unparseable keys are reported in their own bucket, so they are excluded
+    # here rather than double-counted as "matched nothing" -- otherwise the
+    # conservation check below can never balance.
+    unparseable_set = set(dsm_unparseable)
+    dsm_unmatched = [k for k in dsm_keys
+                     if k not in claimed and k not in unparseable_set]
     # One DSM claimed by several DEMs is legitimate where a delivery shipped a
     # re-issued DEM beside the original (e.g. `..._2019.tif` and
     # `..._2019_1.tif` sharing one `..._2019_dsm.tif`). Both items describe the
@@ -223,6 +228,17 @@ def pairs_build(dem_keys: list[str], dsm_keys: list[str],
         raise RuntimeError(
             f"row count {len(rows)} != dem input {len(dem_keys)} - "
             "a DEM key was dropped, which must never happen silently"
+        )
+
+    # The DSM side needs the same invariant the DEM side has: every raster DSM
+    # is claimed by some DEM, matched nothing, or failed to parse. Without this
+    # a key could fall out of all three and nothing would say so.
+    accounted = len(claimed) + len(dsm_unmatched) + len(dsm_unparseable)
+    if accounted != len(dsm_keys):
+        raise RuntimeError(
+            f"DSM keys accounted {accounted} != input {len(dsm_keys)} "
+            f"(claimed {len(claimed)}, unmatched {len(dsm_unmatched)}, "
+            f"unparseable {len(dsm_unparseable)})"
         )
 
     return {

@@ -33,6 +33,10 @@ has not been re-run since the July catch-up (#27's scope). The catalog itself is
 ~2,175 DEM tiles behind the bucket, not ~40,000. This plan reconciles that real gap
 and posts the correction; the pgstac catch-up stays with #27.
 
+> **Corrected during Phase 1.** The measured gap is **4,420**, not ~2,175. The
+> 97,996 cached URLs include 2,245 `albers10k2m` tiles that sit outside the
+> mapsheet structure, so the comparable figure is 95,751 against 100,171.
+
 ## Decisions taken
 
 - **DSM media type is inherited from the paired DEM's `is_cog`**, verified on a
@@ -44,7 +48,7 @@ and posts the correction; the pgstac catch-up stays with #27.
 ## Confirmed live during planning
 
 ```
-082/082f/2017/dsm/  ->  bc_082f006_1_xno_p75_utm11_180827_dsm.laz   (laz only, no tif)
+082/082f/2017/dsm/  ->  bc_082f006_1_xno_p75_utm11_180827_dsm.laz   (.laz AND 28 .tif)
 082/082f/2022/dsm/  ->  bc_082f005_xli1m_utm11_2022.tif             (identical basename)
 094/094o/2026/dsm/  ->  bc_094o056_2_1_4_xli1m_utm10_20260506_20260506_dsm.tif
 ```
@@ -83,8 +87,13 @@ Listings also return `_$folder$` marker keys, which must be filtered.
          `convention == "suffix"`
       2. an identical-basename 2022 mapsheet-year (`082/082f/2022`) → full pairing,
          `convention == "identical"`
-      3. a `.laz`-only mapsheet-year (`082/082f/2017`) → **zero** pairs and an
-         explicit "no raster DSM" record, not an empty success
+      3. a `.laz`-only mapsheet-year → **zero** pairs and an explicit
+         "no raster DSM" record, not an empty success
+         (**corrected**: `082/082f/2017` is not laz-only — it holds 28 raster
+         DSMs. The 11 real laz-only groups are `082e/2018`, `082e/2019`,
+         `082f/2018`, `082g/2018`, `082j/2018`, `082k/2017`, `082l/2018`,
+         `082l/2019`, `092g/2016`, `092h/2016`, `092j/2016`. The fixture uses
+         `082/082j/2018`.)
 - [x] Two more tests for the failure modes the issue names:
       4. a synthetic unknown convention (`..._surface.tif`) → emitted as UNPAIRED
          with the DEM named, never dropped
@@ -96,9 +105,13 @@ Listings also return `_$folder$` marker keys, which must be filtered.
 - [x] `tile_key_parse()` in `scripts/stac_utils.py` — parse a key into
       `(mapsheet_year, tile_id, utm, date_tokens, suffix)`; return `None` (not a
       guess) on an unparseable name
-- [x] `scripts/dsm_pair.py` — match DEM to DSM on `(mapsheet_year, tile_id,
+- [x] `scripts/dsm_pair.py` — match DEM to DSM on `(mapsheet_year, tile_id, utm,
       date_tokens)`, then assert the matched name against the known conventions and
       **record which one matched**
+      (**corrected**: the plan's key omitted `utm`. Without it 95.0% of DEMs —
+      91,008 of 95,751 — share a key with at least one other tile, worst case 84
+      files on one key. The implemented key includes the utm zone, normalised so
+      `utm09` and `utm9` agree.)
 - [x] Write `data/dem_dsm_pairs.csv` (keys relative to `PATH_S3`, not full URLs —
       halves a ~96k-row file) and `data/dsm_pairing_report.md`: paired count by
       convention, unpaired tiles, mapsheet-years with no raster DSM

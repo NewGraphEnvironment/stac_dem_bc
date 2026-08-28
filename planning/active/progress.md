@@ -124,3 +124,54 @@ Two findings from the Claude Code review on PR #32, both real:
    answer. Count is 0 against today's bucket, so this was latent, not wrong.
 
 Both now have tests (35 total).
+
+### Plan-agent review — three committed data regressions — 2026-08-28
+
+The `plan-review-31` agent did deliver, late and by message. I had already told
+the user it produced nothing; that was wrong, and its three blockers were real
+data damage in commits already pushed. Full findings in `review-plan.md`.
+
+**R1 — the validation ledger was wiped, 98,048 rows to 6.** My own end-to-end
+smoke test (`item_validate.py --items-dir <scratch>`) replaced it, because a
+non-incremental run rewrites the file wholesale. The second-order damage was
+worse than the lost audit trail: `urls_reconcile.py` derives item-backed URLs from
+this file, and `scripts/README.md` tells the operator to run `--apply` — which
+would have truncated `urls_list.txt` from 102,416 to 6. Restored; a full run now
+refuses to shrink an existing ledger without `--allow-shrink`, verified firing on
+the destructive case and silent on the healthy one.
+
+*One correction to the finding:* the leaked scratchpad paths are not mine. The
+restored ledger already held 40,021 rows with `.../scratchpad/catchup_out/` paths
+from the July catch-up. Pre-existing, worth its own issue, not a regression here.
+
+**R2 — `urls_list.txt` advanced to 102,416 with none of the 4,420 built.**
+`detect_changes.R` rewrites the cache as a side effect of detecting, so the next
+run's setdiff is empty, `urls_new.txt` gets deleted, and those tiles are invisible
+to change detection permanently — verbatim the failure `urls_reconcile.py` was
+written to repair, with R1 having broken the repair path. Reverted to the 97,996
+baseline; `urls_new.txt` keeps the 4,420 and the next run re-derives them.
+
+**R3 — `urls_deleted.txt` deleted.** An append-only audit trail removed because
+the current run found no deletions. It is #28's standing evidence, and the 43 lost
+entries were all `albers10k2m_new/` — against 4,490 albers rows in
+`stac_geotiff_checks.csv` for 2,245 live URLs, that is a prefix rename, which
+supports #28's hypothesis over data loss. Restored; the script now appends and
+never removes.
+
+Also fixed: `item_reprocess.py` had no pairing (the documented remediation path
+would silently strip the asset); the DSM side had no conservation check (added,
+and it double-counted on the first attempt — unparseable keys were also in
+`dsm_unmatched`); `FOOTPRINT_SAMPLE_MIN` tested the ~90k population rather than
+the drawn sample, so it could never fire; four factual errors in `task_plan.md`,
+including a match key omitting `utm` that would have put 91,008 of 95,751 DEMs
+into a shared key.
+
+Added the reviewer's suggested drift test: 157 R-derived groups, 146 parsed by
+Python, difference exactly the 11 `.laz`-only ones.
+
+**Process note.** I spawned this reviewer with a `name`, which made it a
+persistent teammate that idles instead of delivering, and gave it no file-delivery
+instruction. It then had no way to write its findings — it was read-only. Three
+idle pings looked identical to "nothing to say", and I reported it as such before
+the content arrived. Reviewers should be spawned unnamed, with the delivery path
+in the first prompt, and an idle ping must never be read as a clean review.

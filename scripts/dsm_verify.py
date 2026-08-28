@@ -174,11 +174,12 @@ def main() -> int:
     n_footprint_comparable = sum(1 for r in comparable if _has_footprint(r))
     logger.info("%d of those also have cached DEM footprint metadata",
                 n_footprint_comparable)
-    if n_footprint_comparable < FOOTPRINT_SAMPLE_MIN:
-        logger.error("Only %d tiles can have their footprint compared (need %d) - "
-                     "inconclusive, not a pass", n_footprint_comparable,
-                     FOOTPRINT_SAMPLE_MIN)
+    if n_footprint_comparable == 0:
+        logger.error("No tile has a cached DEM footprint - nothing to compare")
         return 1
+    # The meaningful threshold is on the DRAWN SAMPLE, not this population -
+    # checked after sampling. Against ~90k comparable tiles a population test
+    # could never fire, so it would have read as a guard while guarding nothing.
 
     sample = sample_stratified(comparable, args.sample, args.seed)
     urls = [f"{PATH_S3}/{r['dsm_key']}" for r in sample]

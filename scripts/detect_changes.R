@@ -102,16 +102,26 @@ result <- tryCatch({
     }
   }
 
+  # urls_deleted.txt is an APPEND-ONLY audit trail, not current state. It is
+  # the standing evidence for #28 (upstream deletions are retained in the
+  # catalog, so the record of what vanished is the only trace), and a month
+  # with no deletions says nothing about earlier ones.
+  #
+  # It used to be rewritten with the current month's set, and removed outright
+  # when a month had none — which deleted 43 entries on 2026-08-28. Those 43
+  # were all under `albers10k2m_new/`, and stac_geotiff_checks.csv still holds
+  # 4,490 albers rows against 2,245 live URLs: a prefix rename, which is #28's
+  # hypothesis. Losing that would have lost the evidence for it.
+  prior_deleted <- if (file.exists(deleted_file)) readr::read_lines(deleted_file) else character(0)
   if (length(deleted_urls) > 0) {
-    cat(sprintf("Writing deleted URLs to %s...\n", deleted_file))
-    readr::write_lines(deleted_urls, deleted_file)
-    cat(sprintf("  Wrote %d URLs\n", length(deleted_urls)))
+    merged <- unique(c(prior_deleted, deleted_urls))
+    cat(sprintf("Appending deleted URLs to %s...\n", deleted_file))
+    readr::write_lines(merged, deleted_file)
+    cat(sprintf("  %d new, %d total in the audit trail\n",
+                length(setdiff(deleted_urls, prior_deleted)), length(merged)))
   } else {
-    cat("No deleted URLs - not creating urls_deleted.txt\n")
-    if (file.exists(deleted_file)) {
-      file.remove(deleted_file)
-      cat("  Removed old urls_deleted.txt\n")
-    }
+    cat(sprintf("No deletions this run - %s left untouched (%d entries)\n",
+                deleted_file, length(prior_deleted)))
   }
 
   # Step 5: Update cache with fresh URLs
