@@ -61,9 +61,9 @@ Listings also return `_$folder$` marker keys, which must be filtered.
       markers, parenthesized filenames per #8, or genuinely new arrivals)
 - [x] Fix the listing in `scripts/urls_fetch.R` and `scripts/detect_changes.R` if
       the filter is the cause; leave the plausibility guard intact
-- [ ] Post a comment on #31 (xref #29, #27) recording that 60,126 is the pgstac
-      count and the catalog holds 98,040 — so the "catch up 60,126 → 100,171"
-      bullet resolves to a ~2.2k build plus a pgstac re-registration under #27
+- [x] Post a comment on #31 (xref #29, #27) recording that 60,126 is the pgstac
+      count and the catalog holds 98,040 — the real gap is **4,420** new DEM tiles
+      (issue comment 5455765690)
 
 ## Phase 2: List DSM keys
 
@@ -120,11 +120,17 @@ Listings also return `_$folder$` marker keys, which must be filtered.
       one piece of code covers both the cached and the `rio_stac` branches
 - [x] `scripts/item_create.py` — load the pairs lookup, pass it through
       `process_item()`; cover the `rio_stac` cache-miss fallback path too
-- [ ] Backfill: rebuild all existing item JSONs from `data/stac_geotiff_checks.csv`
-      (full metadata is cached, so this needs **no** remote reads), then sync with
-      `scripts/s3_sync-ci.sh` (never `--delete`)
-- [ ] Build the ~2.2k reconciled DEM tiles from Phase 1 through the normal
-      incremental path
+- [ ] **Backfill the ~98k existing items — NOT DONE, needs an explicit go-ahead.**
+      The plan assumed this was network-free from `data/stac_geotiff_checks.csv`.
+      It is not: **60,324 of 100,345 cache rows predate spatial-metadata caching**
+      and carry NaN for bounds/shape/epsg, so a rebuild falls through to the
+      `rio_stac` remote path for all of them — roughly a 10 h local run, and it
+      publishes to production S3.
+      Cheaper alternative worth costing first: fetch the existing item JSONs from
+      S3 (they already carry `proj:*`) and add the `dsm` asset to each, ~98k small
+      GETs rather than 60k GeoTIFF header reads plus COG validation.
+- [ ] Build the 4,420 new DEM tiles through the normal incremental path — same
+      production-publish gate as the backfill
 
 ## Phase 7: `providers` and `keywords` (#30)
 
@@ -135,7 +141,8 @@ Listings also return `_$folder$` marker keys, which must be filtered.
       collection.json from S3 rather than regenerating it, so `collection_create.py`
       alone would never reach the live collection
 - [x] Note in the collection description that `image` is the bare-earth DEM
-- [ ] Raise the CC-BY-4.0 vs BC OGL question on #30 — flag, do not silently change
+- [x] Raise the CC-BY-4.0 vs BC OGL question on #30 — flagged, not changed
+      (issue comment 5455765978)
 
 ## Phase 8: Wire in and document
 
