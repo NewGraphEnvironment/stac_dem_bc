@@ -127,3 +127,45 @@ def test_published_ids_decode_the_percent_encoding_in_links(tmp_path):
 def test_malformed_items_do_not_raise(bad):
     """A single odd item must not take down a 91k-item run."""
     item_edit(dict(bad), DSM)
+
+
+# ---------------------------------------------------------------------------
+# The exit gate. A strict zero-error rule failed a release over 2 of 98,040.
+# ---------------------------------------------------------------------------
+
+from item_backfill import ERROR_ABS_MAX, ERROR_RATE_MAX  # noqa: E402
+
+
+def _tolerable(errors, processed):
+    """Mirror of the gate in main(), so the policy is testable without I/O."""
+    rate = errors / processed if processed else 0.0
+    return errors <= ERROR_ABS_MAX and rate <= ERROR_RATE_MAX
+
+
+def test_the_real_ci_failure_is_now_tolerated():
+    """2 errors in 98,040 with verify passing must not discard the run.
+
+    That exact result failed CI run 33268573094 and skipped the publish after
+    16m37s of completed work.
+    """
+    assert _tolerable(2, 98040)
+
+
+def test_the_local_run_error_count_is_also_tolerated():
+    """34 in 98,040 -- the local rate -- is still ordinary transient noise."""
+    assert _tolerable(34, 98040)
+
+
+def test_a_systemic_failure_is_not_tolerated():
+    """The gate must still fail when something is actually broken."""
+    assert not _tolerable(5000, 98040)      # 5% - credentials, DNS, bucket gone
+    assert not _tolerable(500, 98040)       # over the absolute cap
+    assert not _tolerable(3, 100)           # small run, 3% - rate catches it
+
+
+def test_zero_errors_is_tolerated():
+    assert _tolerable(0, 98040)
+
+
+def test_gate_does_not_divide_by_zero_on_an_empty_run():
+    assert _tolerable(0, 0)

@@ -164,6 +164,26 @@ Listings also return `_$folder$` marker keys, which must be filtered.
 - [x] Update `scripts/README.md`, the data-tracking section of `CLAUDE.md`, and the
       README roadmap
 
+## Phase 9: Release v1.0.0 (added 2026-08-29 — the plan never covered publishing)
+
+The original plan stopped at "attach the asset". Everything below was discovered
+by doing it, and belongs in the plan rather than only in commit messages.
+
+- [x] `scripts/item_backfill.py` — rewrite published items rather than rebuild
+      them (60,324 cache rows lack spatial metadata, so a rebuild would swap ~60k
+      items from the `rio_stac` path to the `item_create_from_cache` path)
+- [x] Repair #25's tail: 90 published items whose `href`s carry literal spaces —
+      an HTTP request cannot be formed from one
+- [x] `NEWS.md` + catalogue versioning, following `stac_uav_bc` (#27)
+- [x] Move the publish into CI (`workflow_dispatch` + `backfill=true`) rather than
+      running it from a laptop
+- [x] Fix the dead `providers[0].url` shipped in #32
+- [ ] Re-dispatch after the error-tolerance fix; verify the publish
+- [ ] Register to pgstac from m1 via rtj's `stac_register-pypgstac.sh`
+- [ ] Rebuild `README.md` + `index.html` — **after** registration, since
+      `README.Rmd` queries the live API and would otherwise bake in stale counts
+- [ ] Tag `v1.0.0`
+
 ## Validation
 
 - [x] `pytest tests/` green, including the three known answers and both failure modes
