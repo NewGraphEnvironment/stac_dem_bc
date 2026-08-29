@@ -175,3 +175,53 @@ instruction. It then had no way to write its findings — it was read-only. Thre
 idle pings looked identical to "nothing to say", and I reported it as such before
 the content arrived. Reviewers should be spawned unnamed, with the delivery path
 in the first prompt, and an idle ping must never be read as a clean review.
+
+### Release attempt 1 failed on my own exit code — 2026-08-29
+
+CI run 33268573094, dispatched with `backfill=true`. Everything upstream passed,
+including the 4,420 building with **no remote extraction** because the committed
+metadata cache paid off. The backfill then completed all 98,040 items in 16m37s at
+~98 it/s — faster than the laptop — and the deepdiff verify passed:
+
+```
+written 91556 | unchanged 6482 | error 2      (sums to 98,040)
+Verify passed: the only differences are the intended ones
+##[error]Process completed with exit code 1
+```
+
+**The work succeeded; `return 1 if counts["error"] else 0` failed it.** A strict
+zero-error gate on ~98k network requests. 2 failures — 0.002% — discarded 16m37s
+of verified work and skipped the publish.
+
+This is the mirror of the convention already in CLAUDE.md ("a guard must not fail
+toward skip"): a guard must not fail toward **abort** on an operation where
+partial failure is certain. I predicted this exact risk in writing before
+dispatching and shipped it anyway.
+
+Three consequences, and the second was the expensive one:
+
+1. Sync skipped — 91,556 correct items discarded.
+2. **The manifest was never persisted.** `data/backfill_done.txt` only commits via
+   "Commit refreshed caches", which was skipped on failure, so a re-run would have
+   restarted from zero rather than resuming 98,038 successes.
+3. The 2 error messages never reached the log at all — tqdm writes its progress
+   bar to stderr with carriage returns and overwrote the interleaved warnings.
+   Second time today the same interleaving hid diagnostics from me.
+
+Fixes, all tested:
+
+- **Retry in-process**, 3 attempts with linear backoff. Locally every transient
+  failure re-fetched fine on the next try, so this absorbs the ordinary case
+  before it can reach the exit code.
+- **Gate on error RATE** against a stated tolerance (0.1%, 200 absolute) rather
+  than on perfection. Tested against both known answers: 2/98,040 and 34/98,040
+  are accepted; 5%, 500 absolute, and 3/100 are refused.
+- **Per-item failures to `data/backfill_errors.txt`**, not stderr, so tqdm cannot
+  clobber them and the failing ids are always recoverable.
+- **`if: always()` on the cache commit**, so a failed run still persists what it
+  completed.
+
+Also noted: PWF had gone stale — four commits with no update, and `task_plan.md`
+had zero mention of the backfill or the release. Phase 9 added retroactively.
+The convention exists precisely so the long tail of a task stays legible, and I
+dropped it exactly when the task got long.

@@ -228,8 +228,13 @@ jobs:
         if: steps.publish.outputs.count != '0' && steps.publish.outputs.count != ''
         run: bash scripts/s3_sync-ci.sh
 
+      # always() so a FAILED run still persists what it completed. The first
+      # backfill run finished all 98,040 items and then exited non-zero on 2
+      # transient errors; because this step was skipped, the manifest recording
+      # 98,038 successes was never committed and a re-run would have restarted
+      # from zero. Progress state must survive the failure path.
       - name: Commit refreshed caches
-        if: steps.detect.outputs.changes == 'true' || inputs.backfill
+        if: always() && (steps.detect.outputs.changes == 'true' || inputs.backfill)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -251,6 +256,8 @@ jobs:
           path: |
             logs/*.log
             data/urls_access_checks.csv
+            data/backfill_done.txt
+            data/backfill_errors.txt
           if-no-files-found: ignore
 
       - name: Session info
