@@ -32,7 +32,7 @@ import logging
 import os
 import sys
 
-from stac_utils import get_output_dir
+from stac_utils import encode_url_for_gdal, get_output_dir
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,9 @@ PROVIDERS = [
     {
         "name": "Province of British Columbia",
         "roles": ["producer", "licensor", "host"],
-        "url": "https://www2.gov.bc.ca/gov/content/data/geographic-data-services/lidarbc",
+        # lidar.gov.bc.ca, not the www2.gov.bc.ca content path -- the latter
+        # 404s. The repo README has always used this one.
+        "url": "https://lidar.gov.bc.ca/",
     },
     {
         "name": "New Graph Environment",
@@ -61,6 +63,33 @@ DESCRIPTION = (
 )
 
 
+def links_encode(collection: dict) -> int:
+    """Percent-encode spaces in item link hrefs. Returns how many changed.
+
+    #25 fixed the code that writes new links but nothing ever repaired the
+    published collection, so 90 links still carry literal spaces -- and they are
+    self-perpetuating, because the monthly run fetches this file, appends to it,
+    and writes the same bad links back out.
+
+    A raw-space href does not merely look untidy: curl cannot even form the
+    request (exit 3, no status), while the encoded form returns 200. Encoding
+    spaces alone is sufficient -- the parentheses in `..._2018 (2).tif` are
+    legal URL sub-delims and resolve as-is -- and space-only is exactly the
+    transform item_create.py already applies to new links, so this makes the
+    legacy ones consistent rather than differently-encoded.
+    """
+    n = 0
+    for link in collection.get("links", []):
+        if link.get("rel") != "item":
+            continue
+        href = link.get("href", "")
+        fixed = encode_url_for_gdal(href)
+        if fixed != href:
+            link["href"] = fixed
+            n += 1
+    return n
+
+
 def collection_patch(collection: dict) -> tuple[dict, list[str]]:
     """Return the patched collection and the names of fields that changed.
 
@@ -68,6 +97,9 @@ def collection_patch(collection: dict) -> tuple[dict, list[str]]:
     returns an empty change list, which is what `--check` reports on.
     """
     changed = []
+    n_links = links_encode(collection)
+    if n_links:
+        changed.append(f"{n_links} item link hrefs percent-encoded")
     for field, value in (("providers", PROVIDERS),
                          ("keywords", KEYWORDS),
                          ("description", DESCRIPTION)):
