@@ -1543,6 +1543,65 @@ give it a mock-based twin that always runs.
   fixture whose CRS matches the data leaves every reprojection branch unexecuted. Test at
   two resolutions, with anisotropic cells, and in a geographic CRS.
 
+### A `...` constructor may discard trailing arguments based on the class of the first one
+
+- A constructor that takes `...` is free to branch on **what its first argument
+  is** and build the result from that alone. Everything you passed after it is
+  then dropped — silently, with no warning and no error, because from the
+  constructor's point of view nothing went wrong.
+- The live case is `sf::st_sf()`, whose attribute frame is chosen by a chain
+  ending:
+  ```r
+  df = if (inherits(x, c("tbl_df", "tbl"))) x
+       else if (length(x) == 1) data.frame(row.names = row.names)
+       else if (!sfc_last && inherits(x, "data.frame")) x
+       else if (sfc_last  && inherits(x, "data.frame")) x[-all_sfc_columns]
+       else if (inherits(x[[1]], c("tbl_df", "tbl"))) x[[1]]     # <-- keeps ONLY arg 1
+       else cbind(data.frame(row.names = row.names), as.data.frame(x[-all_sfc_columns], ...))
+  ```
+  So `st_sf(df, a = , b = , geometry = )` keeps `a` and `b`, and
+  `st_sf(tbl, a = , b = , geometry = )` throws them away. **Same call, same
+  data, different class — different columns out.**
+- **The failure is invisible for as long as your fixtures share one class.** In
+  fly#35 four columns recording how each airphoto footprint had been sized never
+  reached a single caller of the package's own documented data source, because
+  `bcdata::collect()` returns a tibble and every fixture in the package read back
+  as plain `sf, data.frame`. Two releases shipped that way with a green suite:
+  geometry and every downstream number stayed correct, and only the audit trail
+  went missing, so nothing errored and nothing looked wrong.
+- **Fix: build the frame first, then hand the constructor one argument.** The
+  columns are then inside the argument the branch keeps, whichever branch it is,
+  and the caller's class is untouched:
+  ```r
+  attrs <- sf::st_drop_geometry(x)
+  attrs$a <- a
+  attrs$b <- b
+  result <- sf::st_sf(attrs, geometry = g)      # not st_sf(x, a =, b =, geometry =)
+  ```
+  Coercing instead — `st_sf(as.data.frame(st_drop_geometry(x)), a =, ...)` — also
+  restores the columns, but downgrades a tibble caller's class as a side effect.
+  Prefer the version that changes one thing.
+- **Test by sweeping the class axis, not by adding cases along it.** Assert
+  identical names *and values* across plain / tibble / grouped / vendor-classed
+  shapes of the same data. Read the tibble honestly (`st_read(as_tibble = TRUE)`)
+  rather than overwriting `class()`, and assert that premise inline so a future
+  upstream change fails by naming the real cause.
+- **Do not over-state what survives.** `sf::st_transform()` moves `sf` to the
+  front of the class vector, so `bcdc_sf, sf, ...` returns `sf, bcdc_sf, ...`.
+  The class *set* is carried; the order is not. An
+  `expect_identical(class(out), class(in))` written from three shapes that all
+  lead with `sf` passes, and then fails on the one real caller you wrote it for.
+- Swept 2026-08-29 across all 61 repos in `~/Projects/repo` — 1500 `.R` files and
+  389 purled `.Rmd` chunks, parsed with R rather than grepped, looking for
+  `st_sf()` with a non-literal first positional argument plus trailing column
+  arguments. **`fly` was the only instance.** A regex misses this: the original
+  defect was a multi-line call. Validate any such scanner against both known
+  answers before believing a clean result — the pre-fix file must be flagged and
+  the fixed one must not, or "no hits" is indistinguishable from a broken scan.
+- Generalizes past `sf`. Ask it of anything taking `...`: *does this constructor
+  decide what to keep by looking at the first argument?* Same shape in any
+  language where a variadic builder dispatches on an argument's type.
+
 ### sf: `st_join(largest = TRUE)` ignores the join predicate
 - `sf::st_join(x, y, join = predicate, largest = TRUE)` does **not** use `predicate` to decide matches — with `largest = TRUE`, sf runs `st_intersection(x, y)` and keeps the feature of greatest overlap area, so matching is *always* intersection-based regardless of what `join =` is set to. A function that exposes a configurable predicate AND a largest-overlap mode therefore silently mis-attributes when both are combined: pass `st_within` expecting containment, get anything that merely *overlaps*. Verify against sf source, not the argument list — the `join` arg is accepted and ignored, not rejected. Fix: abort when a non-default predicate is combined with the largest-overlap mode, rather than honouring one and dropping the other. (drift#42)
 - Corollary: `largest = TRUE` also drops zero-area geometries from consideration — so a predicate join against **point** or **line** overlays cannot use largest mode at all (no area to compare). Point/line attribution must go through the plain (`largest = FALSE`) predicate path.
@@ -2439,6 +2498,81 @@ you cannot say why it went unnoticed, you have not found it yet.
 - Same family as "`git add -A` after a generator sweeps its side effects into
   your commit", one level lower: there the extra changes come from another tool,
   here from the writer you called yourself.
+
+### One fact derived twice, never reconciled
+
+- The bug shape is a **count taken from one artifact and the things counted
+  produced from another**, with a guard comparing the two. It fires on healthy
+  input, aborts a run in which nothing was wrong, and — because the guard looks
+  like diligence — the fix goes onto the *inputs* rather than the comparison. So
+  it comes back.
+- Measured 2026-08-30 in stac_dem_bc, three times in one change before anyone
+  looked at the mechanism:
+  1. a lookup asked about 600 ids and was compared against a page of 10;
+  2. a caller-supplied list with a duplicate counted twice and fetched once;
+  3. one id resolving to two hrefs counted once and fetched twice.
+  Fixes 1 and 2 deduped the inputs (`sort -u`, a set) and left the comparison
+  untouched. Of nine counts in that pipeline, **eight were structural** — count
+  and counted shared a producer — and every bug landed on the one pair that did
+  not.
+- **The fix is to derive the expectation from the artifact the consumer actually
+  consumes**, so the two cannot drift:
+  ```bash
+  cut -f2 hrefs.tsv | sort -u > urls.txt     # what the fetch loop iterates
+  N_URLS=$(count_lines urls.txt)             # ...so count THAT, not the id list
+  [ "$N_FETCHED" -eq "$N_URLS" ] || exit 1
+  ```
+- Review question that finds it, and it is not "are there more instances":
+  **for each guard, name the producer of each side. If they differ, the guard can
+  fire on good input.** Ask it once per comparison; it is a five-minute audit and
+  it terminates, where hunting instances does not.
+
+### A paginated API's default page size silently truncates a lookup used as a check
+
+- Asking an API about N things and getting its **default page** back is not an
+  error and does not look like one. The response is well-formed, the status is
+  200, and the missing items read as *absent from the server* rather than as
+  *not requested*. A verification built on it reports the subject as broken while
+  the subject is fine.
+- Measured 2026-08-30 against a pgstac/stac-fastapi API: `POST /search` with 600
+  ids and no `limit` returned **10** features; with `limit: 600`, all 600. The
+  verifier that shipped therefore failed on every run of more than ten items —
+  after the write it was verifying had already succeeded.
+- It survived review because the only exercise was **three** items, and 3 < 10.
+  A fixture smaller than the default page cannot reach the failure (see "A
+  fixture set that cannot reach the failure mode is not validation").
+- Rules: **set the page size explicitly on every request you treat as evidence**,
+  and assert it in a unit test at a size *larger than any plausible default*.
+  Test the body you build, not the response you mock — a transport mock never
+  constructs the request.
+- Related and worth checking in the same pass: whether the API omits unmatched
+  keys silently. If it does, a returned **count** proves nothing and only set
+  equality does.
+
+### Counting lines: `wc -l` and `grep -c` fail in opposite directions
+
+- Refines the count guard prescribed above under "Parallel writers sharing one
+  output file". `wc -l` counts **newlines**, so a final line with no trailing
+  newline is not counted — a caller-supplied list is then short by one and the
+  guard aborts a good run.
+- The obvious replacement is worse. `grep -c ''` counts that line, and **exits 1
+  on an empty file** — so under `set -e` it kills the script on the empty case,
+  which is usually the routine one ("nothing to do"). Verified: the statement
+  after the assignment never executed.
+- `grep -c` also counts **matching lines, not occurrences**. Counting records in
+  a compact single-line JSON with `grep -c` returns 1 for a file holding 102,460
+  of them — not off by a bit, structurally meaningless.
+- Safe helper, checked against all four inputs (empty, unterminated, terminated,
+  missing) rather than reasoned about:
+  ```bash
+  count_lines() {
+    local n
+    n=$(grep -c '' "$1" 2>/dev/null) || n="${n:-0}"
+    printf '%s' "${n:-0}"
+  }
+  ```
+- For records inside a structured file, do not count with a line tool at all —
+  parse it.
 
 
 # NGE Feature Workflow
