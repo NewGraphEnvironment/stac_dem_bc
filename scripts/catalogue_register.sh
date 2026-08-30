@@ -66,6 +66,17 @@ PY="${PYTHON:-.venv/bin/python}"
 WORK=$(mktemp -d -t catalogue_register.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
 
+# Counting lines is a trap at both ends. `wc -l` misses a final line with no
+# trailing newline, so a caller-supplied ids file is counted one short and the
+# fetch guard then aborts a perfectly good run. `grep -c ''` counts it, but
+# exits 1 on an EMPTY file -- which under `set -e` would kill the script on the
+# zero-drift case, i.e. the routine one. Verified both directions.
+count_lines() {
+  local n
+  n=$(grep -c '' "$1" 2>/dev/null) || n="${n:-0}"
+  printf '%s' "${n:-0}"
+}
+
 echo "collection : $COLLECTION_ID"
 echo "mode       : $MODE"
 
@@ -75,7 +86,7 @@ echo "fetching published collection.json ..."
 curl -fsSL --max-time 300 "$BUCKET_URL/collection.json" -o "$WORK/collection.json"
 "$PY" scripts/register_manifest.py ids-published \
   --collection-file "$WORK/collection.json" > "$WORK/published.txt"
-N_PUBLISHED=$(wc -l < "$WORK/published.txt" | tr -d ' ')
+N_PUBLISHED=$(count_lines "$WORK/published.txt")
 echo "published  : $N_PUBLISHED"
 
 # --- what to register --------------------------------------------------------
@@ -86,7 +97,13 @@ case "$MODE" in
     ;;
   ids-file)
     [ -s "$IDS_FILE" ] || { echo "ERROR: ids file missing or empty: $IDS_FILE" >&2; exit 1; }
-    cp "$IDS_FILE" "$WORK/todo.txt"
+    # Normalise: drop blank lines and guarantee a trailing newline. A
+    # caller-supplied file with no final newline would otherwise be counted one
+    # short by `wc -l` while Python reads every line — the fetch would then
+    # produce one more file than expected and the count guard below would abort
+    # a perfectly good run.
+    grep -v '^[[:space:]]*$' "$IDS_FILE" > "$WORK/todo.txt" || true
+    [ -s "$WORK/todo.txt" ] || { echo "ERROR: no ids in $IDS_FILE" >&2; exit 1; }
     ;;
   drift|verify)
     echo "enumerating registered ids (keyset paging; ~200s at full scale) ..."
@@ -98,7 +115,7 @@ case "$MODE" in
     ;;
 esac
 
-N_TODO=$(wc -l < "$WORK/todo.txt" | tr -d ' ')
+N_TODO=$(count_lines "$WORK/todo.txt")
 echo "to register: $N_TODO"
 
 if [ "$MODE" = "verify" ]; then
@@ -192,7 +209,7 @@ xargs -P "$JOBS" -I {} "$FETCH_SCRIPT" {} "$FETCH_DIR" < "$WORK/urls.txt" 2>/dev
 set -e
 
 N_FETCHED=$(find "$FETCH_DIR" -maxdepth 1 -type f -name '*.json' | wc -l | tr -d ' ')
-N_FAILED=$(wc -l < "$WORK/failed.txt" | tr -d ' ')
+N_FAILED=$(count_lines "$WORK/failed.txt")
 echo "fetched    : $N_FETCHED of $N_TODO ($N_FAILED failed after 3 attempts)"
 
 if [ "$N_FETCHED" -ne "$N_TODO" ]; then
