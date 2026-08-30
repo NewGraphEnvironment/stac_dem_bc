@@ -13,8 +13,10 @@ name: Monthly incremental update
 #
 # State model: data/ caches persist only via the end-of-job commit, so a
 # failed run discards its partial state and the next run re-detects cleanly.
-# pgstac registration is a separate manual step on geoserv - see
-# scripts/README.md.
+# pgstac registration is NOT done here: no runner can reach the STAC host (no
+# tailnet, no deploy key). It is a client-side upsert run from a machine that
+# can - `scripts/catalogue_register.sh --drift` - and it is stateless, so a
+# month nobody registers is picked up by the next run. See scripts/README.md.
 
 on:
   schedule:
@@ -131,7 +133,11 @@ jobs:
       # Idempotent: a no-op once the published collection carries the fields.
       - name: Patch collection metadata
         if: steps.detect.outputs.new_urls == 'true' || inputs.backfill
-        run: .venv/bin/python scripts/collection_patch.py --path "$STAC_OUTPUT_DIR/collection.json"
+        # --clear-version: this run is about to append items, which makes any
+        # version the collection carries FALSE rather than merely stale. A wrong
+        # version says "you already have this one"; absent says "go and check".
+        # The next release re-stamps with --version.
+        run: .venv/bin/python scripts/collection_patch.py --path "$STAC_OUTPUT_DIR/collection.json" --clear-version
 
       - name: Create STAC items (incremental)
         if: steps.detect.outputs.new_urls == 'true'
@@ -166,7 +172,7 @@ jobs:
               mkdir -p "$STAC_OUTPUT_DIR"
               curl -fsSL https://stac-dem-bc.s3.amazonaws.com/collection.json \
                 -o "$STAC_OUTPUT_DIR/collection.json"
-              .venv/bin/python scripts/collection_patch.py --path "$STAC_OUTPUT_DIR/collection.json"
+              .venv/bin/python scripts/collection_patch.py --path "$STAC_OUTPUT_DIR/collection.json" --clear-version
             fi
             .venv/bin/python scripts/item_create.py --urls-file data/urls_pairing_changed.txt
           else

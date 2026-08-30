@@ -714,10 +714,12 @@ the <strong>digital surface model</strong> alongside the bare-earth DEM
 (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/31">#31</a>),
 paired on tile id and acquisition date. Still ahead:</p>
 <ul>
-<li><strong>Incremental registration</strong> — the post-sync pgstac
-registration is a full reload today (~80 minutes at current scale);
-upserting only each month’s new items brings it to seconds. Tracked in
-the infrastructure repo.</li>
+<li><strong>Registration from CI</strong> — registration is now a
+client-side upsert in this repo
+(<code>scripts/catalogue_register.sh</code>), but it still runs from a
+laptop: no GitHub Actions runner can reach the STAC host today. Closing
+that needs a tailnet or deploy-key decision in the infrastructure repo,
+and it unblocks every catalogue repo at once.</li>
 <li><strong>Upstream-deletion handling</strong> (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/28">#28</a>)
 — propagate objectstore removals to the catalog; on hold until the
 September run shows whether recent removals were renames.</li>
