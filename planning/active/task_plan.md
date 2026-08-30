@@ -67,13 +67,13 @@ re-registering the *same* id stops being an outage. #34 is made tidier by this
 
 ## Phase 1: `register_manifest.py` — the pure core (lands first, per B2)
 
-- [ ] `item_ids_from_urls()` reusing `stac_utils.url_to_item_id`; raises on
+- [x] `item_ids_from_urls()` reusing `stac_utils.url_to_item_id`; raises on
       unparseable input rather than warning
-- [ ] `item_ids_from_collection()` — item-link hrefs → ids from the published
+- [x] `collection_item_links()` — item-link hrefs → ids from the published
       `collection.json`
-- [ ] `ndjson_write()` — compact one JSON per line, no embedded newlines
-- [ ] `ids_diff()` — missing / orphaned, reported in **both** directions
-- [ ] `tests/test_register_manifest.py` against the existing real-listing fixtures
+- [x] `ndjson_write()` — compact one JSON per line, no embedded newlines
+- [x] `ids_diff()` — missing / orphaned, reported in **both** directions
+- [x] `tests/test_register_manifest.py` against the existing real-listing fixtures
 
 ## Phase 2: `collection_register.sh` then `item_register.sh`
 
