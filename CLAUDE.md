@@ -21,6 +21,13 @@ This project maintains the STAC catalog for BC's LidarBC DEM collection with aut
 - Optimize spatial extent calculation
 - **Result:** 100-item test passed, ready for VM automation
 
+**Phase 4: DSM as a second asset ✅ COMPLETE (2026-08-29, v1.0.0, #31)**
+- Every item carries `dsm` beside the bare-earth `image`, paired on tile id +
+  acquisition date + utm zone; convention recorded as an assertion, not a lookup
+- 90 published items whose `href`s carried literal spaces repaired (#25's tail)
+- `providers`/`keywords` on the collection (#30)
+- **Published: 102,460 items, 95,888 carrying `dsm`** (API served 60,126 before)
+
 **Phase 3: Automation ✅ COMPLETE (2026-07, #23)**
 - Landed as the monthly GitHub Actions workflow (`.github/workflows/update.yml`), not the originally-planned VM cron (that VM was never built)
 - First scheduled run 2026-08-03 handled a deletions-only month correctly
@@ -28,7 +35,7 @@ This project maintains the STAC catalog for BC's LidarBC DEM collection with aut
 
 ### Project Context
 
-**Dataset:** ~98,000 DEM GeoTIFFs from BC provincial objectstore (nrs.objectstore.gov.bc.ca/gdwuts), as of 2026-08
+**Dataset:** 100,171 DEM + 95,889 DSM GeoTIFFs from BC provincial objectstore (nrs.objectstore.gov.bc.ca/gdwuts), measured 2026-08-29 on a full bucket walk (575,411 keys). Also present and **unindexed**: 175,172 `pointcloud/` `.laz`, 15,752 `orthophoto/` `.tif`, 264 `chm/` `.tif` (#35)
 - History of large undocumented growth: 22,548 → 58,109 (discovered Feb 2026), then +63% to 98,039 in five months (July 2026 catch-up, #23) — arrival may be bulk loads, not steady monthly
 - ~90 files with parentheses in filename excluded (all fail validation - see issue #8)
 
@@ -39,7 +46,11 @@ This project maintains the STAC catalog for BC's LidarBC DEM collection with aut
 - 99.86% success rate (81 items failed/missing)
 - **Bottleneck:** Network I/O reading remote GeoTIFFs for metadata
 
-**Current Status:**
+**Current Status (v1.0.0, 2026-08-29):**
+- ✅ Catalogue versioned by NEWS.md + git tags — a tag means "S3 and the API are in
+  this state", following `stac_uav_bc`. `DESCRIPTION` is a `Type: Project`
+  dependency manifest and is deliberately **not** versioned (matches water-temp-bc)
+- ✅ DSM paired and published as a second asset (#31)
 - ✅ Incremental update capability (change detection working)
 - ✅ Validation caching (GeoTIFF validation)
 - ✅ STAC JSON validation layer (new)
@@ -50,7 +61,7 @@ This project maintains the STAC catalog for BC's LidarBC DEM collection with aut
 1. ~~Reduce full processing time to ~1-1.5 hours~~ → **Reality: 5-6 hours** (network I/O limited)
 2. ✅ Monthly incremental updates via GitHub Actions (typical month fits the runner comfortably; oversized batches fall back to a local run)
 3. ✅ Implement robust validation and error handling
-4. ✅ Automated monthly updates — GitHub Actions, not VM cron (#23; catalog 98k items as of 2026-07)
+4. ✅ Automated monthly updates — GitHub Actions, not VM cron (#23; catalog 102,460 items as of v1.0.0, 2026-08-29)
 5. ✅ Maintain audit trail and benchmarking
 
 **Key Learning:** Performance is network I/O bound, not CPU bound. Future optimization: local metadata caching (Issue #10).
@@ -137,6 +148,29 @@ Source URLs → GeoTIFF Validation → DSM Pairing → Item Creation → JSON Va
 ---
 
 ## Project-Specific Notes
+
+### Registration runs on infrastructure rtj owns
+
+`s3_sync-ci.sh` is where this repo's automation stops. Loading the catalogue into
+pgstac happens on the STAC host, whose provisioning, credentials and runbook live
+in the **private rtj repo** (`rtj/scripts/geoserv/`, `rtj/RUNBOOK.md`).
+
+**Read `rtj/RUNBOOK.md` before concluding any infra path is unavailable.** Its
+failure-modes section answers the common ones by name — including which SSH user
+each host accepts, which is not what you would guess. Cost 2026-08-29: a wrong
+username was read as "no access to the host", and a capability gap was reported to
+the user that did not exist. The runbook was on disk the whole time.
+
+Host names, IPs and key fingerprints stay out of this repo — it is public, and they
+rotate. They live in machine-local memory and in rtj.
+
+Two known hazards in the registration path, both live:
+- It **DELETEs the collection before loading it**, so any mid-run failure leaves the
+  public API serving zero items. Happened 2026-08-29. Incremental upsert (#27) is
+  the fix.
+- `data/dem_dsm_pairs.csv` and the item JSONs are large enough that concatenation
+  must use `find -exec cat {} +`, never a glob — see the ARG_MAX entry in the
+  code-check conventions below.
 
 ### Testing Strategy
 - Use `test_only = True` and `test_number_items = 10` for development
