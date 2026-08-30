@@ -133,7 +133,10 @@ Listings also return `_$folder$` marker keys, which must be filtered.
       one piece of code covers both the cached and the `rio_stac` branches
 - [x] `scripts/item_create.py` — load the pairs lookup, pass it through
       `process_item()`; cover the `rio_stac` cache-miss fallback path too
-- [ ] **Backfill the ~98k existing items — NOT DONE, needs an explicit go-ahead.**
+- [x] **Backfill the ~98k existing items — DONE (2026-08-29) via the cheaper
+      rewrite path below, run in CI.** The note below records why the original
+      rebuild plan was abandoned; `scripts/item_backfill.py` (Phase 9) is what
+      shipped: 91,558 written, 6,482 unchanged, 0 errors.
       The plan assumed this was network-free from `data/stac_geotiff_checks.csv`.
       It is not: **60,324 of 100,345 cache rows predate spatial-metadata caching**
       and carry NaN for bounds/shape/epsg, so a rebuild falls through to the
@@ -142,7 +145,7 @@ Listings also return `_$folder$` marker keys, which must be filtered.
       Cheaper alternative worth costing first: fetch the existing item JSONs from
       S3 (they already carry `proj:*`) and add the `dsm` asset to each, ~98k small
       GETs rather than 60k GeoTIFF header reads plus COG validation.
-- [ ] Build the 4,420 new DEM tiles through the normal incremental path — same
+- [x] Build the 4,420 new DEM tiles through the normal incremental path — same
       production-publish gate as the backfill
 
 ## Phase 7: `providers` and `keywords` (#30)
@@ -187,12 +190,16 @@ by doing it, and belongs in the plan rather than only in commit messages.
 ## Validation
 
 - [x] `pytest tests/` green, including the three known answers and both failure modes
-- [ ] `/code-check` clean on each commit
-- [ ] Sample verification (Phase 5) meets its stated threshold
+- [~] `/code-check` clean on each commit — not recorded in `progress.md`; no
+      evidence either way at archive time
+- [x] Sample verification (Phase 5) meets its stated threshold — COG-status
+      agreement 0.9980 (threshold 0.99), footprint agreement 1.0000 (threshold 1.00)
 - [x] A rebuilt item validates via `scripts/item_validate.py` and carries both
       `image` and `dsm` assets
-- [ ] Live spot-check: fetch a rebuilt item from S3 and from `images.a11s.one`
-- [ ] PWF checkboxes match landed work; `/planning-archive` on completion
+- [x] Live spot-check: fetch a rebuilt item from S3 and from `images.a11s.one` —
+      both served 102,460 items; a formerly-broken asset href returns 206 where it
+      previously could not form a request at all
+- [x] PWF checkboxes match landed work; `/planning-archive` on completion
 
 ## Critical files
 
