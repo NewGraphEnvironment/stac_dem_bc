@@ -225,3 +225,47 @@ Also noted: PWF had gone stale — four commits with no update, and `task_plan.m
 had zero mention of the backfill or the release. Phase 9 added retroactively.
 The convention exists precisely so the long tail of a task stays legible, and I
 dropped it exactly when the task got long.
+
+### v1.0.0 released — 2026-08-29
+
+CI run 33270745597 (`backfill=true`) published cleanly after the error-tolerance
+fix: `written 91558 | unchanged 6482 | error 0` — the retry took the 2 transient
+failures to zero. `4420 of 4420` new items, `95,978 valid (100.0%)` through the
+non-vacuous gate, `Sync complete: 95978 item(s) + collection.json`.
+
+Verified against live S3 and the API, not inferred from a green run:
+
+| | before | after |
+|---|---|---|
+| items on S3 | 98,040 | 102,460 |
+| items in pgstac / API | 60,126 | 102,460 |
+| items with `dsm` | 0 | 95,888 |
+| raw-space (unusable) hrefs | 90 | 0 |
+| `providers` / `keywords` | absent | live |
+
+A formerly-broken asset href now returns **206** where it previously returned
+`000` — the request could not be formed at all. Those 90 items had an unusable
+download link from the day they were built.
+
+**pgstac registration caused a real outage.** rtj's `stac_register-pypgstac.sh`
+DELETEs the collection (step 2) before loading it (step 5). It died in between on
+`cat "$FETCH_DIR"/*.json` — ARG_MAX, ~6 MB of argv at 102,460 filenames — leaving
+`images.a11s.one` serving **zero items** until repaired by hand. The downloads had
+all succeeded; only the concatenation failed. `find -exec cat {} +` produced all
+102,460 lines and pypgstac loaded them in **27 seconds**.
+
+That was a *recurrence*: rtj#196 hit the identical failure in 2026-07, wrote the
+ARG_MAX entry into soul's `code-check.md`, and never repaired the script — while
+the convention's *other* entry still prescribed the broken glob. Both fixed
+(`soul@95eddb2`, rtj PR #238).
+
+README rebuild: `README.md` had been stale since 2026-08-05. The refreshed rstac
+query returns 64 features with no `dsm`; verified as correct rather than assumed —
+all 64 are in `093/093m/2020`, which the pairing records as `no_dsm_dir`.
+
+Spun out: #34 (rename to stac-elevation-bc, carrying the two breaks #31 deferred),
+#35 (point cloud 175k / orthophoto 15.7k / CHM 264 — none indexed, and point cloud
+is what would actually close the 1,211-tile `no_raster_dsm` gap).
+
+Three bug classes appended to `soul/conventions/code-check.md` (`497b20c`):
+fail-toward-abort, progress-bars-eat-log-lines, and fix-the-writer-reconcile-the-data.

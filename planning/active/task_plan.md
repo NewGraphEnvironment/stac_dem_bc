@@ -178,11 +178,11 @@ by doing it, and belongs in the plan rather than only in commit messages.
 - [x] Move the publish into CI (`workflow_dispatch` + `backfill=true`) rather than
       running it from a laptop
 - [x] Fix the dead `providers[0].url` shipped in #32
-- [ ] Re-dispatch after the error-tolerance fix; verify the publish
-- [ ] Register to pgstac from m1 via rtj's `stac_register-pypgstac.sh`
-- [ ] Rebuild `README.md` + `index.html` — **after** registration, since
+- [x] Re-dispatch after the error-tolerance fix; verify the publish
+- [x] Register to pgstac from m1 via rtj's `stac_register-pypgstac.sh`
+- [x] Rebuild `README.md` + `index.html` — **after** registration, since
       `README.Rmd` queries the live API and would otherwise bake in stale counts
-- [ ] Tag `v1.0.0`
+- [x] Tag `v1.0.0`
 
 ## Validation
 
