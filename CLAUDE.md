@@ -4,7 +4,7 @@
 
 This project maintains the STAC catalog for BC's LidarBC DEM collection with automated monthly updates: a GitHub Actions workflow (`update.yml` — cron + workflow_dispatch, OIDC to S3) runs change detection and an incremental build, then commits refreshed caches back to main. Performance patterns (parallel processing, pre-validation) were ported from stac_orthophoto_bc.
 
-**Architecture:** GitHub Actions cron → Change detection → Parallel validation/processing → S3 sync → PgSTAC registration (manual step on geoserv; incremental upsert tracked in the infrastructure repo)
+**Architecture:** GitHub Actions cron → Change detection → Parallel validation/processing → S3 sync → pgstac registration (`scripts/catalogue_register.sh --drift`, client-side upsert, run from a tailnet machine — CI cannot reach the host)
 
 **Expected Performance:**
 - First run (full): ~1-1.5 hours (down from 5-6 hours)
@@ -54,7 +54,7 @@ This project maintains the STAC catalog for BC's LidarBC DEM collection with aut
 - ✅ Incremental update capability (change detection working)
 - ✅ Validation caching (GeoTIFF validation)
 - ✅ STAC JSON validation layer (new)
-- ✅ Monthly automation via GitHub Actions (`update.yml`: cron 3rd of month + workflow_dispatch, OIDC to S3; pgstac registration remains a manual geoserv step)
+- ✅ Monthly automation via GitHub Actions (`update.yml`: cron 3rd of month + workflow_dispatch, OIDC to S3); pgstac registration is a client-side upsert in this repo (#27), still run by hand because no runner can reach the host
 - ✅ Spatial extent optimized (hardcoded BC bbox)
 
 **Goals:**
@@ -149,11 +149,13 @@ Source URLs → GeoTIFF Validation → DSM Pairing → Item Creation → JSON Va
 
 ## Project-Specific Notes
 
-### Registration runs on infrastructure rtj owns
+### Registration is client-side here; rtj owns the host
 
-`s3_sync-ci.sh` is where this repo's automation stops. Loading the catalogue into
-pgstac happens on the STAC host, whose provisioning, credentials and runbook live
-in the **private rtj repo** (`rtj/scripts/geoserv/`, `rtj/RUNBOOK.md`).
+This repo registers the catalogue into pgstac itself, with
+`scripts/catalogue_register.sh` (#27). **rtj still owns the host** — its
+provisioning, credentials and runbook live in the private rtj repo
+(`rtj/scripts/geoserv/`, `rtj/RUNBOOK.md`) — but loading a collection is no
+longer something you go there to do.
 
 **Read `rtj/RUNBOOK.md` before concluding any infra path is unavailable.** Its
 failure-modes section answers the common ones by name — including which SSH user
@@ -161,13 +163,30 @@ each host accepts, which is not what you would guess. Cost 2026-08-29: a wrong
 username was read as "no access to the host", and a capability gap was reported to
 the user that did not exist. The runbook was on disk the whole time.
 
-Host names, IPs and key fingerprints stay out of this repo — it is public, and they
-rotate. They live in machine-local memory and in rtj.
+**The host address is in this repo deliberately, and that is a change from the
+previous rule here.** What is secret is *access* — the SSH key — not the address.
+`images.a11s.one` resolves to the same machine in public DNS, and `stac_uav_bc`
+has shipped it publicly for months. So the scripts default to the MagicDNS name
+`root@geopro` and name the reserved IP as a documented fallback. Key material,
+fingerprints and passwords stay out, as before; `POSTGRES_PASSWORD` is sourced on
+the host and never leaves it, and is passed to pypgstac through the PG*
+environment rather than argv so it does not surface in `ps aux`.
 
-Two known hazards in the registration path, both live:
-- It **DELETEs the collection before loading it**, so any mid-run failure leaves the
-  public API serving zero items. Happened 2026-08-29. Incremental upsert (#27) is
-  the fix.
+Hazards in the registration path:
+- **Never delete-then-load.** `pgstac.items.collection` is
+  `ON DELETE CASCADE`, so dropping the collection row destroys every item. rtj's
+  `stac_register-pypgstac.sh` does exactly that before reloading, and on
+  2026-08-29 it failed in between and left the public API serving zero items.
+  Everything in this repo upserts; the single destructive script
+  (`collection_unregister.sh`) requires `--yes` and prints the count first.
+- **Register the collection BEFORE its items** — the same foreign key. This is the
+  deliberate inverse of `s3_sync-ci.sh`, which uploads items first so a failure
+  leaves unreferenced items rather than dangling links. Both are correct for their
+  transport; do not "fix" one to match the other.
+- **Never verify a registration by a count.** The API has no aggregation extension
+  (`/aggregate` 404s) and returns `numberMatched: null`, and a `/search` on a list
+  of ids silently omits the ones that do not exist — so "asked for N, got N" can be
+  true while the sets differ. Compare id **sets**, in both directions.
 - `data/dem_dsm_pairs.csv` and the item JSONs are large enough that concatenation
   must use `find -exec cat {} +`, never a glob — see the ARG_MAX entry in the
   code-check conventions below.

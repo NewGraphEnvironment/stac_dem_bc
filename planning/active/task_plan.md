@@ -126,11 +126,11 @@ re-registering the *same* id stops being an outage. #34 is made tidier by this
 
 ## Phase 6: Docs, NEWS, follow-up issue
 
-- [ ] Five stale registration claims: `scripts/README.md` (4 spots incl. the
+- [x] Five stale registration claims: `scripts/README.md` (4 spots incl. the
       data-flow diagram), `README.Rmd`, `NEWS.md`, `update.yml` header, `CLAUDE.md`
 - [ ] `README.Rmd` re-knit in its **own** commit — `README.md`/`index.html` are
       tracked build outputs and will bury a functional diff
-- [ ] Record measured runtimes, not estimates
+- [x] Record measured runtimes, not estimates
 - [ ] File the **Python package extraction** issue (~1,618 Python vs ~500 R lines;
       three deps with no R equivalent), sequenced after #29
 

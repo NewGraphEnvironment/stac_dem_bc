@@ -9,6 +9,63 @@ convention as [`stac_uav_bc`](https://github.com/NewGraphEnvironment/stac_uav_bc
 (`Type: Project`, pinned at `0.0.0.9000`) and is deliberately **not** versioned —
 matching `water-temp-bc`. Releases live here and in git tags.
 
+## Unreleased
+
+### Registration is client-side, and never deletes (#27)
+
+Loading the catalogue into pgstac now lives in this repo instead of being a
+manual step on the STAC host that someone has to remember:
+
+```bash
+scripts/catalogue_register.sh --verify   # is the API behind S3?
+scripts/catalogue_register.sh --drift    # register whatever it is missing
+```
+
+`--drift` asks the API which items it holds, diffs against what `collection.json`
+publishes, and registers the difference. It is stateless, so a month nobody
+registered is simply picked up by the next run — the condition that put the API
+38k items behind for a month is now self-correcting rather than something to
+remember.
+
+**Nothing in the routine path deletes.** Every load is `pypgstac --method upsert`,
+so there is no window where the API serves less than it did. The previous path
+DELETEd the collection before reloading it, and on 2026-08-29 it failed in
+between and left the public API serving zero items until it was repaired by hand.
+`pgstac.items.collection` is `ON DELETE CASCADE`, so dropping the collection row
+takes every item with it — which is also why the collection must be registered
+before its items.
+
+- `catalogue_register.sh` — `--verify`, `--drift`, `--all`, `--ids-file`
+- `collection_register.sh`, `item_register.sh` — the two upsert halves
+- `collection_unregister.sh` — the one guarded destructive path, for #34
+- `register_manifest.py` — id and NDJSON logic, testable from `tests/`
+
+Item paths reach `item_register.sh` on **stdin**, never as arguments: 102,460
+filenames is roughly 6 MB of argv against a ~2 MB limit, and that failure mode
+strikes only after the expensive stage has already succeeded. The count guard
+runs on the *receiving* side, because a truncated transfer otherwise loads clean
+and reports success.
+
+Verification is set equality in both directions and never a count — the API has
+no aggregation extension and returns `numberMatched: null`, and a search on a
+list of ids silently omits the ones that do not exist.
+
+### The collection carries a version (#27)
+
+`--version` stamps the STAC Version Extension; `--clear-version` removes it. The
+monthly run clears it, because once items are appended the previous version is
+false rather than stale, and a wrong version is worse than an absent one.
+
+### Known imperfections shipping deliberately
+
+- **Registration still runs from a laptop.** No GitHub Actions runner can reach
+  the STAC host — there is no Tailscale action or SSH deploy key in any of these
+  repos. That is an infrastructure decision and it unblocks every catalogue repo
+  at once, so it is not made here.
+- **102,460 items are published against 102,416 current source URLs.** The 44
+  extra have no upstream URL any more; `--all` keeps them alive. That is #28's
+  deletion-pruning debt, now visible rather than merely present.
+
 ## v1.0.0 (2026-08-29)
 
 First versioned release of the catalogue. Every item now carries the digital
@@ -58,4 +115,5 @@ of which **95,888 carry a `dsm` asset**. The API served 60,126 before this relea
   external reference. Revisit at a collection rename, so consumers absorb one
   break rather than two.
 - **pgstac registration remains a manual step** (#27), so the API can lag the
-  catalogue. It lagged by ~38k items before this release.
+  catalogue. It lagged by ~38k items before this release. *Addressed on the
+  v1.1.0 branch — see below.*

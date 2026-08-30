@@ -95,7 +95,7 @@ stac/prod/stac_dem_bc/collection.json  (collection summary)
 data/stac_item_validation.csv
   ↓ s3_sync.R — push to cloud
 s3://stac-dem-bc/
-  ↓ pgstac registration
+  ↓ catalogue_register.sh --drift — upsert into pgstac
 images.a11s.one (searchable API)
 ```
 
@@ -170,7 +170,7 @@ The bottleneck is network: each GeoTIFF must be partially read over HTTP to extr
 
 - **Run history** — the [Actions tab](https://github.com/NewGraphEnvironment/stac_dem_bc/actions/workflows/update.yml) keeps every run's logs, and each run uploads a `run-logs` artifact (change-detection log + access-check CSV). Artifacts expire after ~90 days — they are the working record, not the archive.
 - **The durable ledger is git** — a successful run with changes ends in one bot commit on `main` ("Monthly incremental update: refresh caches (YYYY-MM)") touching only `data/`. `git log --oneline --author=github-actions -- data/` is the complete month-by-month history. Within those commits: `urls_list.txt` is the current source inventory, `urls_deleted.txt` the cumulative audit of sources removed upstream (their catalog items are retained), and the two CSVs the validation state for sources and outputs. A month absent from the ledger either had no changes or failed — and a failed month self-heals, because nothing was committed to mark its files as seen.
-- **The catalog itself** — `s3://stac-dem-bc/` is the only complete copy (`collection.json` plus one JSON per item, bucket versioned). The API at `images.a11s.one` serves whatever was last *registered*, so it can trail S3 between a sync and the manual registration step below.
+- **The catalog itself** — `s3://stac-dem-bc/` is the only complete copy (`collection.json` plus one JSON per item, bucket versioned). The API at `images.a11s.one` serves whatever was last *registered*, so it can trail S3 between a sync and a registration run. `scripts/catalogue_register.sh --verify` answers "is it behind?" without changing anything.
 - **Design history and one-time events** — `planning/archive/2026-07-issue-23-monthly-automation/` records how this system was built, the pre-build review findings, and the July 2026 catch-up (58k → 98k items).
 
 **Failure triage:**
@@ -183,13 +183,32 @@ The bottleneck is network: each GeoTIFF must be partially read over HTTP to extr
 
 ## After the Pipeline
 
-Once the catalog is on S3, register it in pgstac to make it searchable. Registration runs on the STAC host (geoserv) using the scripts in the rtj repo (`scripts/geoserv/`):
+Once the catalog is on S3, register it in pgstac to make it searchable. Registration is client-side and lives in this repo (#27) — one command from any machine with tailnet SSH to the STAC host:
 
 ```bash
-ssh <geoserv> "bash stac_register-pypgstac.sh stac-dem-bc https://stac-dem-bc.s3.amazonaws.com"
+scripts/catalogue_register.sh --verify   # is the API behind S3? changes nothing
+scripts/catalogue_register.sh --drift    # register whatever it is missing
 ```
 
-This loads the STAC records into PostgreSQL, powering the search API at `images.a11s.one`. Once registered, the collection is browsable in QGIS (STAC Data Source Manager), through the API directly, or any STAC-compatible client. A full reload takes ~46 minutes (dominated by downloading item JSONs from S3; the database load itself is seconds) — an incremental `pypgstac` upsert path is a planned follow-up.
+`--drift` asks the API which items it actually holds, diffs that against what `collection.json` publishes, and registers the difference. It is stateless — it needs no record of what previous runs did — so a month that nobody registered simply gets picked up by the next run. That matters: registration was skipped once for a month and the API served 60,126 items against 98,040 published.
+
+**Everything here upserts and nothing deletes.** `pypgstac load --method upsert` updates rows in place, so there is no window in which the API serves less than it did before. The older path — rtj's `stac_register-pypgstac.sh` — DELETEs the collection and then reloads it, and on 2026-08-29 it failed in between and left `images.a11s.one` serving **zero items** until it was repaired by hand. `pgstac.items.collection` is `ON DELETE CASCADE`, so dropping the collection row takes every item with it. That same cascade is why the collection must be registered *before* its items, which is the inverse of the S3 sync order — both scripts say so in their headers.
+
+| script | does |
+|---|---|
+| `catalogue_register.sh` | the orchestrator: `--verify`, `--drift`, `--all`, `--ids-file` |
+| `collection_register.sh` | upsert one `collection.json` (run first — the FK requires it) |
+| `item_register.sh` | upsert items; paths on **stdin**, never argv |
+| `collection_unregister.sh` | the only destructive script here; for #34's cutover |
+| `register_manifest.py` | id/NDJSON logic, so the shell stays thin and the logic is testable |
+
+Measured 2026-08-30 against the live catalogue of 102,460 items: `--verify` takes **3m40s**, nearly all of it enumerating registered ids from the API (11 requests of 10,000). A 3-item upsert is a couple of seconds. The database load itself is seconds even at full scale; historically it is the *fetch* of item JSONs from S3 that dominates a full `--all` run, at roughly 45 minutes.
+
+Verification is by **set equality in both directions** — missing and orphaned — never by a count. The API has no aggregation extension (`/aggregate` 404s) and returns `numberMatched: null`, and a `/search` on a list of ids silently omits the ones that do not exist. So "I asked for N and got N back" can be true while the sets differ.
+
+Registration still runs from a laptop rather than from CI, because no GitHub Actions runner can reach the host today — there is no Tailscale action and no SSH deploy key in any of these repos. That decision belongs in the infrastructure repo and unblocks every catalogue repo at once.
+
+Once registered, the collection is browsable in QGIS (STAC Data Source Manager), through the API directly, or any STAC-compatible client.
 
 ## Tests
 
