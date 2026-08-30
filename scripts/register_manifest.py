@@ -15,6 +15,7 @@ scripts/catalogue_register.sh.
 import argparse
 import json
 import sys
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -26,10 +27,31 @@ from stac_utils import PATH_S3, PATH_S3_STAC, url_to_item_id
 # not against what we believe we sent.
 API_DEFAULT = "https://images.a11s.one"
 
+# Transient-failure retries on API reads. The verifier runs AFTER the upsert has
+# already succeeded, so an unretried 5xx would turn a completed registration into
+# a traceback -- the same fail-toward-abort shape this whole change exists to
+# remove. An --all verify is ~205 POSTs; at that count "transient" is routine.
+RETRIES = 3
+
 # Keyset paging page size. The API has no aggregation extension and returns a
 # null numberMatched, so enumerating ids is the only way to count anything —
 # 102,460 ids came back in 11 requests at this size.
 PAGE_SIZE = 10000
+
+
+def _post(session, url, body, timeout=180):
+    """POST with retries on transient failures. Raises after the last attempt."""
+    last = None
+    for attempt in range(1, RETRIES + 1):
+        try:
+            resp = session.post(url, json=body, timeout=timeout)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.RequestException as exc:
+            last = exc
+            if attempt < RETRIES:
+                time.sleep(attempt * 2)
+    raise RuntimeError(f"API request failed after {RETRIES} attempts: {last}") from last
 
 
 # =============================================================================
@@ -104,9 +126,7 @@ def ids_registered(collection_id: str, api: str = API_DEFAULT,
     ids: list[str] = []
     seen_tokens: set[str] = set()
     while True:
-        resp = session.post(url, json=body, timeout=180)
-        resp.raise_for_status()
-        page = resp.json()
+        page = _post(session, url, body)
         ids.extend(f["id"] for f in page.get("features", []))
         nxt = next((l for l in page.get("links", []) if l.get("rel") == "next"), None)
         if not nxt:
@@ -129,7 +149,7 @@ def ids_registered(collection_id: str, api: str = API_DEFAULT,
     return ids
 
 
-def search_body(ids, page_size: int = PAGE_SIZE) -> dict:
+def search_body(ids) -> dict:
     """The POST /search body for an id lookup.
 
     Pure, and separated out purely so it can be asserted on offline. The
@@ -160,9 +180,8 @@ def ids_serving(ids, api: str = API_DEFAULT, chunk: int = 500, session=None) -> 
     got = set()
     for i in range(0, len(ids), chunk):
         batch = ids[i:i + chunk]
-        resp = session.post(url, json=search_body(batch), timeout=180)
-        resp.raise_for_status()
-        got.update(f["id"] for f in resp.json().get("features", []))
+        page = _post(session, url, search_body(batch))
+        got.update(f["id"] for f in page.get("features", []))
     return got
 
 

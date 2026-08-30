@@ -21,7 +21,7 @@
 #
 # Usage:
 #   find "$DIR" -name '*.json' ! -name collection.json | scripts/item_register.sh
-#   scripts/item_register.sh --dryrun < ids.txt
+#   scripts/item_register.sh --dryrun < item_paths.txt
 #
 # Env:
 #   STAC_HOST  ssh target (default: root@geopro)

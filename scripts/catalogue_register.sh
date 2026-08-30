@@ -102,7 +102,9 @@ fi
 
 case "$MODE" in
   all)
-    cp "$WORK/published.txt" "$WORK/todo.txt"
+    # Deduped for the same reason as --ids-file below: the count and the fetch
+    # must be over the same set, or the guard fires on a healthy run.
+    sort -u "$WORK/published.txt" > "$WORK/todo.txt"
     ;;
   ids-file)
     [ -s "$IDS_FILE" ] || { echo "ERROR: ids file missing or empty: $IDS_FILE" >&2; exit 1; }
@@ -111,7 +113,11 @@ case "$MODE" in
     # short by `wc -l` while Python reads every line — the fetch would then
     # produce one more file than expected and the count guard below would abort
     # a perfectly good run.
-    grep -v '^[[:space:]]*$' "$IDS_FILE" > "$WORK/todo.txt" || true
+    # sort -u, not just a blank-line filter: `hrefs-published` matches against a
+    # SET, so a duplicated id yields one fetch file while N_TODO counts two --
+    # and the run then aborts after the whole fetch, reporting "fetched 2 of 3"
+    # with zero failures and no explanation. Dedupe before anything counts.
+    grep -v '^[[:space:]]*$' "$IDS_FILE" | sort -u > "$WORK/todo.txt" || true
     [ -s "$WORK/todo.txt" ] || { echo "ERROR: no ids in $IDS_FILE" >&2; exit 1; }
     ;;
   drift|verify)
@@ -133,6 +139,12 @@ if [ "$MODE" = "verify" ]; then
   # alone would have reported IN SYNC over any number of orphans -- registered
   # items with no published link -- which is the drift direction #28 is open
   # about and the one --all would silently preserve.
+  # count_lines returns 0 for a MISSING file, which would make an unwritten
+  # orphan list read as "no orphans" -- the gate silently disarmed. Require it.
+  if [ ! -f "$WORK/orphaned.txt" ]; then
+    echo "ERROR: orphan list was not written; cannot verify both directions" >&2
+    exit 1
+  fi
   N_ORPHANED=$(count_lines "$WORK/orphaned.txt")
   RC=0
   if [ "$N_TODO" -gt 0 ]; then
