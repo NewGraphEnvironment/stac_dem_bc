@@ -168,6 +168,7 @@ def main() -> int:
 
     p = sub.add_parser("hrefs-published", help="tab-separated id and fetch href")
     p.add_argument("--collection-file", required=True)
+    p.add_argument("--ids-file", help="restrict to these ids (one per line)")
 
     p = sub.add_parser("ids-from-urls", help="item ids from source GeoTIFF URLs")
     p.add_argument("--urls-file", required=True)
@@ -192,7 +193,23 @@ def main() -> int:
             print(item_id)
 
     elif args.cmd == "hrefs-published":
-        for item_id, href in collection_item_links(args.collection_file):
+        links = collection_item_links(args.collection_file)
+        if args.ids_file:
+            wanted = {
+                line.rstrip("\n") for line in open(args.ids_file) if line.strip()
+            }
+            links = [(i, h) for i, h in links if i in wanted]
+            # An id with no published link cannot be fetched, so it cannot be
+            # registered. Say so rather than silently returning a short list —
+            # a shortfall discovered later looks like a network failure.
+            found = {i for i, _ in links}
+            unknown = wanted - found
+            if unknown:
+                raise SystemExit(
+                    f"{len(unknown)} requested id(s) have no item link in "
+                    f"{args.collection_file}, e.g. {sorted(unknown)[:3]}"
+                )
+        for item_id, href in links:
             print(f"{item_id}\t{href}")
 
     elif args.cmd == "ids-from-urls":

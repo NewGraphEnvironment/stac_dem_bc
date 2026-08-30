@@ -94,22 +94,22 @@ re-registering the *same* id stops being an outage. #34 is made tidier by this
 
 ## Phase 3: `catalogue_register.sh` — the orchestrator
 
-- [ ] `--all` (every published item link) and `--drift` (register only what the
+- [x] `--all` (every published item link) and `--drift` (register only what the
       API is missing) share one code path, so the 3-item case exercises the 102k code
-- [ ] `--ids-file <f>` for explicit lists
-- [ ] Parallel S3 fetch, each worker to its **own** file, then
+- [x] `--ids-file <f>` for explicit lists
+- [x] Parallel S3 fetch, each worker to its **own** file, then
       `find -exec cat {} +` — the matched trap pair that has bitten rtj twice
-- [ ] `--max-time` on every curl + a periodic progress line (G5)
-- [ ] Per-file retry before any error reaches the exit code (G6; the backfill
+- [x] `--max-time` on every curl + a periodic progress line (G5)
+- [x] Per-file retry before any error reaches the exit code (G6; the backfill
       precedent — 98,040 successes nearly discarded over 2 transient failures)
-- [ ] Verify by **set equality**, both directions, never a returned-count
+- [x] Verify by **set equality**, both directions, never a returned-count
 
 ## Phase 4: `collection_unregister.sh`
 
-- [ ] pgstac SQL delete of a collection + its items, for #34's cutover
-- [ ] Guarded: id must match an allowlist pattern, explicit `--yes`, prints the
+- [x] pgstac SQL delete of a collection + its items, for #34's cutover
+- [x] Guarded: id must match an allowlist pattern, explicit `--yes`, prints the
       item count it is about to destroy first
-- [ ] rtj's `stac_unregister.sh` is dead code (405s) — this must not reach for it
+- [x] rtj's `stac_unregister.sh` is dead code (405s) — this must not reach for it
 
 ## Phase 5: STAC Version Extension
 
