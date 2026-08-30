@@ -113,15 +113,15 @@ re-registering the *same* id stops being an outage. #34 is made tidier by this
 
 ## Phase 5: STAC Version Extension
 
-- [ ] Opt-in `--version` stamp: append the v1.2.0 schema URL to `stac_extensions`,
+- [x] Opt-in `--version` stamp: append the v1.2.0 schema URL to `stac_extensions`,
       set `version`. Live collection has **no `stac_extensions` key at all**
       (`None`, not `[]`) — this is a schema change, so re-validate after
-- [ ] Kept **outside** `collection_patch()`'s changed-list contract, or `--check`
+- [x] Kept **outside** `collection_patch()`'s changed-list contract, or `--check`
       starts failing after every release
-- [ ] **Invalidate rather than go stale**: when the monthly patch appends items,
+- [x] **Invalidate rather than go stale**: when the monthly patch appends items,
       *remove* `version`. A wrong version is worse than an absent one — absent says
       "check yourself", wrong says "you already have this"
-- [ ] Never call `git describe` from `collection_patch.py` — CI's checkout is
+- [x] Never call `git describe` from `collection_patch.py` — CI's checkout is
       shallow with no tags; take `--version` explicitly and hard-fail on no-tag
 
 ## Phase 6: Docs, NEWS, follow-up issue

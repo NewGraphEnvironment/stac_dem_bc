@@ -20,7 +20,7 @@ import sys
 import pystac
 from pystac import Collection, Extent, SpatialExtent, TemporalExtent
 
-from collection_patch import DESCRIPTION, KEYWORDS, PROVIDERS
+from collection_patch import DESCRIPTION, KEYWORDS, PROVIDERS, version_stamp
 from stac_utils import (
     BBOX_BC,
     date_extract_from_path,
@@ -35,6 +35,11 @@ logger = logging.getLogger(__name__)
 def main():
     parser = argparse.ArgumentParser(description="Create STAC collection for DEM BC")
     parser.add_argument("--test", action="store_true", help="Test mode (dev output)")
+    parser.add_argument("--version", default=None,
+                        help="Stamp this release version via the STAC Version Extension. "
+                             "Pass explicitly; never derived from git here (CI checks out "
+                             "shallow with no tags, and the usual 0.0.0 fallback is a "
+                             "silently wrong stamp).")
     parser.add_argument("--test-count", type=int, default=10, help="Number of items for extent calculation in test mode (default: 10)")
     args = parser.parse_args()
 
@@ -106,6 +111,14 @@ def main():
         providers=[pystac.Provider.from_dict(p) for p in PROVIDERS],
         keywords=list(KEYWORDS),
     )
+
+    # A rebuild republishes the whole catalogue, so it is a release moment and
+    # may carry a version. The monthly path never reaches here -- it patches the
+    # fetched collection instead -- which is why the stamp is opt-in on both.
+    if args.version:
+        version_stamp(collection.extra_fields, args.version)
+        collection.stac_extensions = list(collection.extra_fields.pop("stac_extensions"))
+        logger.info("Stamped version %s", args.version)
 
     # Save with correct hrefs
     collection.save(catalog_type=pystac.CatalogType.ABSOLUTE_PUBLISHED)
