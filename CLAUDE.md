@@ -604,6 +604,35 @@ Add new checks here when a bug class is discovered — they compound over time.
 - Anything building pathspecs from a file (`.Rbuildignore`, `.gitignore`) will
   eventually meet a leading `_`, `(`, or `^`.
 
+### `sed 1d f1 f2 f3` strips only the FIRST file's header
+
+`sed` treats multiple file arguments as one concatenated stream, so a line-address
+script applies once across the whole set rather than per file. Stripping CSV headers
+this way — especially via `find … -exec sed 1d {} +`, which batches many files into one
+invocation — leaves every header but the first embedded in the data.
+
+It is silent, and it lands rows that parse. Caught 2026-08-30 concatenating 24 paged WFS
+responses: 23 stray header rows entered a 223,667-row analysis and showed up only as a
+row-count reconciliation failing by exactly 23.
+
+```bash
+for f in pages/*.csv; do sed 1d "$f"; done > combined.csv   # per file
+awk 'FNR>1' pages/*.csv > combined.csv                      # or FNR, which resets
+```
+
+Reconcile the row count against what the source said it would be. That is the check that
+catches this, and it costs one line.
+
+### `sed -n '/X/,$d' file` prints nothing at all
+
+`-n` suppresses auto-print, and `d` only deletes — so nothing is ever emitted and the
+output is empty. The intent (print up to a marker) needs `sed '/X/,$d'` without `-n`, or
+`sed -n '1,/X/p'`.
+
+Fails toward an **empty file**, which downstream reads as "no matches" rather than as a
+broken command. Same family as the guards below: the silent direction is the dangerous
+one.
+
 ### Reading a file line-by-line drops the last line without a trailing newline
 - `while IFS= read -r line; do ...; done < file` skips a final line that has no
   newline after it. Use `while IFS= read -r line || [ -n "$line" ]`.
@@ -668,6 +697,20 @@ Add new checks here when a bug class is discovered — they compound over time.
 - Anything chatty on stderr does this — Qt, GDAL, JVM warnings, progress bars.
   Suspect it whenever a subprocess parser fails on *content* rather than on
   absence.
+- **And carry the CONTENTS onward, not the path.** The fix above leaves you
+  holding a temp file, and the natural next move — attach its path to the result
+  and clean it up when the caller returns — destroys the log before the assertion
+  that needs it. A probe wrapped in its own helper returns, the file goes, and
+  the failure reports `(no stderr captured)` for the one case the file exists to
+  explain. Read it immediately and pass the lines:
+  ```r
+  attr(out, "stderr") <- if (fs::file_exists(err)) readLines(err, warn = FALSE)
+                         else character(0)
+  ```
+  Caught 2026-08-30 in rfp#227, in a helper written that same hour specifically
+  to stop losing container diagnostics. It surfaced as an unrelated PyQGIS
+  `AttributeError` being invisible — the symptom was "the probe returns
+  nothing", which reads as a container that would not start.
 
 ### Heredoc precedence in pipelines
 - `cmd1 | cmd2 <<EOF` — the heredoc binds to `cmd2` (the rightmost simple command). If you intended `cmd1` to receive it, put `<<EOF` on cmd1 explicitly: `cmd1 <<EOF | cmd2`.
@@ -914,6 +957,22 @@ Add new checks here when a bug class is discovered — they compound over time.
 ### `gh` CLI
 - **`gh pr create` resolves branch from CWD, not `--repo`**. Specifying `--repo NewGraphEnvironment/X` does NOT switch branch resolution — the command still reads the current working directory's checked-out branch. To open a PR in repo X, `cd` into X's checkout first, or pass `--head <branch>` explicitly.
 - **`gh issue create` / `gh pr create` with heredoc bodies fail on prose containing special shell characters** (apostrophes, dollar signs, backticks). Use `--body-file /tmp/issue.md` instead — every project's `newgraph.md` convention specifies this; codified here for the underlying class. The two are written interchangeably, so the trap applies to both: `gh pr create --body "$(cat <<'EOF' … EOF)"` breaks the parser on a prose apostrophe and bash reports `unexpected EOF while looking for matching '"'`, aborting the whole command before anything runs.
+- **A stacked PR is retargeted when its base branch is DELETED, not when the base
+  PR merges.** Merge the base and the child still points at a merged branch:
+  `gh pr view` reports it `MERGEABLE`/`CLEAN`, so nothing looks wrong, and merging
+  it there is a no-op against history that is already on main. Relying on the
+  deletion side-effect is worse than it sounds, because the natural cleanup order
+  is merge-then-delete and a `--delete-branch` on the base silently rewrites the
+  child's base as a side effect of tidying. Retarget explicitly, then re-read the
+  state before merging:
+  ```bash
+  gh pr merge "$BASE_PR" --merge          # no --delete-branch yet
+  gh pr edit "$CHILD_PR" --base main      # explicit, not a side effect
+  gh pr view "$CHILD_PR" --json mergeable,mergeStateStatus,statusCheckRollup
+  ```
+  Checks are attached to the head SHA, not the base, so they survive the
+  retarget — but confirm rather than assume, since a required check configured
+  per-base may not. Seen 2026-08-30 merging rfp#231 then rfp#234.
 - **Before you *cut* a branch, verify local is current with origin.** The mirror of the
   rule below, and easier to miss because everything about the working tree looks fine. A
   clean tree and the right branch name say nothing about whether that branch is 19 commits
@@ -1031,6 +1090,34 @@ qpdf --qdf --object-streams=disable in.pdf - | strings | grep -oE 'https?://[^ )
 
 `pdftotext` also splits ligatures — "fish" comes out as " sh" — so a grep for any term
 containing `fi`, `fl` or `ffi` can report a false absence.
+
+### Extracted PDF text carries corrupted glyphs, and a tolerant parser turns them into wrong numbers
+
+Worse than the ligature case above, because it fails silently with a plausible value
+rather than a missing match. Three shapes, all met in one set of 18 camera calibration
+reports (fly#32, 2026-08-30):
+
+| what the PDF renders | what it means | what a naive parser does |
+|---|---|---|
+| `2001Opixel` | 20010 | `gsub("[^0-9.]", "", x)` **deletes** the O and returns 2001 |
+| `Pixel Size [<U+F06D>m]` | `[µm]` in a Symbol font | a literal `\[µm\]` misses; a human reading the extract sees `[m]` and takes **metres** |
+| `Pixel Size  5.200 m` | 5.200 µm, sign dropped entirely | reads as metres — a factor of 10^6 |
+
+The micron sign is the common one: U+F06D is a **Private Use Area** codepoint emitted by
+Word-generated PDFs, so it is neither `µ` (U+00B5) nor `μ` (U+03BC) and matches neither.
+
+Three habits:
+
+- **Anchor on the label, not the unit.** Take the first number on the `Pixel Size` line
+  rather than matching a unit that is written three different ways.
+- **Never strip non-digits to "clean" a number.** That silently deletes a corrupted
+  glyph instead of failing on it. Substitute deliberately (`[Oo]` preceded by a digit
+  → `0`) and let an independent check prove the result.
+- **Have an independent identity to check against.** These reports state pixel count,
+  pixel size *and* image size in mm, so `px × pitch == mm` catches any one of the three
+  being wrong — which is what made the O→0 substitution safe rather than reckless. Where
+  the document states only two of the three, the check is vacuous; know which rows those
+  are rather than counting them as passes.
 
 ## R / Package Installation
 
@@ -1230,6 +1317,105 @@ prevented it.
   both. The new drift guard compared paths against the union of both templates
   and reported clean. A reviewer found it, not the guard — which is the point:
   a pooled guard cannot catch its own author.
+
+### A guard that compares against a vendored copy cannot see the copy go stale
+
+A drift guard needs something to compare against. When the real source is
+unavailable in CI — a private repo, a licensed dataset, a machine that is not the
+build machine — the usual fix is to vendor a witness and compare against that.
+It works, and it introduces a failure the guard is structurally blind to: **the
+witness itself going stale.**
+
+The guard then reports green for exactly the drift it exists to catch, because
+both sides of its comparison are frozen together. Nothing is broken, nothing is
+mis-scoped, and no assertion is wrong — the reference is simply a photograph of
+the thing being checked.
+
+**The tell is a guard whose comparison never reads the upstream at all.** Ask
+what would have to change for it to go red, and if every answer is "someone
+re-runs the vendoring script", the guard is measuring the vendoring, not the
+drift.
+
+Measured 2026-08-30 in gq. Three artifacts are vendored from a private QGIS
+template repo, and **two of the three had silently drifted**:
+
+| artifact | state | how it surfaced |
+|---|---|---|
+| `themes.csv` | stale for a release | a *different* repo's cross-check, which skips in CI |
+| `template_groups.csv` | stale, still | re-running the extractor by hand during issue triage |
+| `form_types.csv` | current | the same hand check, which is the only reason this is known |
+
+The second is the instructive one. An issue had been filed saying the suite was
+red and the exemptions were stale; the suite was **green**, because the exemption
+test compares against the vendored `template_groups.csv` rather than the
+templates. The witness had frozen before the upstream change landed, so the guard
+could not fire, and the issue's own premise had gone stale in the same motion.
+
+Two things that work, and they are not alternatives:
+
+- **A currency check gated on the source being present** — extract live, compare
+  to the committed copy, `skip()` when the source is unavailable. It runs on a
+  developer machine and skips in CI, which is worth saying out loud in the test,
+  because a skip is not a pass.
+- **A date or upstream version stamped beside the witness**, so "when was this
+  last true?" is answerable without the source. A guard that cannot run in CI at
+  least stops claiming currency it has not checked.
+
+Generalises to any pinned reference: a checked-in golden file, a vendored schema,
+a recorded API response, a lockfile treated as documentation. If the copy is the
+only thing the test reads, the test is pinned to the copy, not to the world.
+
+### A guard's scope is usually a coincidence, and it will not announce itself
+
+Sibling of the pooled-guard rule above, and the harder one to see. There the
+guard compares against the wrong *aggregate*; here it compares against the right
+thing over the wrong *set* — a literal list that happens to match the data today.
+It reads as a deliberate enumeration because that is exactly what it looks like.
+
+```r
+opaque <- c("esri_world_topo")          # the only one themes.csv names today
+expect_false(any(df$visible[df$layer_key %in% opaque]))
+```
+
+Nothing is wrong with that assertion. The defect is that `opaque` is pinned to
+nothing, so the guard silently covers whatever the data currently happens to
+contain, and grows blind the moment it grows.
+
+**The tell is a literal set used as a filter.** For every hardcoded list, ask
+where the set is *defined* and whether anything fails when the two diverge. If
+the answer is "it matches at the moment", the guard's coverage is a coincidence
+with an expiry date you do not control.
+
+**Pin the scope against its source of truth**, and keep the list literal where
+the membership is a *judgement* — "is this basemap opaque" is not derivable from
+a query, and deriving it makes the guard agree with itself by construction:
+
+```r
+expect_setequal(c(opaque, overlay), union(g$layer_key[g$source_type == "wms"],
+                                          rasters))   # declare-or-fail
+```
+
+**Expect it to recur one axis over rather than one level up.** This is what makes
+it expensive: each fix is correct and the class reappears somewhere adjacent.
+Measured 2026-08-30 in gq#77 — four review rounds, **five** instances, all in one
+test file:
+
+| # | scope held by | found by |
+|---|---|---|
+| 1 | two hardcoded template names vs a set derived from all templates | review |
+| 2 | one basemap key vs the four the group actually holds | review |
+| 3 | the key list vs `groups.csv`, where the set is defined | review |
+| 4 | one group's wms layers vs *every* group's — and the uncovered group draws **above** it | review |
+| 5 | the wms axis vs rasters, an axis with exactly one member and no margin | measuring a reviewer's claim that the residual was "definitional" |
+
+Two of those would have shipped an opaque satellite raster over every field map
+with a green suite. Three separate "this is now terminal" claims were wrong.
+
+**Terminate it by enumeration, not by assertion.** The recursion stops when you
+can name the complete candidate set and show there is no level above its source —
+in that case, that `groups.csv` is hand-maintained and no generator writes it. A
+residual you can state precisely ("a layer that is neither a wms nor a raster")
+is definitional; one you can only call unlikely is instance six.
 
 ### Tests that silently do not run
 
@@ -1712,12 +1898,66 @@ When importing config from one location into a canonical one (legacy `~/.bash_pr
   output is structurally valid and semantically wrong, so every check that looks
   only at shape passes it.
 
+### A grep that cannot show a failure is not a check
+
+- Filtering a run's output to the lines you expect is not verification. If the
+  filter cannot match an error, a failing run and a passing one look identical —
+  and the lines immediately before a fatal error are usually exactly the ones you
+  were hoping to see.
+- Seen 2026-08-29: a driver run was piped through
+  `grep -E "greyscale stretch|added"`. It matched the line printed one statement
+  before `Error: could not find function`, and the success was reported from that
+  match. The work was then completed by hand, which produced the right result and
+  hid that the driver had not. A PR claim of "verified end to end" was true of the
+  earlier commits and false of that one.
+- This is the sibling of *"a wrapper's exit 0 is not the work completing"* below,
+  one step earlier: that rule is about trusting the wrong exit status, this one is
+  about never seeing the status at all. `cmd | grep ...` reports **grep's** exit,
+  so `$?` is 0 whenever the pattern matched, whatever the command did.
+- Capture the whole run, gate on it, then look at the part you care about:
+  ```bash
+  cmd > run.log 2>&1; rc=$?
+  errs=$(grep -c 'Execution halted\|^Error\|could not find' run.log)
+  [ "$rc" -eq 0 ] && [ "$errs" -eq 0 ] || { tail -30 run.log; exit 1; }
+  grep -E "the interesting lines" run.log
+  ```
+
 ### A round-trip through your own reader proves nothing about interop
 - When code writes a format some **other** program consumes — a database table, a config file, an export another tool imports — a test that writes then reads it back with your own reader validates only that you are self-consistent. It cannot detect that the real consumer rejects what you wrote.
 - Symptom when wrong: every test green, the artifact byte-perfect on inspection, and the feature silently does nothing in production. Failures on the consumer's side are often **silent by design** — a lookup that matches nothing returns "no result", not an error.
 - Get the real consumer into the loop, even if awkward: run it in a container, shell out to its CLI, gate the test on the tool being installed and skip otherwise. Then keep a cheap structural assertion alongside for CI, so the invariant is still guarded when the heavy test skips.
 - Best ground truth is **the consumer's own output**: have it write the artifact once, then diff yours against it. That surfaces required fields no documentation mentions.
 - (rfp#17, 2026-08: `layer_styles` rows were written with `f_table_schema` NULL. QGIS looks a style up with an equality match passing `""`, and `NULL = ''` is never true in SQL, so every row was invisible — `loadDefaultStyle()` returned FALSE, layers drew with default symbols, nothing logged. The rows round-tripped perfectly through DBI, so the whole suite was green. Found only by asking QGIS in a container, then bisecting against a row QGIS wrote itself.)
+
+### A reference generated by feeding your artifact to the consumer is circular
+
+- The interop rule above says to get the real consumer's own output as ground
+  truth. The trap is *how* you get it. Ask the consumer to **load your artifact
+  and save it back** and it hands you your own artifact with its blessing — so
+  every later comparison against that reference passes by construction, however
+  wrong the artifact is. It looks like the strongest possible evidence, because
+  the consumer really did produce the file.
+- The tell is a generation step of the shape `load(ours) -> save()`. Ground truth
+  has to be **constructed from the consumer's own API**, from inputs that are not
+  your artifact, so the consumer decides the shape rather than echoing it.
+  ```python
+  # circular: hands back what it was given
+  layer.loadNamedStyle('/data/ours.qml'); layer.saveNamedStyle('/data/ref.qml')
+
+  # ground truth: the consumer builds it
+  layer.setRenderer(QgsHillshadeRenderer(prov, 1, 315.0, 45.0))
+  layer.saveNamedStyle('/data/ref.qml')
+  ```
+- Same shape outside XML: a schema "validated" by exporting your own rows and
+  re-importing them, a golden file regenerated by the code under test, a fixture
+  built by serialising the object you are about to assert on.
+- Caught 2026-08-30 in rfp#227. The repo already carried a note that a style file
+  *it had exported* was useless as evidence about that consumer's behaviour — and
+  the obvious way to author the new references would have reintroduced exactly
+  that, through a helper that already existed and did the wrong one of the two.
+- Pairs with the fixture rule below: a reference that cannot disagree with you is
+  the fixture-set problem in its purest form, since **no** input can reach the
+  failure mode.
 
 ### Mocking the transport means the request is never built
 - A network client mocked at its HTTP boundary — `local_mocked_bindings(.do_http = ...)`, `responses`, `nock`, a stubbed `fetch` — gives excellent coverage of *response* handling and **zero** coverage of the request. Status codes, retries, backoff, parse errors, partial bodies: all testable. Method, headers, content type, and body encoding: never exercised, because no test that stubs the transport constructs one.
@@ -1796,6 +2036,44 @@ When importing config from one location into a canonical one (legacy `~/.bash_pr
   Green in the one you run locally says nothing about the one CI runs. Run both
   before believing it.
 
+### Do not branch on a value only some code paths populate
+
+A variable that one route fills in and another leaves `NA` is not a safe thing to test.
+The condition reads as a property of the row — "has this been sized", "is this
+non-square" — but it is really a property of *which route ran first*, so every branch
+downstream inherits an ordering dependency nobody wrote down.
+
+The failure is total and silent for the affected rows: the condition is uniformly false
+for a whole class of input, so the branch is never taken, no warning fires, and the
+reporting columns say the work happened.
+
+**Tell: the value is assigned in more than one place, and at least one of them is
+conditional.** Ask what it holds for a row that has taken none of those paths yet — if
+the answer is `NA`, anything branching on it before every path has run is testing
+arrival order.
+
+Measured 2026-08-30 in fly#32, where the same `NA`-by-construction fact broke **three
+separate conditions** in one function over three review rounds, each found inside the
+previous round's fix:
+
+| round | condition | consequence |
+|---|---|---|
+| 1 | `sized <- !is.na(half_side)` | fine for the old single route |
+| 2 | `corrected <- sized & !by_gsd` | the two are disjoint, so the DEM route was unreachable for every row it existed to serve — 24/24 empty, silently |
+| 3 | `non_square <- abs(half_cross - half_along) > tol` | computed before the DEM route fills those values, so DEM-sized frames were never rotated; and the answer depended on **what else was in the batch** |
+
+The fix is not a better condition. It is to branch on something known **before any route
+runs** — there, the recording format's aspect ratio rather than the sized half-dimensions.
+Derive the predicate from the inputs, not from a work-in-progress.
+
+**Batch dependence is the confirming symptom.** If whether row *i* takes a branch can be
+changed by editing row *j*, the predicate is reading shared mutable state. Test it: run
+one row alone and in company, and compare.
+
+Related to the proxy rule below — both are conditions that stand in for the property you
+actually want — but distinct in remedy. A proxy needs a truer measurement; this needs the
+same measurement taken *earlier*.
+
 ### A guard that encodes the cause you measured is a proxy for the property you want
 
 You reproduce a bug, measure the state that produced it, and write the guard
@@ -1847,6 +2125,42 @@ CRS reaches **one** of three arms while appearing to cover the behaviour. Where
 an input dimension selects which failure you get, that dimension belongs in a
 table, with a healthy control at each value so the guard is distinguishable from
 one that refuses everything.
+
+### A probe reporting a defect in long-shipped code is usually a broken probe
+
+When an ad-hoc probe says something that has worked in production for months is
+broken, the prior belongs on the probe, not on the code. Check the instrument
+before you write the finding up — and certainly before it becomes scope.
+
+**The tell is an obviously-correct item in the failure list.** A probe that
+reports 13 things missing, and the list contains items you can see with your own
+eyes, has not found 13 defects and one false positive; it is wrong about all 13.
+Scan the output for something you already know is fine, and if it is in there,
+stop reading the finding and read the probe.
+
+Measured 2026-08-29 in rfp#216. An issue flagged a map-theme group as possibly
+dangling, and a probe "confirmed" it — 13 theme rows naming groups not in the
+layer tree. The probe built each group's path by walking parents to the document
+root, which is *itself* an unnamed group node, so every path gained a phantom
+leading segment and nothing matched. `bcrestoration Mobile /Basemap` was in the
+missing list, which is a group anyone can see in QGIS. Anchored at the right
+node, **0** of 25 rows dangled and the whole finding evaporated.
+
+Two habits, both cheap:
+
+- **Print a positive control.** Have the probe assert something you know is true
+  before reporting what is false — "these 3 groups resolve" beside "these 13 do
+  not". A probe that cannot find the known-good case is not measuring what it
+  claims.
+- **Reconcile the count against the population.** 13 of 25 rows broken in a
+  shipped artifact would mean half a feature has been failing silently. If a
+  finding implies a failure rate nobody has noticed, the failure is in the
+  measurement far more often than in the world.
+
+The inverse case is real but rarer, and it announces itself differently — a
+genuine long-lived defect usually has a *reason* nobody noticed it (a guard that
+cannot see it, a code path nothing exercises), and you can name that reason. If
+you cannot say why it went unnoticed, you have not found it yet.
 
 ### Restore the bug and confirm the test fails
 - The rule above says a fixture that cannot reach the failure mode is worthless. This is the thirty-second check that tells you which kind you just wrote: **put the defect back, run the test, watch it go red.** A test that stays green against the code it was written to reject is decoration, and reading it will not tell you that — every case below looked correct on the page.
@@ -1924,7 +2238,7 @@ one that refuses everything.
   A probe run against a 2017 tile concluded "there is no surface model and no
   CHM", and that became the central constraint of a project plan — ruling out
   canopy measurement entirely — for weeks. Listing the prefix instead showed
-  `dem, dsm, pointcloud` and more immediately, with DSM present in 25 of 38
+  `dem, dsm, orthophoto, pointcloud` immediately, with DSM present in 25 of 38
   mapsheet-years.
 - **Enumerate the container** (`?list-type=2&delimiter=/&prefix=…`, `ls`, the
   API's own listing endpoint) and match on the fields that actually identify the
@@ -2058,6 +2372,62 @@ one that refuses everything.
   a rebuild would have silently replaced them with differently-shaped output,
   invisible in a single-record spot check. Fetch, edit the one field, write back,
   and diff a sample to prove nothing else moved.
+
+### `system2()` shell-quotes the command but not the arguments
+
+- `system2("git", c("-C", dir, "status"))` breaks the moment `dir` contains a
+  space: the command name is quoted, the args are pasted on raw and re-split by
+  the shell. Wrap every path or user-derived arg in `shQuote()`.
+- It fails in the direction that hides itself. A `git -C "/some path" rev-parse`
+  that gets split returns nothing on stdout, so a probe reads it as "not a git
+  checkout" and **skips every later check** rather than erroring. The provenance
+  guard then reports nothing wrong because it never ran.
+- Same family as the stderr-interleaving rule above, and the same fix shape:
+  read the exit **status**, not just the output. `stdout = TRUE` discards the
+  status, so `length(out) == 0` conflates "the command failed" with "there was
+  nothing to report" — check `attr(out, "status")`, or call again with
+  `stdout = FALSE` when you only need pass/fail.
+- Caught 2026-08-29 in gq#64, and only by testing the guard against a checkout
+  deliberately placed at a path containing a space. Reading it proved nothing;
+  the two-answer test did.
+
+### `expect_setequal()` refuses NULL, and `names(character(0))` is NULL
+
+- An exemption list keyed by name — `c(layer_a = "reason", layer_b = "reason")` —
+  is normally asserted two ways: the offenders are all exempt, and every
+  exemption is still needed. The second calls `names()`.
+- Emptying that list, which is the goal every such list documents as its correct
+  state, then **errors the test**:
+  ```r
+  local_exempt <- character(0)     # or c(), or NULL
+  names(local_exempt)              # NULL, not character(0)
+  expect_setequal(setdiff(names(local_exempt), offenders), character(0))
+  #> Error: `object` must be a vector, not `NULL`.
+  ```
+- Use `stats::setNames(character(0), character(0))`, and say why in a comment —
+  it reads as a affectation otherwise and the next person will simplify it back.
+- **Do not fix it by deleting the "still needed" assertion.** That assertion is
+  the tripwire that makes the list a set of decisions rather than a backlog;
+  removing it to make emptying easy discards the reason the list was trustworthy.
+- The trap is that this fires at the exact moment of success. The guard works for
+  as long as it has entries, and breaks when you finally earn the empty state —
+  so it is a bug you cannot meet until the day you are trying to close the issue.
+
+### A writer that rewrites a whole file changes more than the rows you added
+
+- Appending via a library writer usually means read-all, append, write-all. The
+  library then imposes its own conventions on **every** line, not just yours:
+  Python's `csv.writer` terminates with `\r\n` by default, so a two-row append
+  converted an entire CSV to CRLF and every line showed as modified.
+- The diff stat is the only warning, and it is easy to skim past — "21
+  insertions, 19 deletions" for two added rows. Read the count against your
+  intent: if it exceeds what you changed, stop and look before committing.
+- Prefer opening in append mode and writing only the new bytes, with the
+  terminator stated explicitly (`lineterminator='\n'`). When a full rewrite is
+  unavoidable, diff before staging.
+- Same family as "`git add -A` after a generator sweeps its side effects into
+  your commit", one level lower: there the extra changes come from another tool,
+  here from the writer you called yourself.
 
 
 # NGE Feature Workflow
@@ -2538,6 +2908,23 @@ Skip planning for single-file edits, quick fixes, or tasks with obvious next ste
    **Do not wait for it.** Spawn, then start the lowest-risk phase. Background agents have repeatedly returned late — in one case after the entire issue had shipped — so treating the review as a precondition stalls the work for as long as the agent takes (see `karpathy.md` §6). Fold findings in whenever they land: pre-baseline they edit the plan; mid-implementation they become follow-up commits. A review that arrives after the code is written is not wasted — the reviewer reads real code instead of a plan, which is how one late review still contributed three fixes that no earlier reading had found. If you genuinely cannot proceed without the result, run it with `run_in_background: false` so the blocking is explicit.
 
    Verify before acting, in both directions. Findings have been confidently wrong (a "BLOCKER" disproved by a 30-second probe) and confidently right about things nobody suspected. Reproduce the claim first.
+
+   **"Both directions" includes the reviewer's conclusions, not just its findings.**
+   A review is wrong in the *alarming* direction loudly — a BLOCKER you probe and
+   disprove costs one round-trip. It is wrong in the *reassuring* direction
+   silently, because nothing prompts you to check a sentence telling you that you
+   are finished. Measured 2026-08-30 in gq#77: round 4 fixed its own finding and
+   characterised the residual as "definitional". Two commands showed it was not —
+   the leftover axis had exactly one member and no margin, the same shape as the
+   instance that reviewer had just fixed. Treat *"this is now terminal / complete /
+   definitional"* as a claim with an author, exactly like an issue asserting a
+   question can only be answered by testing.
+
+   Corollary on when to stop: **convergence is not a reviewer saying you have
+   converged.** Across four rounds on that PR, five instances of one defect class
+   were found, and three separate "this is terminal now" claims — two of them mine
+   — were wrong. What ended it was enumerating the complete candidate set and
+   showing nothing sat above its source, not another round.
 
    **Spawn review agents UNNAMED.** Passing `name` to the `Agent` tool changes what you get: a named spawn becomes a persistent *teammate* that goes **idle** rather than completing, so there is no final report to auto-deliver and its output must be pulled with `SendMessage`. An unnamed spawn is a fire-and-return subagent whose report arrives on its own in the completion notification. Measured 2026-08-25 on one machine, one session, unchanged settings: the unnamed spawn returned in **6.4s**; three named reviewers returned nothing at all, sending only empty idle pings. Pass `name` only for a collaborator you intend to keep messaging, and shut it down when done — it pings indefinitely otherwise.
 
