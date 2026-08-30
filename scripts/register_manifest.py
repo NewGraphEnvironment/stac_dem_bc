@@ -88,7 +88,18 @@ def _href_to_id(href: str) -> str:
     name = href.rsplit("/", 1)[-1]
     if not name.endswith(".json"):
         raise ValueError(f"item link does not end in .json: {href}")
-    return urllib.parse.unquote(name[: -len(".json")])
+    stem = name[: -len(".json")]
+    # Decode %20 ONLY, because that is the exact inverse of the encoder that
+    # produced these hrefs: stac_utils.encode_url_for_gdal does
+    # `url.replace(" ", "%20")` and touches nothing else.
+    #
+    # urllib.parse.unquote() would decode every escape, which is not the inverse.
+    # An id containing a literal '%' (never encoded on the way out, since the
+    # encoder only handles spaces) would come back decoded into a DIFFERENT id --
+    # permanently "missing" and permanently orphaned at the same time, with
+    # --drift failing verification after a successful upsert every single month.
+    # No such id exists today; this keeps it that way rather than relying on it.
+    return stem.replace("%20", " ")
 
 
 def collection_item_links(path) -> list[tuple[str, str]]:

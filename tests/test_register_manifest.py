@@ -263,3 +263,44 @@ def test_search_body_would_have_caught_the_shipped_bug():
     assert small["limit"] == 3
     big = search_body([f"id-{i}" for i in range(11)])
     assert big["limit"] == 11 and big["limit"] > 10
+
+
+def test_href_to_id_is_the_exact_inverse_of_the_encoder():
+    """Decoding must mirror `encode_url_for_gdal`, which encodes spaces ONLY.
+
+    A general unquote() is not the inverse. An id carrying a literal '%' is
+    never encoded on the way out, so decoding every escape on the way back
+    yields a DIFFERENT id — one that is permanently missing and permanently
+    orphaned at once, failing every --drift verification after a successful
+    upsert. No such id exists today; this keeps it impossible rather than
+    unlikely.
+    """
+    from stac_utils import encode_url_for_gdal
+
+    for stem in ("plain", "with space", "a (2)", "100%25", "5%_slope"):
+        href = "https://x/" + encode_url_for_gdal(stem) + ".json"
+        assert _href_to_id(href) == stem, f"round trip broke for {stem!r}"
+
+
+def test_encoder_is_lossy_for_a_literal_percent_20():
+    """A known, unfixable limitation — asserted so it is a decision, not a bug.
+
+    `encode_url_for_gdal` encodes spaces and nothing else, so a filename
+    containing the literal characters "%20" encodes to itself and is then
+    indistinguishable from an encoded space. No decoder can separate the two;
+    the ambiguity is in the encoding. Recorded here rather than left to be
+    rediscovered as a mysteriously missing item.
+
+    Nothing in the published catalogue hits this (no id contains '%' at all),
+    and it would require a source filename containing the literal text "%20".
+    """
+    from stac_utils import encode_url_for_gdal
+
+    assert encode_url_for_gdal("a%20b") == "a%20b"          # encoder is a no-op
+    assert encode_url_for_gdal("a b") == "a%20b"            # ...and so is "a b"
+    assert _href_to_id("https://x/a%20b.json") == "a b"     # collapses to one
+
+
+def test_href_to_id_does_not_decode_a_literal_percent_escape():
+    """`%41` in a filename is the two characters, not 'A'."""
+    assert _href_to_id("https://x/report%41.json") == "report%41"

@@ -23,6 +23,9 @@
 #   STAC_HOST        ssh target (default: root@geopro)
 #   STAC_DB          pgstac database (default: stac)
 #   STAC_COLLECTION  collection id (default: stac-dem-bc)
+#   STAC_BUCKET_URL  bucket serving collection.json (default: the stac-dem-bc
+#                    bucket). MUST move together with STAC_COLLECTION -- they are
+#                    two knobs over one fact, and the script reconciles them.
 #   STAC_API         API base (default: https://images.a11s.one)
 #   FETCH_JOBS       parallel S3 fetches (default: 20)
 #
@@ -86,6 +89,21 @@ echo "fetching published collection.json ..."
 curl -fsSL --max-time 300 "$BUCKET_URL/collection.json" -o "$WORK/collection.json"
 "$PY" scripts/register_manifest.py ids-published \
   --collection-file "$WORK/collection.json" > "$WORK/published.txt"
+# STAC_COLLECTION and STAC_BUCKET_URL must move together. They are independent
+# knobs over the same fact, and the API answers an unknown collection with
+# 200 / zero features / no next link -- so pointing them at different collections
+# reports every published item as missing, then "registers" them under an id the
+# fetch never came from. Reconciled here rather than discovered later.
+FILE_COLLECTION_ID=$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("id",""))' \
+  "$WORK/collection.json")
+if [ "$FILE_COLLECTION_ID" != "$COLLECTION_ID" ]; then
+  echo "ERROR: collection id mismatch." >&2
+  echo "       STAC_COLLECTION  = $COLLECTION_ID" >&2
+  echo "       collection.json  = $FILE_COLLECTION_ID  (from $BUCKET_URL)" >&2
+  echo "       Set STAC_BUCKET_URL to the bucket for '$COLLECTION_ID'." >&2
+  exit 1
+fi
+
 N_PUBLISHED=$(count_lines "$WORK/published.txt")
 echo "published  : $N_PUBLISHED"
 
@@ -178,7 +196,29 @@ fi
 "$PY" scripts/register_manifest.py hrefs-published \
   --collection-file "$WORK/collection.json" \
   --ids-file "$WORK/todo.txt" > "$WORK/hrefs.tsv"
-cut -f2 "$WORK/hrefs.tsv" > "$WORK/urls.txt"
+
+# THE EXPECTATION IS DERIVED FROM THE ARTIFACT THE FETCHER CONSUMES.
+#
+# Both bugs found in review landed on the same pair: a count taken from one
+# place (`todo.txt`) and files produced from another (`urls.txt`), with a guard
+# comparing them. Deduping the inputs -- which is what the first two fixes did --
+# leaves that pair free to disagree for the next reason. `urls.txt` is what the
+# fetch loop actually iterates, so counting it is the only count that cannot
+# drift from what the fetch produces.
+cut -f2 "$WORK/hrefs.tsv" | sort -u > "$WORK/urls.txt"
+N_URLS=$(count_lines "$WORK/urls.txt")
+
+# One id must resolve to exactly one URL. It does today, but nothing in the
+# published collection enforces it -- a duplicated item link would give one id
+# two hrefs, which no amount of deduping `todo.txt` can reach because the
+# duplication is on the href side. Reconciled explicitly rather than assumed,
+# and reported as what it is rather than surfacing later as a phantom fetch
+# shortfall.
+if [ "$N_URLS" -ne "$N_TODO" ]; then
+  echo "ERROR: $N_TODO id(s) resolved to $N_URLS distinct URL(s)." >&2
+  echo "       The published collection.json has duplicate or missing item links." >&2
+  exit 1
+fi
 
 if [ "$DRYRUN" -eq 1 ]; then
   echo "[dryrun] would fetch $N_TODO item(s) and upsert them to $DB on $HOST"
@@ -223,8 +263,12 @@ for attempt in 1 2 3; do
   if curl -sfL --max-time 60 "$url" -o "$out.part" && [ -s "$out.part" ]; then
     # Write then rename: `curl > file` truncates before curl runs, so a failed
     # fetch would otherwise leave a zero-byte file that counts as present.
-    mv "$out.part" "$out"
-    exit 0
+    # Checked: an unchecked mv (ENOSPC mid-run) would exit 0 having produced no
+    # file and logged no failure -- a shortfall with no diagnostic at all.
+    if mv "$out.part" "$out"; then
+      exit 0
+    fi
+    break
   fi
   sleep $((attempt * 2))
 done
@@ -234,7 +278,7 @@ exit 1
 FETCHEOF
 chmod +x "$FETCH_SCRIPT"
 
-echo "fetching $N_TODO item JSON(s) with $JOBS workers ..."
+echo "fetching $N_URLS item JSON(s) with $JOBS workers ..."
 : > "$WORK/failed.txt"
 # Failures are collected, not aborted on: xargs' exit status conflates "one
 # transient 500" with "the bucket is gone", and the count guard below is the
@@ -247,10 +291,10 @@ set -e
 
 N_FETCHED=$(find "$FETCH_DIR" -maxdepth 1 -type f -name '*.json' | wc -l | tr -d ' ')
 N_FAILED=$(count_lines "$WORK/failed.txt")
-echo "fetched    : $N_FETCHED of $N_TODO ($N_FAILED failed after 3 attempts)"
+echo "fetched    : $N_FETCHED of $N_URLS ($N_FAILED failed after 3 attempts)"
 
-if [ "$N_FETCHED" -ne "$N_TODO" ]; then
-  echo "ERROR: fetched $N_FETCHED of $N_TODO — nothing sent to the database." >&2
+if [ "$N_FETCHED" -ne "$N_URLS" ]; then
+  echo "ERROR: fetched $N_FETCHED of $N_URLS — nothing sent to the database." >&2
   echo "       Failed URLs: $N_FAILED (re-run; upsert makes this safe to repeat)" >&2
   head -5 "$WORK/failed.txt" | sed 's/^/       /' >&2
   if [ -s "$WORK/fetch_stderr.txt" ]; then
