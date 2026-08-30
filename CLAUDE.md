@@ -35,7 +35,7 @@ This project maintains the STAC catalog for BC's LidarBC DEM collection with aut
 
 ### Project Context
 
-**Dataset:** 100,171 DEM + 95,889 DSM GeoTIFFs from BC provincial objectstore (nrs.objectstore.gov.bc.ca/gdwuts), measured 2026-08-29 on a full bucket walk (575,411 keys). Also present and **unindexed**: 175,172 `pointcloud/` `.laz`, 15,752 `orthophoto/` `.tif`, 264 `chm/` `.tif` (#35)
+**Dataset:** 100,171 DEM + 95,889 DSM GeoTIFFs from BC provincial objectstore (nrs.objectstore.gov.bc.ca/gdwuts), measured 2026-08-29 on a full bucket walk (575,411 keys). Also present and **unindexed**: 175,172 `pointcloud/` `.laz`, 264 `chm/` `.tif`, and non-elevation products that are out of scope for this collection (#35)
 - History of large undocumented growth: 22,548 → 58,109 (discovered Feb 2026), then +63% to 98,039 in five months (July 2026 catch-up, #23) — arrival may be bulk loads, not steady monthly
 - ~90 files with parentheses in filename excluded (all fail validation - see issue #8)
 
@@ -1924,7 +1924,7 @@ one that refuses everything.
   A probe run against a 2017 tile concluded "there is no surface model and no
   CHM", and that became the central constraint of a project plan — ruling out
   canopy measurement entirely — for weeks. Listing the prefix instead showed
-  `dem, dsm, orthophoto, pointcloud` immediately, with DSM present in 25 of 38
+  `dem, dsm, pointcloud` and more immediately, with DSM present in 25 of 38
   mapsheet-years.
 - **Enumerate the container** (`?list-type=2&delimiter=/&prefix=…`, `ls`, the
   API's own listing endpoint) and match on the fields that actually identify the
