@@ -77,19 +77,19 @@ re-registering the *same* id stops being an outage. #34 is made tidier by this
 
 ## Phase 2: `collection_register.sh` then `item_register.sh`
 
-- [ ] `collection_register.sh` first (B1 — the FK ordering)
-- [ ] `item_register.sh` reads item paths on stdin, never argv (102k filenames is
+- [x] `collection_register.sh` first (B1 — the FK ordering)
+- [x] `item_register.sh` reads item paths on stdin, never argv (102k filenames is
       ~6 MB against a ~2 MB ARG_MAX)
-- [ ] `HOST="${STAC_HOST:-root@geopro}"`, `DB="${STAC_DB:-stac}"`; header records
+- [x] `HOST="${STAC_HOST:-root@geopro}"`, `DB="${STAC_DB:-stac}"`; header records
       the reserved IP `146.190.12.8` as fallback (geopro is untagged on the
       tailnet, so it carries a 180-day key expiry — rtj#208)
-- [ ] Remote `mktemp` + remote trap; the reference uses a fixed path whose `rm` is
+- [x] Remote `mktemp` + remote trap; the reference uses a fixed path whose `rm` is
       skipped on failure
-- [ ] **Remote** count guard against an expected count (B3)
-- [ ] `--method upsert` explicitly, every time; no delete path in this repo
-- [ ] `--dryrun` stops before the SSH; preflight `ssh -o ConnectTimeout` probe
+- [x] **Remote** count guard against an expected count (B3)
+- [x] `--method upsert` explicitly, every time; no delete path in this repo
+- [x] `--dryrun` stops before the SSH; preflight `ssh -o ConnectTimeout` probe
       before any expensive stage (A1)
-- [ ] Empty input exits 0 with "nothing to register" — never hands pypgstac an
+- [x] Empty input exits 0 with "nothing to register" — never hands pypgstac an
       empty file, never passes a vacuous `0 -eq 0`
 
 ## Phase 3: `catalogue_register.sh` — the orchestrator
