@@ -9,7 +9,22 @@ convention as [`stac_uav_bc`](https://github.com/NewGraphEnvironment/stac_uav_bc
 (`Type: Project`, pinned at `0.0.0.9000`) and is deliberately **not** versioned —
 matching `water-temp-bc`. Releases live here and in git tags.
 
-## Unreleased
+## v1.1.0 (2026-08-30)
+
+The catalogue is unchanged from v1.0.0 — same 102,460 items, same content. What
+this release marks is that the catalogue can now *say* which version it is, and
+that getting it into the API is a command rather than a memory.
+
+### The collection carries a version (#27)
+
+`https://images.a11s.one/collections/stac-dem-bc` now serves
+`"version": "1.1.0"` and declares the STAC Version Extension. It had carried no
+version at all.
+
+`--version` stamps; `--clear-version` removes. The monthly run clears it,
+because once items are appended the previous version is *false* rather than
+stale, and a wrong version ("you already have this one") is worse than an
+absent one ("go and check").
 
 ### Registration is client-side, and never deletes (#27)
 
@@ -49,12 +64,6 @@ and reports success.
 Verification is set equality in both directions and never a count — the API has
 no aggregation extension and returns `numberMatched: null`, and a search on a
 list of ids silently omits the ones that do not exist.
-
-### The collection carries a version (#27)
-
-`--version` stamps the STAC Version Extension; `--clear-version` removes it. The
-monthly run clears it, because once items are appended the previous version is
-false rather than stale, and a wrong version is worse than an absent one.
 
 ### Known imperfections shipping deliberately
 
@@ -115,5 +124,5 @@ of which **95,888 carry a `dsm` asset**. The API served 60,126 before this relea
   external reference. Revisit at a collection rename, so consumers absorb one
   break rather than two.
 - **pgstac registration remains a manual step** (#27), so the API can lag the
-  catalogue. It lagged by ~38k items before this release. *Addressed on the
-  v1.1.0 branch — see below.*
+  catalogue. It lagged by ~38k items before this release. **Fixed in v1.1.0**
+  (#27): `scripts/catalogue_register.sh --drift`.
