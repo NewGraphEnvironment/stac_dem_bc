@@ -2238,7 +2238,7 @@ you cannot say why it went unnoticed, you have not found it yet.
   A probe run against a 2017 tile concluded "there is no surface model and no
   CHM", and that became the central constraint of a project plan — ruling out
   canopy measurement entirely — for weeks. Listing the prefix instead showed
-  `dem, dsm, orthophoto, pointcloud` immediately, with DSM present in 25 of 38
+  `dem, dsm, pointcloud` and more immediately, with DSM present in 25 of 38
   mapsheet-years.
 - **Enumerate the container** (`?list-type=2&delimiter=/&prefix=…`, `ls`, the
   API's own listing endpoint) and match on the fields that actually identify the
