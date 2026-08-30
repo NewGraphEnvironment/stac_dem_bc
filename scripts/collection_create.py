@@ -116,8 +116,17 @@ def main():
     # may carry a version. The monthly path never reaches here -- it patches the
     # fetched collection instead -- which is why the stamp is opt-in on both.
     if args.version:
-        version_stamp(collection.extra_fields, args.version)
-        collection.stac_extensions = list(collection.extra_fields.pop("stac_extensions"))
+        # Stamp through a dict carrying the CURRENT extension list, then write
+        # both fields back. Passing extra_fields alone would build a fresh list
+        # containing only the version extension and assign it over
+        # collection.stac_extensions, discarding any other extension the
+        # collection carries -- the exact property
+        # test_version_stamp_preserves_other_extensions asserts.
+        stamped = version_stamp(
+            {"stac_extensions": list(collection.stac_extensions)}, args.version
+        )
+        collection.stac_extensions = stamped["stac_extensions"]
+        collection.extra_fields["version"] = stamped["version"]
         logger.info("Stamped version %s", args.version)
 
     # Save with correct hrefs

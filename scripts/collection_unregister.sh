@@ -85,6 +85,13 @@ fi
 if [ "$COUNT" -eq 0 ]; then
   EXISTS=$(ssh "$HOST" "docker exec geoserv-db psql -U stac -d $DB -tAc \
     \"select count(*) from pgstac.collections where id = '$COLLECTION_ID';\"" | tr -d ' ')
+  # Same numeric guard as $COUNT above. Without it an unreadable value makes
+  # the test fail toward the DESTRUCTIVE branch, which is the wrong direction
+  # for the only script here that destroys anything.
+  if ! [ "$EXISTS" -eq "$EXISTS" ] 2>/dev/null; then
+    echo "ERROR: could not read the collection row (got: '$EXISTS')" >&2
+    exit 1
+  fi
   if [ "$EXISTS" -eq 0 ]; then
     echo "nothing to do: no such collection registered"
     exit 0

@@ -102,6 +102,7 @@ def ids_registered(collection_id: str, api: str = API_DEFAULT,
     }
     url = f"{api.rstrip('/')}/search"
     ids: list[str] = []
+    seen_tokens: set[str] = set()
     while True:
         resp = session.post(url, json=body, timeout=180)
         resp.raise_for_status()
@@ -109,12 +110,60 @@ def ids_registered(collection_id: str, api: str = API_DEFAULT,
         ids.extend(f["id"] for f in page.get("features", []))
         nxt = next((l for l in page.get("links", []) if l.get("rel") == "next"), None)
         if not nxt:
+            # The only NORMAL way out: the server says there is no more.
             break
+        token = (nxt.get("body") or {}).get("token")
+        if not token:
+            # A next link with no continuation token means the enumeration
+            # stopped early. Raising matters more than it looks: a short id list
+            # makes every unenumerated item report as "missing", which would
+            # send a --drift run to re-register a catalogue that was fine.
+            raise RuntimeError(
+                f"paging stopped early: 'next' link with no token after {len(ids)} ids"
+            )
+        if token in seen_tokens:
+            raise RuntimeError(f"paging token repeated after {len(ids)} ids — not advancing")
+        seen_tokens.add(token)
         # stac-fastapi returns the continuation in the link body, not the href
-        body = {**body, **(nxt.get("body") or {})}
-        if not (nxt.get("body") or {}).get("token"):
-            break
+        body = {**body, **nxt["body"]}
     return ids
+
+
+def search_body(ids, page_size: int = PAGE_SIZE) -> dict:
+    """The POST /search body for an id lookup.
+
+    Pure, and separated out purely so it can be asserted on offline. The
+    `limit` is the whole reason: the API's DEFAULT LIMIT IS 10, so a body
+    without one silently returns the first 10 of however many ids were asked
+    for. That reads as "590 of my 600 items are missing" and fails a
+    verification whose subject was in fact fine. Measured against the live API:
+    600 registered ids, no limit -> 10 features; limit=600 -> 600.
+    """
+    ids = list(ids)
+    return {
+        "ids": ids,
+        "limit": max(len(ids), 1),
+        "fields": {"include": ["id"]},
+    }
+
+
+def ids_serving(ids, api: str = API_DEFAULT, chunk: int = 500, session=None) -> set:
+    """Which of these ids the API actually serves, as a set.
+
+    Batched because a very long id list is a real request-size ceiling. Returns
+    a SET so the caller compares sets — a /search omits ids that do not exist
+    without erroring, so a returned count proves nothing.
+    """
+    session = session or requests.Session()
+    url = f"{api.rstrip('/')}/search"
+    ids = list(ids)
+    got = set()
+    for i in range(0, len(ids), chunk):
+        batch = ids[i:i + chunk]
+        resp = session.post(url, json=search_body(batch), timeout=180)
+        resp.raise_for_status()
+        got.update(f["id"] for f in resp.json().get("features", []))
+    return got
 
 
 def ids_diff(published, registered) -> tuple[list[str], list[str]]:
@@ -182,9 +231,15 @@ def main() -> int:
     p.add_argument("--collection-id", required=True)
     p.add_argument("--api", default=API_DEFAULT)
     p.add_argument("--missing-out", help="write missing ids here")
+    p.add_argument("--orphaned-out", help="write orphaned ids here")
 
     p = sub.add_parser("ndjson", help="build NDJSON from item paths on stdin")
     p.add_argument("--out", required=True)
+
+    p = sub.add_parser("verify-serving",
+                       help="assert every id in a file is served by the API")
+    p.add_argument("--ids-file", required=True)
+    p.add_argument("--api", default=API_DEFAULT)
 
     args = ap.parse_args()
 
@@ -231,6 +286,8 @@ def main() -> int:
         print(f"orphaned   {len(orphaned)}", file=sys.stderr)
         for item_id in orphaned[:10]:
             print(f"  orphaned: {item_id}", file=sys.stderr)
+        if args.orphaned_out:
+            Path(args.orphaned_out).write_text("".join(f"{i}\n" for i in orphaned))
         if args.missing_out:
             Path(args.missing_out).write_text("".join(f"{i}\n" for i in missing))
         else:
@@ -240,6 +297,20 @@ def main() -> int:
     elif args.cmd == "ndjson":
         n = ndjson_write(sys.stdin, args.out)
         print(n)
+
+    elif args.cmd == "verify-serving":
+        wanted = [l.rstrip("\n") for l in open(args.ids_file) if l.strip()]
+        if not wanted:
+            print("nothing to verify (0 ids)", file=sys.stderr)
+            return 0
+        got = ids_serving(wanted, args.api)
+        missing = sorted(set(wanted) - got)
+        print(f"requested {len(wanted)}, serving {len(got)}", file=sys.stderr)
+        if missing:
+            print(f"FAIL: {len(missing)} id(s) not served, e.g. {missing[:3]}",
+                  file=sys.stderr)
+            return 1
+        print("OK: every requested id is served by the API", file=sys.stderr)
 
     return 0
 

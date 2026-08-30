@@ -27,6 +27,7 @@ from register_manifest import (  # noqa: E402
     ids_diff,
     item_ids_from_urls,
     ndjson_write,
+    search_body,
 )
 from stac_utils import PATH_S3  # noqa: E402
 
@@ -214,3 +215,51 @@ def test_ndjson_write_empty_input_yields_zero(tmp_path):
     out = tmp_path / "items.ndjson"
     assert ndjson_write([], out) == 0
     assert out.read_text() == ""
+
+
+# =============================================================================
+# search_body — the API's default limit is 10
+# =============================================================================
+
+def test_search_body_always_carries_a_limit():
+    """The bug this pins cost a full verification pass.
+
+    POST /search without a `limit` returns the API's default of 10 features,
+    whatever the length of the ids list. Measured against the live API: 600
+    registered ids with no limit returned 10; with limit=600 it returned 600.
+    A verify built on the unlimited body reports "590 of your 600 items are
+    missing" about a catalogue that is entirely fine, and exits non-zero after
+    the upsert has already succeeded.
+    """
+    body = search_body([f"id-{i}" for i in range(600)])
+    assert body["limit"] == 600
+
+
+def test_search_body_limit_matches_the_id_count_at_every_size():
+    for n in (1, 9, 10, 11, 500):
+        body = search_body([f"id-{i}" for i in range(n)])
+        assert body["limit"] == n, f"limit must equal the id count at n={n}"
+
+
+def test_search_body_limit_is_never_zero():
+    """limit=0 would return nothing and read as 'everything is missing'."""
+    assert search_body([])["limit"] >= 1
+
+
+def test_search_body_requests_only_ids():
+    body = search_body(["a"])
+    assert body["fields"] == {"include": ["id"]}
+    assert body["ids"] == ["a"]
+
+
+def test_search_body_would_have_caught_the_shipped_bug():
+    """A 3-item fixture cannot reach this failure, which is why it shipped.
+
+    3 < 10, so the unlimited body returned all 3 and the only manual exercise
+    on record passed. The assertion has to be on a list LONGER than the default
+    limit or it proves nothing.
+    """
+    small = search_body(["a", "b", "c"])
+    assert small["limit"] == 3
+    big = search_body([f"id-{i}" for i in range(11)])
+    assert big["limit"] == 11 and big["limit"] > 10

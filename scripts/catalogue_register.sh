@@ -89,6 +89,15 @@ curl -fsSL --max-time 300 "$BUCKET_URL/collection.json" -o "$WORK/collection.jso
 N_PUBLISHED=$(count_lines "$WORK/published.txt")
 echo "published  : $N_PUBLISHED"
 
+# Zero published items means the collection.json is truncated, or the wrong
+# bucket was read -- never that the catalogue is legitimately empty. Without
+# this, every mode reports success having done nothing, and --verify would
+# announce IN SYNC against an empty set.
+if [ "$N_PUBLISHED" -eq 0 ]; then
+  echo "ERROR: no item links in the published collection.json — refusing to proceed" >&2
+  exit 1
+fi
+
 # --- what to register --------------------------------------------------------
 
 case "$MODE" in
@@ -111,7 +120,8 @@ case "$MODE" in
       --collection-file "$WORK/collection.json" \
       --collection-id "$COLLECTION_ID" \
       --api "$API" \
-      --missing-out "$WORK/todo.txt"
+      --missing-out "$WORK/todo.txt" \
+      --orphaned-out "$WORK/orphaned.txt"
     ;;
 esac
 
@@ -119,15 +129,28 @@ N_TODO=$(count_lines "$WORK/todo.txt")
 echo "to register: $N_TODO"
 
 if [ "$MODE" = "verify" ]; then
-  # Absence of drift is an affirmative result and gets said out loud; an empty
-  # loop that prints nothing is indistinguishable from a check that never ran.
-  if [ "$N_TODO" -eq 0 ]; then
-    echo "IN SYNC: every published item is registered"
-    exit 0
+  # Both directions, because the header and the docs promise both. `missing`
+  # alone would have reported IN SYNC over any number of orphans -- registered
+  # items with no published link -- which is the drift direction #28 is open
+  # about and the one --all would silently preserve.
+  N_ORPHANED=$(count_lines "$WORK/orphaned.txt")
+  RC=0
+  if [ "$N_TODO" -gt 0 ]; then
+    echo "DRIFT: $N_TODO published item(s) are not registered" >&2
+    head -5 "$WORK/todo.txt" | sed 's/^/  missing:  /' >&2
+    RC=1
   fi
-  echo "DRIFT: $N_TODO published item(s) are not registered" >&2
-  head -5 "$WORK/todo.txt" | sed 's/^/  missing: /' >&2
-  exit 1
+  if [ "$N_ORPHANED" -gt 0 ]; then
+    echo "DRIFT: $N_ORPHANED registered item(s) are no longer published (#28)" >&2
+    head -5 "$WORK/orphaned.txt" | sed 's/^/  orphaned: /' >&2
+    RC=1
+  fi
+  # Absence of drift is an affirmative result and gets said out loud; a check
+  # that prints nothing is indistinguishable from one that never ran.
+  if [ "$RC" -eq 0 ]; then
+    echo "IN SYNC: $N_PUBLISHED published, all registered, no orphans"
+  fi
+  exit "$RC"
 fi
 
 if [ "$N_TODO" -eq 0 ]; then
@@ -205,7 +228,9 @@ echo "fetching $N_TODO item JSON(s) with $JOBS workers ..."
 # transient 500" with "the bucket is gone", and the count guard below is the
 # real gate.
 set +e
-xargs -P "$JOBS" -I {} "$FETCH_SCRIPT" {} "$FETCH_DIR" < "$WORK/urls.txt" 2>/dev/null
+# stderr goes to a file, never /dev/null: a curl that dies in a way the retry
+# loop does not catch leaves its only diagnostic there.
+xargs -P "$JOBS" -I {} "$FETCH_SCRIPT" {} "$FETCH_DIR" < "$WORK/urls.txt" 2>"$WORK/fetch_stderr.txt"
 set -e
 
 N_FETCHED=$(find "$FETCH_DIR" -maxdepth 1 -type f -name '*.json' | wc -l | tr -d ' ')
@@ -216,6 +241,10 @@ if [ "$N_FETCHED" -ne "$N_TODO" ]; then
   echo "ERROR: fetched $N_FETCHED of $N_TODO — nothing sent to the database." >&2
   echo "       Failed URLs: $N_FAILED (re-run; upsert makes this safe to repeat)" >&2
   head -5 "$WORK/failed.txt" | sed 's/^/       /' >&2
+  if [ -s "$WORK/fetch_stderr.txt" ]; then
+    echo "       fetch stderr (last 5):" >&2
+    tail -5 "$WORK/fetch_stderr.txt" | sed 's/^/       /' >&2
+  fi
   exit 1
 fi
 
@@ -232,29 +261,13 @@ find "$FETCH_DIR" -maxdepth 1 -type f -name '*.json' | ./scripts/item_register.s
 # --- verify ------------------------------------------------------------------
 
 echo "verifying by set equality ..."
-"$PY" - "$COLLECTION_ID" "$API" "$WORK/todo.txt" <<'PYEOF'
-import json, sys, requests
-
-collection_id, api, todo_path = sys.argv[1], sys.argv[2], sys.argv[3]
-wanted = [l.rstrip("\n") for l in open(todo_path) if l.strip()]
-
-# Batched, because a URL-length limit is a real ceiling on a single query.
-got = set()
-for i in range(0, len(wanted), 500):
-    chunk = wanted[i:i + 500]
-    r = requests.post(f"{api.rstrip('/')}/search",
-                      json={"ids": chunk, "fields": {"include": ["id"]}},
-                      timeout=120)
-    r.raise_for_status()
-    got.update(f["id"] for f in r.json().get("features", []))
-
-missing = sorted(set(wanted) - got)
-print(f"requested {len(wanted)}, serving {len(got)}")
-if missing:
-    print(f"FAIL: {len(missing)} id(s) registered but not served, e.g. {missing[:3]}",
-          file=sys.stderr)
-    sys.exit(1)
-print("OK: every registered id is served by the API")
-PYEOF
+# Delegated to register_manifest.py rather than inlined, because the request
+# body needs a `limit` and that is exactly the kind of detail an inline heredoc
+# loses. The API's default limit is 10: a body without one returns the first 10
+# ids of however many were asked for, which reads as "590 of my 600 items are
+# missing" and fails a verification whose subject was fine. Measured, and pinned
+# by tests/test_register_manifest.py.
+"$PY" scripts/register_manifest.py verify-serving \
+  --ids-file "$WORK/todo.txt" --api "$API"
 
 echo "DONE: $N_TODO item(s) registered to $COLLECTION_ID"

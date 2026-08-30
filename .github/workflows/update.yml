@@ -133,7 +133,11 @@ jobs:
       # Idempotent: a no-op once the published collection carries the fields.
       - name: Patch collection metadata
         if: steps.detect.outputs.new_urls == 'true' || inputs.backfill
-        run: .venv/bin/python scripts/collection_patch.py --path "$STAC_OUTPUT_DIR/collection.json"
+        # --clear-version: this run is about to append items, which makes any
+        # version the collection carries FALSE rather than merely stale. A wrong
+        # version says "you already have this one"; absent says "go and check".
+        # The next release re-stamps with --version.
+        run: .venv/bin/python scripts/collection_patch.py --path "$STAC_OUTPUT_DIR/collection.json" --clear-version
 
       - name: Create STAC items (incremental)
         if: steps.detect.outputs.new_urls == 'true'
@@ -168,7 +172,7 @@ jobs:
               mkdir -p "$STAC_OUTPUT_DIR"
               curl -fsSL https://stac-dem-bc.s3.amazonaws.com/collection.json \
                 -o "$STAC_OUTPUT_DIR/collection.json"
-              .venv/bin/python scripts/collection_patch.py --path "$STAC_OUTPUT_DIR/collection.json"
+              .venv/bin/python scripts/collection_patch.py --path "$STAC_OUTPUT_DIR/collection.json" --clear-version
             fi
             .venv/bin/python scripts/item_create.py --urls-file data/urls_pairing_changed.txt
           else
