@@ -28,6 +28,14 @@ This project maintains the STAC catalog for BC's LidarBC DEM collection with aut
 - `providers`/`keywords` on the collection (#30)
 - **Published: 102,460 items, 95,888 carrying `dsm`** (API served 60,126 before)
 
+**Phase 5: Client-side registration ✅ COMPLETE (2026-08-30, v1.1.0, #27)**
+- `scripts/catalogue_register.sh --drift` upserts whatever the API is missing;
+  stateless, so a month nobody registers is picked up by the next run
+- Nothing in the routine path deletes — the prior tool DELETEd the collection
+  before reloading and took the public API to zero items on 2026-08-29
+- Collection stamped with the STAC Version Extension
+- Remaining: registration from CI needs a tailnet/deploy-key decision in rtj
+
 **Phase 3: Automation ✅ COMPLETE (2026-07, #23)**
 - Landed as the monthly GitHub Actions workflow (`.github/workflows/update.yml`), not the originally-planned VM cron (that VM was never built)
 - First scheduled run 2026-08-03 handled a deletions-only month correctly
@@ -46,11 +54,14 @@ This project maintains the STAC catalog for BC's LidarBC DEM collection with aut
 - 99.86% success rate (81 items failed/missing)
 - **Bottleneck:** Network I/O reading remote GeoTIFFs for metadata
 
-**Current Status (v1.0.0, 2026-08-29):**
+**Current Status (v1.1.0, 2026-08-30):**
 - ✅ Catalogue versioned by NEWS.md + git tags — a tag means "S3 and the API are in
   this state", following `stac_uav_bc`. `DESCRIPTION` is a `Type: Project`
   dependency manifest and is deliberately **not** versioned (matches water-temp-bc)
 - ✅ DSM paired and published as a second asset (#31)
+- ✅ Client-side pgstac registration, upsert-only (#27) — `scripts/catalogue_register.sh --drift`
+- ✅ Collection carries a version via the STAC Version Extension (#27); the live
+  collection serves `version: 1.1.0`
 - ✅ Incremental update capability (change detection working)
 - ✅ Validation caching (GeoTIFF validation)
 - ✅ STAC JSON validation layer (new)
@@ -61,7 +72,7 @@ This project maintains the STAC catalog for BC's LidarBC DEM collection with aut
 1. ~~Reduce full processing time to ~1-1.5 hours~~ → **Reality: 5-6 hours** (network I/O limited)
 2. ✅ Monthly incremental updates via GitHub Actions (typical month fits the runner comfortably; oversized batches fall back to a local run)
 3. ✅ Implement robust validation and error handling
-4. ✅ Automated monthly updates — GitHub Actions, not VM cron (#23; catalog 102,460 items as of v1.0.0, 2026-08-29)
+4. ✅ Automated monthly updates — GitHub Actions, not VM cron (#23; catalog 102,460 items as of v1.1.0, 2026-08-30)
 5. ✅ Maintain audit trail and benchmarking
 
 **Key Learning:** Performance is network I/O bound, not CPU bound. Future optimization: local metadata caching (Issue #10).
