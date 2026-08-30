@@ -128,19 +128,19 @@ re-registering the *same* id stops being an outage. #34 is made tidier by this
 
 - [x] Five stale registration claims: `scripts/README.md` (4 spots incl. the
       data-flow diagram), `README.Rmd`, `NEWS.md`, `update.yml` header, `CLAUDE.md`
-- [ ] `README.Rmd` re-knit in its **own** commit — `README.md`/`index.html` are
+- [x] `README.Rmd` re-knit in its **own** commit — `README.md`/`index.html` are
       tracked build outputs and will bury a functional diff
 - [x] Record measured runtimes, not estimates
-- [ ] File the **Python package extraction** issue (~1,618 Python vs ~500 R lines;
+- [x] File the **Python package extraction** issue (~1,618 Python vs ~500 R lines;
       three deps with no R equivalent), sequenced after #29
 
 ## Validation
 
-- [ ] `python -m pytest tests/ -q` green
-- [ ] **Restore-the-bug**: feed 102k lines on stdin and confirm it completes where
+- [x] `python -m pytest tests/ -q` green
+- [x] **Restore-the-bug**: feed 102k lines on stdin and confirm it completes where
       an argv version fails — a guard nobody has seen fail is decoration
-- [ ] `--dryrun` touches nothing (`git status` clean immediately after)
-- [ ] Live end-to-end on ~5 real ids: set equality holds, re-run is a no-op
-- [ ] API serves the full catalogue throughout — no window where it does not
-- [ ] `/code-check` clean on each commit
-- [ ] `/planning-archive` on completion
+- [x] `--dryrun` touches nothing (`git status` clean immediately after)
+- [x] Live end-to-end on ~5 real ids: set equality holds, re-run is a no-op
+- [x] API serves the full catalogue throughout — no window where it does not
+- [x] `/code-check` clean on each commit
+- [x] `/planning-archive` on completion

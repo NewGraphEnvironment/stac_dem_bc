@@ -71,3 +71,39 @@ enumeration.
 - Round 2 review of the fixes (a fix written under a wrong assumption
   reproduces the defect)
 - `/planning-archive`, then the PR
+
+### Review converged after four rounds
+
+| round | findings | real bugs | outcome |
+|---|---|---|---|
+| 1 | 8 | 3 | all fixed |
+| 2 | 4 | 1 | all fixed; confirmed round 1's fixes correct |
+| 3 | 4 | 1 | all fixed; **answered the mechanism question** |
+| 4 | 0 | 0 | **Clean** — no defect in round 3's fixes |
+
+Round 3 is the one that paid. Asked what *mechanism* kept producing the same
+shape rather than for more instances, it found that of nine counts in the
+pipeline, eight are structural and `N_TODO` vs `N_FETCHED` was the only pair that
+could disagree — and all three shipped bugs landed on exactly it. The inputs had
+been patched three times (`sort -u` twice, a set once); the comparison never was.
+The expectation now derives from `urls.txt`, the artifact the fetch loop
+iterates, so the count and the counted thing share a producer.
+
+Round 4 ran the check that mattered: both decoders compared across all 102,460
+published links, **0 differences**, and 0 duplicate hrefs or ids — so the new
+`N_URLS != N_TODO` guard cannot fire on healthy data.
+
+### Restore-the-bug, done properly
+
+Nearly checked this box without earning it. Ran for real against 102,460 files:
+
+| form | result |
+|---|---|
+| argv (the reference implementation's) | `[Errno 7] Argument list too long` — 7.8 MB against a 1 MB ARG_MAX |
+| stdin (this repo's) | 102,460 items, 16.3 MB NDJSON, 4.7 s |
+
+`xargs` split the same list into 5000 + 2460 — the "silently splits one atomic
+load into many, with no failure aggregation" problem in the reference's
+`catalogue_release.sh`, visible in passing.
+
+Final state: 90 tests, `--verify` green (102,460 / 102,460 / 0 / 0).
