@@ -709,7 +709,10 @@ complementary BC collections:</p>
 <p>The big one landed in 2026: the catalog is now
 <strong>self-updating</strong> (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/23">#23</a>)
 — the goal open since the first build — and the July catch-up grew the
-collection from 58k to ~98k fully-validated items. Still ahead:</p>
+collection from 58k to ~98k fully-validated items. Items now also carry
+the <strong>digital surface model</strong> alongside the bare-earth DEM
+(<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/31">#31</a>),
+paired on tile id and acquisition date. Still ahead:</p>
 <ul>
 <li><strong>Incremental registration</strong> — the post-sync pgstac
 registration is a full reload today (~80 minutes at current scale);
@@ -718,10 +721,15 @@ the infrastructure repo.</li>
 <li><strong>Upstream-deletion handling</strong> (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/28">#28</a>)
 — propagate objectstore removals to the catalog; on hold until the
 September run shows whether recent removals were renames.</li>
-<li><strong>URL-encoded item hrefs</strong> (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/25">#25</a>,
-fix in review as <a href="https://github.com/NewGraphEnvironment/stac_dem_bc/pull/26">PR
-#26</a>) — 90 legacy items carry literal spaces in their download links,
-which strict HTTP clients reject.</li>
+<li><strong>Surface models published as point cloud only</strong> —
+1,211 DEM tiles across 11 mapsheet-years have a <code>dsm/</code>
+directory holding only <code>.laz</code>. Recorded as a declared
+coverage gap in <code>data/dsm_pairing_report.md</code>; deriving a
+raster from the point cloud is unscoped.</li>
+<li><strong>CHM</strong> (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/29">#29</a>)
+— 264 canopy-height tiles are published province-wide, ~1.1% coverage of
+the mapsheet-years that carry them. Worth indexing for completeness; not
+a substitute for deriving.</li>
 <li><strong>True footprint geometry</strong> (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/2">#2</a>)
 — recalculate per-item footprints to exclude no-data pixels rather than
 using bounding boxes; gives accurate spatial-overlap queries.</li>

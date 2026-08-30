@@ -126,7 +126,10 @@ collections:
 The big one landed in 2026: the catalog is now **self-updating**
 ([\#23](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/23)) —
 the goal open since the first build — and the July catch-up grew the
-collection from 58k to ~98k fully-validated items. Still ahead:
+collection from 58k to ~98k fully-validated items. Items now also carry
+the **digital surface model** alongside the bare-earth DEM
+([\#31](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/31)),
+paired on tile id and acquisition date. Still ahead:
 
 - **Incremental registration** — the post-sync pgstac registration is a
   full reload today (~80 minutes at current scale); upserting only each
@@ -136,12 +139,15 @@ collection from 58k to ~98k fully-validated items. Still ahead:
   ([\#28](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/28))
   — propagate objectstore removals to the catalog; on hold until the
   September run shows whether recent removals were renames.
-- **URL-encoded item hrefs**
-  ([\#25](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/25),
-  fix in review as [PR
-  \#26](https://github.com/NewGraphEnvironment/stac_dem_bc/pull/26)) —
-  90 legacy items carry literal spaces in their download links, which
-  strict HTTP clients reject.
+- **Surface models published as point cloud only** — 1,211 DEM tiles
+  across 11 mapsheet-years have a `dsm/` directory holding only `.laz`.
+  Recorded as a declared coverage gap in `data/dsm_pairing_report.md`;
+  deriving a raster from the point cloud is unscoped.
+- **CHM**
+  ([\#29](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/29))
+  — 264 canopy-height tiles are published province-wide, ~1.1% coverage
+  of the mapsheet-years that carry them. Worth indexing for
+  completeness; not a substitute for deriving.
 - **True footprint geometry**
   ([\#2](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/2)) —
   recalculate per-item footprints to exclude no-data pixels rather than

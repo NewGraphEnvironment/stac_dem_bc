@@ -9,7 +9,7 @@ convention as [`stac_uav_bc`](https://github.com/NewGraphEnvironment/stac_uav_bc
 (`Type: Project`, pinned at `0.0.0.9000`) and is deliberately **not** versioned —
 matching `water-temp-bc`. Releases live here and in git tags.
 
-## v1.0.0 (unreleased — tag is cut after the publish is verified)
+## v1.0.0 (2026-08-29)
 
 First versioned release of the catalogue. Every item now carries the digital
 surface model alongside the bare-earth DEM.
@@ -37,6 +37,10 @@ surface model alongside the bare-earth DEM.
   collection.
 - **Catalogue caught up to the bucket**: 4,420 DEM tiles that had arrived since
   the 2026-08 run.
+
+Published state: **102,460 items** on `s3://stac-dem-bc` and registered in pgstac,
+of which **95,888 carry a `dsm` asset**. The API served 60,126 before this release
+— registration had not been re-run since the July catch-up (#27).
 
 ### Known imperfections shipping deliberately
 
