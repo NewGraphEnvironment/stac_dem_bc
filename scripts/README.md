@@ -191,6 +191,21 @@ ssh <geoserv> "bash stac_register-pypgstac.sh stac-dem-bc https://stac-dem-bc.s3
 
 This loads the STAC records into PostgreSQL, powering the search API at `images.a11s.one`. Once registered, the collection is browsable in QGIS (STAC Data Source Manager), through the API directly, or any STAC-compatible client. A full reload takes ~46 minutes (dominated by downloading item JSONs from S3; the database load itself is seconds) — an incremental `pypgstac` upsert path is a planned follow-up.
 
+## Tests
+
+`tests/` holds the pairing contract suite (51 tests, offline). Fixtures under
+`tests/fixtures/` are **real objectstore listings** taken 2026-08-28, so the tests
+exercise the filename generations that actually exist rather than idealised ones.
+
+```bash
+python -m pytest tests/ -q
+```
+
+The monthly workflow runs them before anything touches the catalogue. Three of the
+guards are mutation-tested — collapsing `no_raster_dsm`, treating an empty listing
+as no-DSM, and dropping unpaired DEMs each fail the suite — because a guard nobody
+has seen fail is decoration.
+
 ## DEM/DSM Pairing
 
 A DEM and its DSM come from the same flight over the same footprint at the same
