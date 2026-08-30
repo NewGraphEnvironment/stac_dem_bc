@@ -75,7 +75,11 @@ trap 'rm -f "$NDJSON"' EXIT
 printf '%s\n' "$COLLECTION" | "$PY" scripts/register_manifest.py ndjson --out "$NDJSON" >/dev/null
 
 COLLECTION_ID=$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$COLLECTION")
-ITEM_LINKS=$(grep -c '"rel": *"item"' "$COLLECTION" || true)
+# Counted by parsing, not by grep -c: grep counts matching LINES, and a
+# compact collection.json is ONE line -- so it reported "item links : 1" for a
+# file carrying 102,460 of them. Informational only, never a guard, but a
+# number that wrong in a release step is worse than no number.
+ITEM_LINKS=$("$PY" -c 'import json,sys; print(sum(1 for l in json.load(open(sys.argv[1]))["links"] if l.get("rel")=="item"))' "$COLLECTION")
 BYTES=$(wc -c < "$NDJSON" | tr -d ' ')
 
 echo "collection : $COLLECTION_ID"
