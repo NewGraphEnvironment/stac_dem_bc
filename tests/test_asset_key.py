@@ -150,6 +150,79 @@ def test_the_legacy_reader_keeps_its_literal_in_one_named_place():
     assert item_backfill.DEM_KEYS[0] == ASSET_DEM, "current key must win"
 
 
+# =============================================================================
+# the workflows — scripts/ is not the boundary
+# =============================================================================
+
+WORKFLOWS = os.path.join(os.path.dirname(__file__), "..", ".github", "workflows")
+
+# The CLI flags through which a workflow can name an asset key.
+ASSET_FLAGS = ("--require-asset", "--forbid-asset", "--asset-name")
+
+
+def _workflow_files():
+    if not os.path.isdir(WORKFLOWS):
+        return []
+    return sorted(os.path.join(WORKFLOWS, f) for f in os.listdir(WORKFLOWS)
+                  if f.endswith((".yml", ".yaml")))
+
+
+def _workflow_asset_literals(path):
+    """(line, flag, value) wherever a workflow spells an asset key literally."""
+    found = []
+    with open(path) as fh:
+        for n, line in enumerate(fh, 1):
+            if line.lstrip().startswith("#"):
+                continue
+            for flag in ASSET_FLAGS:
+                idx = line.find(flag)
+                while idx != -1:
+                    rest = line[idx + len(flag):].strip()
+                    value = rest.split()[0].strip('"\'') if rest.split() else ""
+                    # A shell variable is the correct form; a bare word is not.
+                    if value and not value.startswith("$"):
+                        found.append((n, flag, value))
+                    idx = line.find(flag, idx + 1)
+    return found
+
+
+def test_there_are_workflows_to_check():
+    """The premise. An empty listing would pass the guard below for nothing."""
+    files = _workflow_files()
+    assert any(f.endswith("update.yml") for f in files), \
+        "the publishing workflow must be in scope"
+
+
+@pytest.mark.parametrize("path", _workflow_files() or [None], ids=lambda p: os.path.basename(p or "none"))
+def test_no_workflow_spells_an_asset_key(path):
+    """update.yml drives every publish, so a literal there is exactly as wrong
+    as one in scripts/ — and the AST scanner above cannot see YAML.
+
+    It fails loudly rather than silently (a changed ASSET_DEM would make
+    --require-asset reject every item), but it is the same one-fact-two-
+    definitions this whole change removes.
+    """
+    if path is None:
+        pytest.skip("no workflows in this repo")
+    hits = _workflow_asset_literals(path)
+    assert not hits, (
+        f"{os.path.basename(path)} names an asset key literally at {hits}. "
+        f"Read it from stac_utils.ASSET_DEM / item_migrate.ASSET_RENAMES."
+    )
+
+
+def test_the_workflow_scanner_can_find_a_literal(tmp_path):
+    """A scanner that finds nothing is indistinguishable from a clean tree."""
+    src = tmp_path / "probe.yml"
+    src.write_text(
+        "        # --require-asset dem  (a comment, must be ignored)\n"
+        "        run: audit-items --require-asset dem --forbid-asset image\n"
+        '        run: audit-items --require-asset "$DEM" --forbid-asset "$OLD"\n'
+    )
+    hits = _workflow_asset_literals(str(src))
+    assert [(n, v) for n, _, v in hits] == [(2, "dem"), (2, "image")], hits
+
+
 def test_the_two_asset_keys_are_distinct_and_named_for_the_product():
     assert ASSET_DEM == "dem"
     assert ASSET_DSM == "dsm"

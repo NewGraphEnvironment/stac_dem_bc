@@ -142,7 +142,17 @@ def published_item_ids(collection_path: str | None = None) -> set:
     Reading the real link list rather than assuming keeps the two populations
     from overlapping.
     """
-    if collection_path and os.path.exists(collection_path):
+    if collection_path is not None:
+        # An explicitly-supplied path that is missing is an ERROR, not a cue to
+        # go to the network. Falling back would fetch the PUBLISHED, unpatched
+        # collection and run against a different artifact from the one every
+        # other step in the job reads -- silently, and only when something else
+        # had already gone wrong.
+        if not os.path.exists(collection_path):
+            raise FileNotFoundError(
+                f"{collection_path} does not exist. Pass no --collection to "
+                f"fetch the published one; an explicit path is never guessed at."
+            )
         with open(collection_path) as fh:
             collection = json.load(fh)
     else:
@@ -182,6 +192,20 @@ def process_one(item_id: str, edit: Edit, out_dir: str,
     for attempt in range(attempts):
         try:
             item = item_fetch(item_id)
+        except Exception as e:  # noqa: BLE001 - transient by assumption
+            last = str(e)
+            if attempt < attempts - 1:
+                time.sleep(1.5 * (attempt + 1))  # linear backoff
+            continue
+
+        # OUTSIDE the retry. The retry exists for network failures; an edit
+        # raises on a DETERMINISTIC condition (item_migrate refuses an item
+        # carrying both the old and new asset key) which cannot improve on a
+        # second attempt. Retrying it costs 3 fetches and 4.5s of backoff per
+        # item, which on a catalogue left half-migrated turns a 20-minute pass
+        # into hours and can exceed the job timeout -- at which point the run
+        # is discarded having learned only which item failed first.
+        try:
             changed = edit(item_id, item)
             if not changed:
                 return item_id, "unchanged"
@@ -207,9 +231,7 @@ def process_one(item_id: str, edit: Edit, out_dir: str,
                 raise
             return item_id, "written"
         except Exception as e:  # noqa: BLE001 - reported per item, never fatal
-            last = str(e)
-            if attempt < attempts - 1:
-                time.sleep(1.5 * (attempt + 1))  # linear backoff
+            return item_id, f"error:{e}"
     return item_id, f"error:{last}"
 
 

@@ -423,3 +423,14 @@ def test_a_written_item_is_never_left_truncated(tmp_path, monkeypatch):
         "x", lambda i, d: item_migrate(d), str(tmp_path), attempts=1)
     assert outcome == "written"
     assert json.load(open(tmp_path / "x.json"))["collection"] == NEW_ID
+
+
+def test_migrate_refuses_a_rename_map_that_collides():
+    """Two old keys onto one new key would silently drop an asset.
+
+    Not reachable with the shipped single-entry ASSET_RENAMES; asserted so a
+    future migration cannot introduce it by editing a constant.
+    """
+    it = published(with_dsm=True)
+    with pytest.raises(ValueError, match="maps two keys onto one"):
+        item_migrate(it, NEW_ID, {"image": "x", "dsm": "x"})

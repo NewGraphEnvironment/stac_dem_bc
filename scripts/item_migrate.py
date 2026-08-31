@@ -41,6 +41,7 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -89,6 +90,13 @@ def item_migrate(item: dict, collection_id: str = COLLECTION_ID,
     silently discards whichever the other run wrote. Failing names it instead.
     """
     renames = ASSET_RENAMES if asset_renames is None else asset_renames
+    # Two old keys mapping to one new key would make the comprehension below
+    # silently drop one asset -- the both-keys guard checks each pair against
+    # its own target, not the new keys against each other. Not reachable with
+    # the single-entry ASSET_RENAMES, and stated here so it stays unreachable.
+    new_keys = list(renames.values())
+    if len(set(new_keys)) != len(new_keys):
+        raise ValueError(f"asset_renames maps two keys onto one: {renames}")
     changed = []
 
     assets = item.get("assets")
@@ -165,6 +173,28 @@ def main() -> int:
     if staged:
         logger.info("Skipping %d id(s) already staged in %s by an earlier step",
                     len(staged), out_dir)
+        # "A file exists" is not "this item is correct". Staged bodies are
+        # counted as migrated by the completeness reconciliation below, so
+        # counting them unchecked would let `item_backfill --out-dir D` followed
+        # by `item_migrate --out-dir D` report the whole catalogue complete
+        # having migrated nothing. Check them where they are cheap to check.
+        wrong = []
+        for item_id in staged:
+            path = os.path.join(out_dir, f"{item_id}.json")
+            try:
+                with open(path) as fh:
+                    body = json.load(fh)
+                if item_migrate(body, args.collection_id):
+                    wrong.append(item_id)
+            except (OSError, ValueError) as e:
+                wrong.append(f"{item_id} ({e})")
+        if wrong:
+            logger.error("%d staged item(s) are NOT in the migrated shape, so "
+                         "they cannot be counted as done: %s",
+                         len(wrong), wrong[:3])
+            return 1
+        logger.info("All %d staged item(s) are already in the migrated shape",
+                    len(staged))
 
     if args.limit is not None:
         todo = todo[: args.limit]
@@ -232,9 +262,16 @@ def main() -> int:
             logger.error("VERIFY FAILED on %d of %d items", failures, checked)
             return 1
         if checked == 0:
-            logger.error("VERIFY checked 0 items -- an empty sample proves nothing")
-            return 1
-        logger.info("Verify passed on %d items", checked)
+            # NOT a failure. An empty sample means either the manifest is
+            # already complete or every item came back correct -- both are
+            # success, and both are the routine state of a re-run. Failing here
+            # would abort the very case the dispatch description calls safe to
+            # repeat. The statement that covers the population is the
+            # completeness reconciliation below, and it still runs.
+            logger.info("Verify sampled 0 items (nothing was rewritten this "
+                        "run); completeness is asserted below")
+        else:
+            logger.info("Verify passed on %d items", checked)
 
     # THE statement that covers all 102,460, and the only one that can. A sample
     # -- any sample -- says nothing about the population, and a mixed population
@@ -252,16 +289,21 @@ def main() -> int:
     # cutover in a month with pairing changes would have asserted nothing.
     if args.limit is None:
         migrated = manifest_load(args.manifest, MIGRATION) | set(staged)
-        if migrated != published:
-            missing = published - migrated
-            extra = migrated - published
-            logger.error("INCOMPLETE: %d published, %d migrated "
-                         "(%d never migrated, %d unknown)",
-                         len(published), len(migrated), len(missing), len(extra))
-            if missing:
-                logger.error("  e.g. never migrated: %s", sorted(missing)[:3])
-            if extra:
-                logger.error("  e.g. not in the published set: %s", sorted(extra)[:3])
+        missing = published - migrated
+        extra = migrated - published
+        # Only `missing` is a failure. `extra` -- an id in the manifest that is
+        # no longer in collection.json -- is what an UPSTREAM DELETION looks
+        # like, and deletion pruning is still open (#28). Aborting on it would
+        # fail a healthy resumed migration across a month in which tiles were
+        # removed. Worth saying, not worth stopping for.
+        if extra:
+            logger.warning("%d migrated id(s) are no longer published (an "
+                           "upstream deletion looks like this; see #28): %s",
+                           len(extra), sorted(extra)[:3])
+        if missing:
+            logger.error("INCOMPLETE: %d published, %d never migrated",
+                         len(published), len(missing))
+            logger.error("  e.g. %s", sorted(missing)[:3])
             return 1
         logger.info("Complete: all %d published items are migrated (%d in the "
                     "manifest, %d staged by an earlier step)",

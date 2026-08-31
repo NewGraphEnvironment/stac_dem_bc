@@ -92,6 +92,22 @@ jobs:
       - name: Run pairing contract tests
         run: .venv/bin/python -m pytest tests/ -q
 
+      # Before anything writes. The check used to live inside the migrate step,
+      # which is ordered AFTER the backfill step -- so dispatching both ran the
+      # entire ~102k-item backfill and only then aborted. They share
+      # $STAC_OUTPUT_DIR, and whichever ran second would fetch the published
+      # body over the first's output.
+      #
+      # A step that FAILS, not an `if:` that skips: `if: inputs.rename &&
+      # !inputs.backfill` would silently do nothing and report success.
+      - name: Refuse conflicting one-time dispatches
+        if: inputs.backfill && inputs.rename
+        run: |
+          echo "::error title=Conflicting inputs::backfill and rename both set." \
+               "They rewrite the same items into the same directory, so the" \
+               "second would overwrite the first. Dispatch them separately."
+          exit 1
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::414155577829:role/role_gha_stac_dem_bc
@@ -155,26 +171,6 @@ jobs:
         if: steps.detect.outputs.new_urls == 'true'
         run: .venv/bin/python scripts/item_create.py --incremental
 
-      # The standing guard, and the reason #34 cannot silently recur. item_create
-      # reads the collection id from DATA (collection.id off the fetched file,
-      # so it self-heals) but the asset key from CODE (so it does not). A month
-      # that built items under the wrong id or the wrong asset key would publish
-      # them into a mixed catalogue that nothing downstream can see. Cheap here:
-      # it only ever looks at this month's new items, tens to thousands of them.
-      - name: Audit newly created items (monthly)
-        if: steps.detect.outputs.new_urls == 'true' && !inputs.backfill && !inputs.rename
-        run: |
-          COUNT=$(find "$STAC_OUTPUT_DIR" -maxdepth 1 -type f -name "*.json" ! -name "collection.json" | wc -l | tr -d ' ')
-          if [ "$COUNT" -eq 0 ]; then
-            echo "no new items to audit"
-            exit 0
-          fi
-          COLLECTION=$(.venv/bin/python -c \
-            'import json,os; print(json.load(open(os.environ["STAC_OUTPUT_DIR"] + "/collection.json"))["id"])')
-          .venv/bin/python scripts/register_manifest.py audit-items \
-            --dir "$STAC_OUTPUT_DIR" --collection-id "$COLLECTION" \
-            --require-asset dem --forbid-asset image --expect "$COUNT"
-
       # Counted BEFORE the pairing rebuild writes into the same directory.
       # Otherwise CREATED is new + rebuilt, and a real shortfall in new items
       # (20 of 100 failed) is masked by an unrelated batch of rebuilds (30),
@@ -232,17 +228,12 @@ jobs:
       # the fetched file) and the migration skips them via skip_already_staged.
       # Ordering is load-bearing, not incidental.
       #
-      # Refuses to run alongside backfill: both write into $STAC_OUTPUT_DIR, and
-      # whichever ran second would fetch the PUBLISHED body over the first's
-      # output and silently discard it.
+      # Running alongside backfill is refused by the first step in the job, not
+      # here: a check placed here would fire only after the backfill had already
+      # spent ~102k fetches writing into the same directory.
       - name: Migrate published items to the renamed collection (dispatch only)
         if: inputs.rename
         run: |
-          if [ "${{ inputs.backfill }}" = "true" ]; then
-            echo "::error::rename and backfill both set - they write to the same" \
-                 "directory and the second would overwrite the first. Run them separately."
-            exit 1
-          fi
           .venv/bin/python scripts/item_migrate.py \
             --collection "$STAC_OUTPUT_DIR/collection.json" \
             --out-dir "$STAC_OUTPUT_DIR" \
@@ -290,6 +281,34 @@ jobs:
       # field, so a stale item registers successfully; and both asset keys are
       # legal STAC.
       #
+      # The standing guard, and the reason #34 cannot silently recur. item_create
+      # reads the collection id from DATA (collection.id off the fetched file,
+      # so it self-heals) but the asset key from CODE (so it does not). A month
+      # that built items under the wrong id or the wrong asset key would publish
+      # them into a mixed catalogue that nothing downstream can see.
+      #
+      # Placed HERE, after the pairing rebuild and gated on the publish count
+      # rather than on new_urls, because both of those were holes: items rebuilt
+      # for a pairing change were never audited, and a pairing-only month
+      # (changes=true, new_urls=false) skipped the audit entirely while still
+      # publishing. It now sees exactly what the sync is about to upload.
+      - name: Audit newly created items (monthly)
+        if: >-
+          !inputs.backfill && !inputs.rename
+          && steps.publish.outputs.count != '0' && steps.publish.outputs.count != ''
+        run: |
+          COLLECTION=$(.venv/bin/python -c \
+            'import json,os; print(json.load(open(os.environ["STAC_OUTPUT_DIR"] + "/collection.json"))["id"])')
+          # Read from stac_utils, never spelled here. A literal in this file
+          # would be a second definition of the asset key, outside every guard
+          # this change added to prevent exactly that.
+          DEM=$(.venv/bin/python -c 'import sys; sys.path.insert(0,"scripts"); import stac_utils; print(stac_utils.ASSET_DEM)')
+          OLD=$(.venv/bin/python -c 'import sys; sys.path.insert(0,"scripts"); import item_migrate; print(",".join(item_migrate.ASSET_RENAMES))')
+          .venv/bin/python scripts/register_manifest.py audit-items \
+            --dir "$STAC_OUTPUT_DIR" --collection-id "$COLLECTION" \
+            --require-asset "$DEM" --forbid-asset "$OLD" \
+            --expect "${{ steps.publish.outputs.count }}"
+
       # This step asserts HOMOGENEITY only. COMPLETENESS is item_migrate's own
       # reconciliation (manifest + staged == published), which exits non-zero and
       # so fails the job before this runs. One statement, one owner: expecting
@@ -305,7 +324,10 @@ jobs:
           echo "auditing staged items against $COLLECTION"
           ARGS=(--dir "$STAC_OUTPUT_DIR" --collection-id "$COLLECTION")
           if [ "${{ inputs.rename }}" = "true" ]; then
-            ARGS+=(--require-asset dem --forbid-asset image)
+            # From the modules, never spelled here -- see the monthly audit.
+            DEM=$(.venv/bin/python -c 'import sys; sys.path.insert(0,"scripts"); import stac_utils; print(stac_utils.ASSET_DEM)')
+            OLD=$(.venv/bin/python -c 'import sys; sys.path.insert(0,"scripts"); import item_migrate; print(",".join(item_migrate.ASSET_RENAMES))')
+            ARGS+=(--require-asset "$DEM" --forbid-asset "$OLD")
           fi
           .venv/bin/python scripts/register_manifest.py audit-items "${ARGS[@]}"
 
@@ -347,8 +369,18 @@ jobs:
             echo "sync did not run (outcome: ${{ steps.sync.outcome }}) -" \
                  "discarding rewrite manifests so the work is redone, not skipped"
             for f in data/migrate_done.txt data/backfill_done.txt; do
-              git reset -q -- "$f" 2>/dev/null || true
-              git checkout -q -- "$f" 2>/dev/null || true
+              # Unstage always; restore only a file git actually tracks.
+              # Branching explicitly rather than suppressing stderr on a
+              # mutating command: `git checkout --` destroys working-tree
+              # content, `-q` already silences success, so a redirect here could
+              # only ever hide a real failure -- and this discard is the thing
+              # standing between a failed run and a permanently skipped item.
+              git reset -q -- "$f" || true          # not in HEAD on the first run
+              if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+                git checkout -q -- "$f"
+              else
+                echo "  $f is untracked; leaving it uncommitted"
+              fi
             done
           fi
 

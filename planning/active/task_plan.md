@@ -173,12 +173,14 @@ run logs as evidence. Mirrors the existing `backfill` dispatch precedent.
       first into the same `$STAC_OUTPUT_DIR`; the migration must skip any id
       already present there, or it fetches the *published* body and overwrites a
       fresh rebuild
-- [x] Full item validation into `$RUNNER_TEMP/validation_rename.csv` —
+- [x] Full item validation into `$RUNNER_TEMP/validation_rewrite.csv` —
       `--incremental` would validate nothing, since every id is already in the
       ledger
-- [x] `audit-items` gate **between validate and sync**, with `--expect 102460`.
-      This is what catches a reused-manifest run that produced 4,420 files and
-      exited 0 — before a byte reaches S3
+- [x] `audit-items` gate **between validate and sync**. Landed asserting
+      HOMOGENEITY only: `--expect <published total>` was wrong on any resumed
+      run, where the staged set is legitimately the remainder. Completeness has
+      one owner, `item_migrate`'s reconciliation, which exits non-zero and so
+      fails the job before the sync
 - [x] Same audit, sampled, on the **monthly** path after `item_create` (tens to
       thousands of items, so cheap). Makes the dangerous state permanently
       self-reporting
