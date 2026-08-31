@@ -46,11 +46,25 @@ BUCKET_FORMS = (
 assert "stac_dem_bc" != OLD_ID
 
 
+WORKFLOWS = os.path.join(os.path.dirname(__file__), "..", ".github", "workflows")
+
+
 def _source_files():
+    """Everything that could name a collection.
+
+    The workflows are in scope deliberately. An inventory is only complete
+    relative to a boundary, and scripts/ is not the boundary here: update.yml
+    fetches the collection and drives every publish, so a hardcoded id there
+    would be exactly as wrong and entirely invisible to a scan of scripts/.
+    """
     out = []
     for name in sorted(os.listdir(SCRIPTS)):
         if name.endswith((".py", ".sh")) and not name.startswith("_"):
             out.append(os.path.join(SCRIPTS, name))
+    if os.path.isdir(WORKFLOWS):
+        for name in sorted(os.listdir(WORKFLOWS)):
+            if name.endswith((".yml", ".yaml")):
+                out.append(os.path.join(WORKFLOWS, name))
     return out
 
 
@@ -60,6 +74,8 @@ def test_there_are_source_files_to_check():
     assert len(files) >= 15
     assert any(f.endswith("catalogue_register.sh") for f in files)
     assert any(f.endswith("collection_patch.py") for f in files)
+    assert any(f.endswith("update.yml") for f in files), \
+        "the publishing workflow must be in scope"
 
 
 def _docstring_lines(src):
@@ -111,9 +127,9 @@ def _code_lines(path):
                 stripped.setdefault(tok.start[0], []).append(tok.string)
         return [(n, " ".join(parts)) for n, parts in sorted(stripped.items())]
 
-    # Shell: strip whole-line comments only. An inline `#` inside a string or a
-    # URL fragment cannot be removed by text alone, and cutting at the first `#`
-    # would silently truncate a line that might carry the literal.
+    # Shell and YAML: strip whole-line comments only. An inline `#` inside a
+    # string or a URL fragment cannot be removed by text alone, and cutting at
+    # the first `#` would silently truncate a line that might carry the literal.
     out = []
     for n, line in enumerate(src.splitlines(), 1):
         if line.lstrip().startswith("#"):

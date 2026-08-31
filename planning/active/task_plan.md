@@ -167,22 +167,22 @@ the contract, the monthly run carries it and `--check` can see a regression.
 Runs in CI, not from a laptop: same OIDC credentials as every other publish, and
 run logs as evidence. Mirrors the existing `backfill` dispatch precedent.
 
-- [ ] `rename` boolean `workflow_dispatch` input + step, mutually exclusive with
+- [x] `rename` boolean `workflow_dispatch` input + step, mutually exclusive with
       `backfill`
-- [ ] **Clobber guard:** the `Rebuild items whose DSM pairing changed` step runs
+- [x] **Clobber guard:** the `Rebuild items whose DSM pairing changed` step runs
       first into the same `$STAC_OUTPUT_DIR`; the migration must skip any id
       already present there, or it fetches the *published* body and overwrites a
       fresh rebuild
-- [ ] Full item validation into `$RUNNER_TEMP/validation_rename.csv` —
+- [x] Full item validation into `$RUNNER_TEMP/validation_rename.csv` —
       `--incremental` would validate nothing, since every id is already in the
       ledger
-- [ ] `audit-items` gate **between validate and sync**, with `--expect 102460`.
+- [x] `audit-items` gate **between validate and sync**, with `--expect 102460`.
       This is what catches a reused-manifest run that produced 4,420 files and
       exited 0 — before a byte reaches S3
-- [ ] Same audit, sampled, on the **monthly** path after `item_create` (tens to
+- [x] Same audit, sampled, on the **monthly** path after `item_create` (tens to
       thousands of items, so cheap). Makes the dangerous state permanently
       self-reporting
-- [ ] Manifest + errors log in the `always()` cache commit and the artifact list
+- [x] Manifest + errors log in the `always()` cache commit and the artifact list
 
 ## Phase 6 — Execute the cutover
 
