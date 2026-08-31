@@ -170,7 +170,9 @@ def main() -> int:
         parser.error("--limit must be >= 0")
 
     todo, staged = skip_already_staged(todo, out_dir)
-    if staged:
+    # A dry run previews; it must not exit 1 over the contents of a directory it
+    # was never going to write to. A preview flag is only safe if it previews.
+    if staged and not args.dry_run:
         logger.info("Skipping %d id(s) already staged in %s by an earlier step",
                     len(staged), out_dir)
         # "A file exists" is not "this item is correct". Staged bodies are
@@ -213,11 +215,11 @@ def main() -> int:
         problems = []
         if rewritten.get("collection") != args.collection_id:
             problems.append(f"collection is {rewritten.get('collection')!r}")
-        assets = rewritten.get("assets", {})
+        assets = rewritten.get("assets") or {}
         for old, new in ASSET_RENAMES.items():
             if old in assets:
                 problems.append(f"still carries the old asset key {old!r}")
-            if old in published_item.get("assets", {}) and new not in assets:
+            if old in (published_item.get("assets") or {}) and new not in assets:
                 problems.append(f"lost the {new!r} asset")
         return problems
 
@@ -234,8 +236,8 @@ def main() -> int:
     # a previous run's failing ids became unrecoverable from the log.
     errors_fh = open(args.errors_log, "w")
     try:
-        counts = run_rewrite(todo, edit, out_dir, manifest_fh, errors_fh,
-                             workers=args.workers, desc="Migrating")
+        counts, errored = run_rewrite(todo, edit, out_dir, manifest_fh, errors_fh,
+                                      workers=args.workers, desc="Migrating")
     finally:
         manifest_fh.close()
         errors_fh.close()
@@ -300,14 +302,36 @@ def main() -> int:
             logger.warning("%d migrated id(s) are no longer published (an "
                            "upstream deletion looks like this; see #28): %s",
                            len(extra), sorted(extra)[:3])
-        if missing:
-            logger.error("INCOMPLETE: %d published, %d never migrated",
-                         len(published), len(missing))
-            logger.error("  e.g. %s", sorted(missing)[:3])
+        # Split `missing` by CAUSE. An id this run failed to fetch is missing
+        # for a reason the error-rate gate already judges, and the next run
+        # retries it for free. An id missing for any OTHER reason was never
+        # attempted, which is a harness fault and is always fatal.
+        #
+        # Without this split the completeness check makes error_tolerable
+        # unreachable: an errored id is always in `todo`, so ANY error means
+        # `missing`, means exit 1 -- which in CI skips the sync, which discards
+        # the manifest, which throws away every completed item. At 102,460 items
+        # against a measured history of 34 and 2 transient failures per run, the
+        # migration could only ever finish on a run where none of 102,460
+        # fetches failed three times. A loop with no exit, produced by two
+        # guards that are each correct alone.
+        unattempted = missing - errored
+        if unattempted:
+            logger.error("INCOMPLETE: %d published, %d never attempted",
+                         len(published), len(unattempted))
+            logger.error("  e.g. %s", sorted(unattempted)[:3])
             return 1
-        logger.info("Complete: all %d published items are migrated (%d in the "
-                    "manifest, %d staged by an earlier step)",
-                    len(published), len(migrated) - len(staged), len(staged))
+        if missing:
+            logger.warning("%d item(s) remain unmigrated, all of them this "
+                           "run's transient failures. The run still publishes "
+                           "what it completed; RE-RUN to pick them up, and do "
+                           "not register until a run reports Complete.",
+                           len(missing))
+            logger.warning("  failed ids: %s", args.errors_log)
+        else:
+            logger.info("Complete: all %d published items are migrated (%d in "
+                        "the manifest, %d staged by an earlier step)",
+                        len(published), len(migrated) - len(staged), len(staged))
     else:
         logger.warning("Partial run (--limit); completeness NOT asserted. "
                        "Re-run without --limit before publishing.")

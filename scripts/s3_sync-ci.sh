@@ -51,8 +51,11 @@ ITEM_COUNT=$(find "$STAC_OUTPUT_DIR" -maxdepth 1 -type f -name "*.json" ! -name 
 echo "Uploading $ITEM_COUNT item JSON(s), then collection.json: $STAC_OUTPUT_DIR -> $BUCKET"
 
 # ${EXTRA_ARGS[@]+...} keeps set -u happy on bash 3.2 (macOS) when the array is empty
+# *.tmp: item_rewrite writes each item to a temp file and renames, so a run
+# killed mid-write can leave one behind. Uploading it would put a stray
+# `<id>.json.tmp` object in the bucket that nothing ever reads or cleans up.
 aws s3 sync "$STAC_OUTPUT_DIR" "$BUCKET" \
-  --exclude "collection.json" --exclude "*/.*" --exclude ".*" \
+  --exclude "collection.json" --exclude "*/.*" --exclude ".*" --exclude "*.tmp" \
   ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 
 aws s3 cp "$STAC_OUTPUT_DIR/collection.json" "$BUCKET/collection.json" \

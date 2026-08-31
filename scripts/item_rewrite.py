@@ -236,10 +236,17 @@ def process_one(item_id: str, edit: Edit, out_dir: str,
 
 
 def run_rewrite(todo: list, edit: Edit, out_dir: str, manifest_fh, errors_fh,
-                workers: int = 16, desc: str = "Rewriting") -> dict:
-    """Fan out over `todo`, returning {written, unchanged, error}."""
+                workers: int = 16, desc: str = "Rewriting") -> tuple:
+    """Fan out over `todo`. Returns ({written, unchanged, error}, errored_ids).
+
+    The id SET matters as much as the count. A caller reconciling its manifest
+    against the published set will see this run's failures as "never migrated",
+    and cannot otherwise tell them apart from an item that was never attempted
+    -- which is a different fault with a different remedy.
+    """
     lock = threading.Lock()
     counts = {"written": 0, "unchanged": 0, "error": 0}
+    errored = set()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
         futures = [ex.submit(process_one, i, edit, out_dir) for i in todo]
@@ -249,6 +256,7 @@ def run_rewrite(todo: list, edit: Edit, out_dir: str, manifest_fh, errors_fh,
             with lock:
                 if outcome.startswith("error:"):
                     counts["error"] += 1
+                    errored.add(item_id)
                     errors_fh.write(f"{item_id}\t{outcome}\n")
                     errors_fh.flush()
                 else:
@@ -263,7 +271,7 @@ def run_rewrite(todo: list, edit: Edit, out_dir: str, manifest_fh, errors_fh,
                     # not run; see update.yml's cache commit.
                     manifest_fh.write(f"{item_id}\n")
                     manifest_fh.flush()
-    return counts
+    return counts, errored
 
 
 def verify_rewrite(sample_ids: list, out_dir: str, edit: Edit,

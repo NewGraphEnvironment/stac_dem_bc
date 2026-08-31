@@ -51,6 +51,7 @@ from item_rewrite import (
     manifest_open,
     published_item_ids,
     run_rewrite,
+    skip_already_staged,
     verify_rewrite,
 )
 from stac_utils import (
@@ -159,7 +160,22 @@ def main() -> int:
     # Every published item is a candidate: those with a pair gain the asset,
     # and the 90 with raw-space hrefs need repair whether or not they pair.
     todo = sorted(published - done)
-    if args.limit:
+
+    # The same clobber guard item_migrate has, and for the same reason: CI
+    # rebuilds items whose DSM pairing changed BEFORE this step, into this same
+    # directory. Rewriting one would fetch the published body and overwrite the
+    # fresher rebuild -- which, for a tile whose DSM was withdrawn, silently
+    # restores the dsm asset the rebuild had just removed.
+    todo, staged = skip_already_staged(todo, out_dir)
+    if staged:
+        logger.info("Skipping %d id(s) already staged in %s by an earlier step",
+                    len(staged), out_dir)
+
+    # `if args.limit:` reads 0 as "no limit" and would rewrite all 102,460 items
+    # for someone who asked for none.
+    if args.limit is not None and args.limit < 0:
+        parser.error("--limit must be >= 0")
+    if args.limit is not None:
         todo = todo[: args.limit]
     logger.info("To process: %d items (%d paired, %d published-but-unpaired)",
                 len(todo),
@@ -183,8 +199,8 @@ def main() -> int:
     # ids could not be identified from it.
     errors_fh = open(args.errors_log, "w")
     try:
-        counts = run_rewrite(todo, edit, out_dir, manifest_fh, errors_fh,
-                             workers=args.workers, desc="Backfilling")
+        counts, errored = run_rewrite(todo, edit, out_dir, manifest_fh, errors_fh,
+                                       workers=args.workers, desc="Backfilling")
     finally:
         manifest_fh.close()
         errors_fh.close()
@@ -212,6 +228,28 @@ def main() -> int:
             return 1
         logger.info("Verify passed on %d items: the rewrite is exactly what "
                     "item_edit predicts", checked)
+
+    # The same population statement item_migrate makes. Dropping --expect from
+    # the CI audit removed the only thing that noticed a backfill which
+    # processed a subset -- and a reused or truncated manifest is exactly how
+    # that happens, silently and with exit 0.
+    if args.limit is None:
+        rewritten = manifest_load(args.manifest, MIGRATION) | set(staged)
+        missing = published - rewritten
+        unattempted = missing - errored
+        if unattempted:
+            logger.error("INCOMPLETE: %d published, %d never attempted",
+                         len(published), len(unattempted))
+            logger.error("  e.g. %s", sorted(unattempted)[:3])
+            return 1
+        if missing:
+            logger.warning("%d item(s) remain, all of them this run's transient "
+                           "failures; re-run to pick them up", len(missing))
+        else:
+            logger.info("Complete: all %d published items are covered",
+                        len(published))
+    else:
+        logger.warning("Partial run (--limit); completeness NOT asserted.")
 
     return 0 if tolerable else 1
 

@@ -434,3 +434,82 @@ def test_migrate_refuses_a_rename_map_that_collides():
     it = published(with_dsm=True)
     with pytest.raises(ValueError, match="maps two keys onto one"):
         item_migrate(it, NEW_ID, {"image": "x", "dsm": "x"})
+
+
+# =============================================================================
+# completeness — the two causes of "missing", which need opposite answers
+# =============================================================================
+
+def _run_migrate(tmp_path, monkeypatch, published_ids, written, errored,
+                 extra_argv=()):
+    """Drive item_migrate.main() with the fan-out replaced.
+
+    The interaction under test only shows up in main(), between the error gate
+    and the completeness reconciliation, and neither can be reached from a pure
+    function. Replacing run_rewrite is what makes the two causes of a missing
+    id settable independently.
+    """
+    import item_rewrite
+
+    coll = tmp_path / "collection.json"
+    coll.write_text(json.dumps({"id": NEW_ID, "links": [
+        {"rel": "item", "href": f"{PATH_S3_STAC}/{i}.json"} for i in published_ids]}))
+    manifest = tmp_path / "done.txt"
+
+    def fake_run_rewrite(todo, edit, out_dir, manifest_fh, errors_fh, **kw):
+        for i in written:
+            manifest_fh.write(f"{i}\n")
+        manifest_fh.flush()
+        for i in errored:
+            errors_fh.write(f"{i}\terror:boom\n")
+        return ({"written": len(written), "unchanged": 0,
+                 "error": len(errored)}, set(errored))
+
+    monkeypatch.setattr(migrate_mod, "run_rewrite", fake_run_rewrite)
+    argv = ["item_migrate.py", "--collection", str(coll),
+            "--out-dir", str(tmp_path / "out"), "--manifest", str(manifest),
+            "--errors-log", str(tmp_path / "err.txt"), *extra_argv]
+    monkeypatch.setattr("sys.argv", argv)
+    os.makedirs(tmp_path / "out", exist_ok=True)
+    return migrate_mod.main()
+
+
+def test_a_tolerated_failure_rate_still_publishes_what_completed(tmp_path, monkeypatch):
+    """The loop this closes had no exit.
+
+    An errored id is always in `todo`, so ANY error means `missing`, which meant
+    exit 1 -- which in CI skips the sync, which discards the manifest, which
+    throws away every completed item. At 102,460 items against a measured
+    history of 34 and 2 transient failures per run, the migration could only
+    ever finish on a run where none of 102,460 fetches failed three times.
+    """
+    ids = [f"id-{i}" for i in range(3000)]
+    rc = _run_migrate(tmp_path, monkeypatch, ids, written=ids[:-2], errored=ids[-2:])
+    assert rc == 0, "2 failures in 3000 is inside the 0.1% tolerance"
+
+
+def test_an_intolerable_failure_rate_still_fails(tmp_path, monkeypatch):
+    """The gate must still fail when something is actually broken -- otherwise
+    the fix above has removed the guard rather than corrected it."""
+    ids = [f"id-{i}" for i in range(100)]
+    rc = _run_migrate(tmp_path, monkeypatch, ids, written=ids[:90], errored=ids[90:])
+    assert rc == 1, "10% is far outside tolerance"
+
+
+def test_an_item_never_attempted_is_always_fatal(tmp_path, monkeypatch):
+    """The other cause of `missing`, and it needs the opposite answer.
+
+    Nothing errored, so the error gate is silent -- yet an id in the published
+    set reached neither the manifest nor the error log. That is a harness fault,
+    not transient network noise, and no re-run will fix it by itself.
+    """
+    ids = [f"id-{i}" for i in range(10)]
+    rc = _run_migrate(tmp_path, monkeypatch, ids, written=ids[:8], errored=[])
+    assert rc == 1
+
+
+def test_a_fully_complete_run_succeeds(tmp_path, monkeypatch):
+    """The control. Without it the three above pass for a main() that always
+    returns 1."""
+    ids = [f"id-{i}" for i in range(10)]
+    assert _run_migrate(tmp_path, monkeypatch, ids, written=ids, errored=[]) == 0
