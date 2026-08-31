@@ -71,17 +71,17 @@ trustworthy.
 lines where each behaviour has a named CI incident behind it. Fork it and the
 policy forks with it.
 
-- [ ] New `scripts/item_rewrite.py`: move `published_item_ids`, `item_fetch`,
+- [x] New `scripts/item_rewrite.py`: move `published_item_ids`, `item_fetch`,
       `process_one`, `ERROR_RATE_MAX`, `ERROR_ABS_MAX`, plus
       `error_tolerable(errors, processed)` and `manifest_load(path, migration)` —
       the latter reading a `# migration: <name>` header line and **refusing a
       manifest from another migration**
-- [ ] `verify_rewrite(...)`: re-fetch published, apply the edit to a *fresh*
+- [x] `verify_rewrite(...)`: re-fetch published, apply the edit to a *fresh*
       copy, DeepDiff that against the file on disk, expect empty. This replaces
       the allowlist rather than widening it — an allowlist that grows a branch
       per migration is the exemption-list failure in `CLAUDE.md`
-- [ ] `item_backfill.py` becomes a thin caller; **`item_edit` keeps its name**
-- [ ] `tests/test_item_backfill.py` passes with **zero edits** — that is the
+- [x] `item_backfill.py` becomes a thin caller; **`item_edit` keeps its name**
+- [x] `tests/test_item_backfill.py` passes with **zero edits** — that is the
       proof the extraction was faithful, and it only works if the file does not
       change in this commit
 - [ ] Delete the `_tolerable()` mirror at `tests/test_item_backfill.py:139-142`
