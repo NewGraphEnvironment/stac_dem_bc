@@ -121,8 +121,11 @@ def test_published_ids_decode_the_percent_encoding_in_links(tmp_path):
 
 
 @pytest.mark.parametrize("bad", [
+    {},                                   # nothing at all
     {"assets": {}},                       # no assets at all
+    {"assets": None},                     # assets present but NULL
     {"assets": {"image": {}}},            # asset with no href
+    {"assets": {"dem": {}}},              # the post-#34 key, same shape
 ])
 def test_malformed_items_do_not_raise(bad):
     """A single odd item must not take down a 91k-item run."""

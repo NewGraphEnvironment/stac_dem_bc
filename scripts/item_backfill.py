@@ -84,7 +84,11 @@ DEM_KEYS = (ASSET_DEM, "image")
 
 def _dem_asset(item: dict) -> dict:
     """The bare-earth asset, whichever key this item spells it with."""
-    assets = item.get("assets", {})
+    # `or {}`, not a default: .get("assets", {}) returns None for an item whose
+    # `assets` is explicitly null, and `key in None` raises. A default only
+    # covers a MISSING key, which is a different input from a null one -- the
+    # same distinction as an empty string versus an unset variable.
+    assets = item.get("assets") or {}
     for key in DEM_KEYS:
         if key in assets:
             return assets[key]
@@ -99,16 +103,21 @@ def item_edit(item: dict, dsm_href: str | None) -> list[str]:
     """
     changed = []
 
-    for key, asset in item.get("assets", {}).items():
+    for key, asset in (item.get("assets") or {}).items():
         href = asset.get("href", "")
         fixed = encode_url_for_gdal(href)
         if fixed != href:
             asset["href"] = fixed
             changed.append(f"href:{key}")
 
-    if dsm_href and ASSET_DSM not in item.get("assets", {}):
+    if dsm_href and ASSET_DSM not in (item.get("assets") or {}):
         dem = _dem_asset(item)
-        item.setdefault("assets", {})[ASSET_DSM] = {
+        # NOT setdefault: it returns the EXISTING value when the key is
+        # present, so an item whose `assets` is null yields None and the
+        # subscript below raises. Missing and null are different inputs.
+        if not isinstance(item.get("assets"), dict):
+            item["assets"] = {}
+        item["assets"][ASSET_DSM] = {
             "href": encode_url_for_gdal(dsm_href),
             # Inherited from the DEM asset already on this item -- the published
             # record IS the DEM's measured COG status, so no cache lookup and no
