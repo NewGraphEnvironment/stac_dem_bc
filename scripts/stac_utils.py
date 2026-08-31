@@ -28,10 +28,30 @@ logger = logging.getLogger(__name__)
 # Path Configuration
 # =============================================================================
 
+# The BUCKET, which keeps its name. It is IaC-managed in rtj and renaming it is
+# a separate and larger decision from renaming the collection (#34) -- so every
+# `stac-dem-bc` that survives in this repo should be one of these, and a test
+# asserts exactly that.
 PATH_S3_STAC = "https://stac-dem-bc.s3.amazonaws.com"
 PATH_S3_JSON = f"{PATH_S3_STAC}/collection.json"
 PATH_S3 = "https://nrs.objectstore.gov.bc.ca/gdwuts"
 PATH_RESULTS_CSV = "data/stac_geotiff_checks.csv"
+
+# =============================================================================
+# Asset keys
+# =============================================================================
+# One definition, because the key is written from four places (the cache path
+# below, item_create's rio_stac fallback and its href override, and the same
+# pair again in item_reprocess) and read from more. A literal in any one of
+# them is a half-done rename that produces a mixed catalogue -- and #34's
+# rename is invisible to every existing check, because item ids do not change
+# and both keys are legal STAC.
+#
+# `dem` was `image` until #34. `image` was never descriptive and became
+# actively ambiguous once every item also carried `dsm`; the published
+# collection description had to spend a sentence saying which was which.
+ASSET_DEM = "dem"
+ASSET_DSM = "dsm"
 
 # BC bounding box (hardcoded — provincial boundary is stable)
 BBOX_BC = [-140, 48, -114, 60]
@@ -356,7 +376,7 @@ def item_create_from_cache(
     item.collection_id = collection_id
 
     item.add_asset(
-        "image",
+        ASSET_DEM,
         pystac.Asset(
             href=fix_url(url),
             media_type=media_type,

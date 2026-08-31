@@ -22,10 +22,14 @@
 # Env:
 #   STAC_HOST        ssh target (default: root@geopro)
 #   STAC_DB          pgstac database (default: stac)
-#   STAC_COLLECTION  collection id (default: stac-dem-bc)
+#   STAC_COLLECTION  collection id (default: collection_patch.COLLECTION_ID)
 #   STAC_BUCKET_URL  bucket serving collection.json (default: the stac-dem-bc
-#                    bucket). MUST move together with STAC_COLLECTION -- they are
-#                    two knobs over one fact, and the script reconciles them.
+#                    bucket). These were once two knobs over ONE fact, because
+#                    the collection and the bucket shared a name. Since #34 they
+#                    are genuinely two -- the collection is stac-elevation-bc and
+#                    the bucket is still stac-dem-bc -- so neither can be derived
+#                    from the other, and the script reconciles them at runtime
+#                    against the id inside the fetched collection.json instead.
 #   STAC_API         API base (default: https://images.a11s.one)
 #   FETCH_JOBS       parallel S3 fetches (default: 20)
 #
@@ -37,9 +41,29 @@
 
 set -euo pipefail
 
+PY="${PYTHON:-.venv/bin/python}"
+[ -x "$PY" ] || PY=python3
+
 HOST="${STAC_HOST:-root@geopro}"
 DB="${STAC_DB:-stac}"
-COLLECTION_ID="${STAC_COLLECTION:-stac-dem-bc}"
+# Read from collection_patch rather than repeated here. A second literal is a
+# second definition, and the two would disagree exactly once -- during a rename,
+# which is when being wrong is most expensive.
+#
+# Assigned and THEN tested, not tested inline: a failing command substitution
+# leaves an empty string, and an empty collection id reads as "no collection"
+# rather than as "the lookup broke". Failing loudly beats falling back to a
+# literal that is stale by construction.
+if [ -n "${STAC_COLLECTION:-}" ]; then
+  COLLECTION_ID="$STAC_COLLECTION"
+else
+  COLLECTION_ID=$("$PY" -c 'import sys; sys.path.insert(0, "scripts"); import collection_patch; print(collection_patch.COLLECTION_ID)' 2>/dev/null) || COLLECTION_ID=""
+  if [ -z "$COLLECTION_ID" ]; then
+    echo "ERROR: could not read COLLECTION_ID from scripts/collection_patch.py." >&2
+    echo "       Run from the repo root, or set STAC_COLLECTION explicitly." >&2
+    exit 1
+  fi
+fi
 API="${STAC_API:-https://images.a11s.one}"
 JOBS="${FETCH_JOBS:-20}"
 BUCKET_URL="${STAC_BUCKET_URL:-https://stac-dem-bc.s3.amazonaws.com}"
@@ -62,9 +86,6 @@ if [ -z "$MODE" ]; then
   echo "Usage: $0 [--dryrun] (--drift | --all | --ids-file F | --verify)" >&2
   exit 1
 fi
-
-PY="${PYTHON:-.venv/bin/python}"
-[ -x "$PY" ] || PY=python3
 
 WORK=$(mktemp -d -t catalogue_register.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
@@ -89,18 +110,32 @@ echo "fetching published collection.json ..."
 curl -fsSL --max-time 300 "$BUCKET_URL/collection.json" -o "$WORK/collection.json"
 "$PY" scripts/register_manifest.py ids-published \
   --collection-file "$WORK/collection.json" > "$WORK/published.txt"
-# STAC_COLLECTION and STAC_BUCKET_URL must move together. They are independent
-# knobs over the same fact, and the API answers an unknown collection with
-# 200 / zero features / no next link -- so pointing them at different collections
-# reports every published item as missing, then "registers" them under an id the
-# fetch never came from. Reconciled here rather than discovered later.
+# STAC_COLLECTION and STAC_BUCKET_URL name two DIFFERENT things since #34 -- the
+# collection is stac-elevation-bc, the bucket is still stac-dem-bc -- so neither
+# can be checked against the other by name. What reconciles them is the id
+# INSIDE the fetched file. It matters because the API answers an unknown
+# collection with 200 / zero features / no next link, so a mismatched pair
+# reports every published item as missing and then "registers" them under an id
+# the fetch never came from. Caught here rather than discovered later.
 FILE_COLLECTION_ID=$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("id",""))' \
   "$WORK/collection.json")
 if [ "$FILE_COLLECTION_ID" != "$COLLECTION_ID" ]; then
   echo "ERROR: collection id mismatch." >&2
-  echo "       STAC_COLLECTION  = $COLLECTION_ID" >&2
+  echo "       expecting        = $COLLECTION_ID  (scripts/collection_patch.py)" >&2
   echo "       collection.json  = $FILE_COLLECTION_ID  (from $BUCKET_URL)" >&2
-  echo "       Set STAC_BUCKET_URL to the bucket for '$COLLECTION_ID'." >&2
+  echo >&2
+  echo "       Two causes, and they want opposite fixes:" >&2
+  echo >&2
+  echo "       1. The published catalogue has not been migrated to" >&2
+  echo "          '$COLLECTION_ID' yet. This is the EXPECTED state between" >&2
+  echo "          merging a rename and running the cutover. Run the migration" >&2
+  echo "          (workflow_dispatch, rename=true) -- do not set" >&2
+  echo "          STAC_COLLECTION to make this pass, which would register the" >&2
+  echo "          old catalogue under a name the code no longer uses." >&2
+  echo >&2
+  echo "       2. STAC_BUCKET_URL points at a different catalogue's bucket." >&2
+  echo "          Set it to the bucket serving '$COLLECTION_ID'. Note the" >&2
+  echo "          bucket and the collection do NOT share a name here." >&2
   exit 1
 fi
 
@@ -310,20 +345,49 @@ fi
 # with no collection row fail outright.
 ./scripts/collection_register.sh "$WORK/collection.json"
 
+# Audit every fetched body BEFORE any of it reaches pgstac. The bodies are
+# already on disk here, so the full-population check costs nothing -- and this
+# is the only place one is possible. The id reconciliation above compares
+# STAC_COLLECTION against collection.json's `id`: one field, in one file, out of
+# 102,461. item_register.sh then routes each item by its OWN `collection` field,
+# so a body naming the previous collection upserts into the previous collection
+# successfully, with no error anywhere.
+#
+# --expect ties the count to the same set the fetch guard above used, rather
+# than to a separately-derived number that could disagree on a healthy run.
+# The asset key as well as the collection id. A body can name the right
+# collection and still carry the retired key -- half of the rename, which
+# nothing downstream can see. Both values are read from the modules, never
+# spelled here.
+AUDIT_DEM=$("$PY" -c 'import sys; sys.path.insert(0, "scripts"); import stac_utils; print(stac_utils.ASSET_DEM)')
+AUDIT_OLD=$("$PY" -c 'import sys; sys.path.insert(0, "scripts"); import item_migrate; print(",".join(item_migrate.ASSET_RENAMES))')
+[ -n "$AUDIT_DEM" ] || { echo "ERROR: could not read the asset key constants" >&2; exit 1; }
+
+"$PY" scripts/register_manifest.py audit-items \
+  --dir "$FETCH_DIR" --collection-id "$COLLECTION_ID" --expect "$N_TODO" \
+  --require-asset "$AUDIT_DEM" --forbid-asset "$AUDIT_OLD"
+
 # find, never a glob: 102k filenames is ~6 MB of argv against a ~2 MB ARG_MAX,
 # and it would fail after the fetch had already succeeded.
-find "$FETCH_DIR" -maxdepth 1 -type f -name '*.json' | ./scripts/item_register.sh
+# STAC_COLLECTION makes the same assertion once more inside item_register.sh,
+# on the file it is about to hand pypgstac. Cheap, and the two are not
+# redundant: this one runs even when the audit above is bypassed.
+find "$FETCH_DIR" -maxdepth 1 -type f -name '*.json' | \
+  STAC_COLLECTION="$COLLECTION_ID" ./scripts/item_register.sh
 
 # --- verify ------------------------------------------------------------------
 
 echo "verifying by set equality ..."
 # Delegated to register_manifest.py rather than inlined, because the request
-# body needs a `limit` and that is exactly the kind of detail an inline heredoc
-# loses. The API's default limit is 10: a body without one returns the first 10
-# ids of however many were asked for, which reads as "590 of my 600 items are
-# missing" and fails a verification whose subject was fine. Measured, and pinned
-# by tests/test_register_manifest.py.
+# body needs two details an inline heredoc would lose, each of which fails
+# silently when omitted. The API's default limit is 10: a body without one
+# returns the first 10 ids of however many were asked for, which reads as
+# "590 of my 600 items are missing" and fails a verification whose subject was
+# fine. And without `collections`, /search answers about every collection on
+# the endpoint -- so during #34, when two collections share all 102,460 ids,
+# verifying the new one would pass on the old one's rows. Both measured, and
+# pinned by tests/test_register_manifest.py.
 "$PY" scripts/register_manifest.py verify-serving \
-  --ids-file "$WORK/todo.txt" --api "$API"
+  --ids-file "$WORK/todo.txt" --collection-id "$COLLECTION_ID" --api "$API"
 
 echo "DONE: $N_TODO item(s) registered to $COLLECTION_ID"

@@ -14,6 +14,7 @@ scripts/catalogue_register.sh.
 
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.parse
@@ -160,26 +161,42 @@ def ids_registered(collection_id: str, api: str = API_DEFAULT,
     return ids
 
 
-def search_body(ids) -> dict:
-    """The POST /search body for an id lookup.
+def search_body(ids, collection_id: str) -> dict:
+    """The POST /search body for an id lookup, scoped to one collection.
 
-    Pure, and separated out purely so it can be asserted on offline. The
-    `limit` is the whole reason: the API's DEFAULT LIMIT IS 10, so a body
-    without one silently returns the first 10 of however many ids were asked
-    for. That reads as "590 of my 600 items are missing" and fails a
-    verification whose subject was in fact fine. Measured against the live API:
-    600 registered ids, no limit -> 10 features; limit=600 -> 600.
+    Pure, and separated out purely so it can be asserted on offline. Two
+    parameters, each of which exists because omitting it fails silently.
+
+    `limit`: the API's DEFAULT LIMIT IS 10, so a body without one silently
+    returns the first 10 of however many ids were asked for. That reads as
+    "590 of my 600 items are missing" and fails a verification whose subject
+    was in fact fine. Measured against the live API: 600 registered ids, no
+    limit -> 10 features; limit=600 -> 600.
+
+    `collections`: without it a /search asks "is this id served ANYWHERE",
+    which is a different question from the one every caller means. It was
+    harmless for as long as one collection existed. #34 puts two collections
+    on the endpoint by design, sharing all 102,460 ids -- so an unscoped
+    verification of the NEW collection passes green while the OLD one is
+    answering, even if zero items registered. The collection id is required
+    rather than defaulted, because a default is exactly the thing that would
+    have gone unnoticed here.
     """
     ids = list(ids)
+    if not collection_id:
+        raise ValueError("collection_id is required: an unscoped /search "
+                         "answers about every collection on the endpoint")
     return {
+        "collections": [collection_id],
         "ids": ids,
         "limit": max(len(ids), 1),
         "fields": {"include": ["id"]},
     }
 
 
-def ids_serving(ids, api: str = API_DEFAULT, chunk: int = 500, session=None) -> set:
-    """Which of these ids the API actually serves, as a set.
+def ids_serving(ids, collection_id: str, api: str = API_DEFAULT,
+                chunk: int = 500, session=None) -> set:
+    """Which of these ids the API serves IN THIS COLLECTION, as a set.
 
     Batched because a very long id list is a real request-size ceiling. Returns
     a SET so the caller compares sets — a /search omits ids that do not exist
@@ -191,7 +208,7 @@ def ids_serving(ids, api: str = API_DEFAULT, chunk: int = 500, session=None) -> 
     got = set()
     for i in range(0, len(ids), chunk):
         batch = ids[i:i + chunk]
-        page = _post(session, url, search_body(batch))
+        page = _post(session, url, search_body(batch, collection_id))
         got.update(f["id"] for f in page.get("features", []))
     return got
 
@@ -214,11 +231,18 @@ def ids_diff(published, registered) -> tuple[list[str], list[str]]:
 # NDJSON
 # =============================================================================
 
-def ndjson_write(paths, out) -> int:
+def ndjson_write(paths, out, expect_collection: str | None = None) -> int:
     """Compact one item JSON per line. Returns the number of lines written.
 
     json.dumps never emits a raw newline, so a record cannot straddle lines
     however odd the source formatting is.
+
+    `expect_collection` is the last checkpoint before pgstac. Each item is
+    routed by its OWN `collection` field -- item_register.sh passes no
+    collection id at all -- so an item whose body still names the previous
+    collection upserts into the previous collection SUCCESSFULLY, with no error
+    anywhere. During #34 that is the difference between a renamed catalogue and
+    a silently split one.
     """
     n = 0
     with open(out, "w") as fh:
@@ -228,10 +252,68 @@ def ndjson_write(paths, out) -> int:
                 continue
             with open(path) as src:
                 doc = json.load(src)
+            if expect_collection is not None:
+                got = doc.get("collection")
+                if got != expect_collection:
+                    raise RuntimeError(
+                        f"{path} names collection {got!r}, expected "
+                        f"{expect_collection!r}. Loading it would register the "
+                        f"item into {got!r} without erroring."
+                    )
             fh.write(json.dumps(doc, separators=(",", ":")))
             fh.write("\n")
             n += 1
     return n
+
+
+# =============================================================================
+# Population homogeneity — the property a half-done migration breaks
+# =============================================================================
+
+def audit_items(paths, collection_id: str, require_asset: str | None = None,
+                forbid_assets=None) -> dict:
+    """Which items disagree with the collection they claim to belong to.
+
+    The property is HOMOGENEITY, not size, and nothing else in this repo checks
+    it. Item ids do not change during a rename, so set equality reports IN SYNC
+    over a fully mixed catalogue; item_register.sh routes by each body's own
+    collection field, so a stale item registers successfully; item_validate.py
+    sees legal STAC either way, because both asset keys are legal; and a count
+    of assets cannot tell {image, dsm} from {dem, dsm}.
+
+    Returns {"checked": n, "wrong_collection": [...], "missing_asset": [...],
+    "forbidden_asset": [...], "unreadable": [...]} with paths, not counts --
+    a count of offenders is no more use here than a count of items.
+    """
+    out = {"checked": 0, "wrong_collection": [], "missing_asset": [],
+           "forbidden_asset": [], "unreadable": []}
+    for path in paths:
+        path = path.rstrip("\n")
+        if not path:
+            continue
+        try:
+            with open(path) as fh:
+                doc = json.load(fh)
+        except (OSError, ValueError) as e:
+            out["unreadable"].append(f"{path}: {e}")
+            continue
+        out["checked"] += 1
+        if doc.get("collection") != collection_id:
+            out["wrong_collection"].append(path)
+        assets = doc.get("assets") or {}
+        if require_asset is not None and require_asset not in assets:
+            out["missing_asset"].append(path)
+        # A LIST, not a string. A rename map can have more than one old key, and
+        # the caller builds this from ASSET_RENAMES -- so a single-string
+        # parameter meant the workflow's comma-joined value ("image,other")
+        # matched no real asset key and the check silently stopped checking
+        # anything. A guard that fails toward "nothing to report" is worse than
+        # no guard, because it still reads as a pass.
+        for key in (forbid_assets or ()):
+            if key in assets:
+                out["forbidden_asset"].append(path)
+                break
+    return out
 
 
 # =============================================================================
@@ -265,10 +347,25 @@ def main() -> int:
 
     p = sub.add_parser("ndjson", help="build NDJSON from item paths on stdin")
     p.add_argument("--out", required=True)
+    p.add_argument("--expect-collection",
+                   help="refuse any item whose body names a different collection")
+
+    p = sub.add_parser("audit-items",
+                       help="assert every item agrees with its collection")
+    p.add_argument("--dir", help="directory of item JSONs (default: paths on stdin)")
+    p.add_argument("--collection-id", required=True)
+    p.add_argument("--require-asset", help="every item must carry this asset key")
+    p.add_argument("--forbid-asset",
+                   help="no item may carry any of these asset keys "
+                        "(comma-separated; a rename map may retire more than one)")
+    p.add_argument("--expect", type=int,
+                   help="the number of items there should be. Derive it from the "
+                        "artifact the consumer reads, not from a separate count.")
 
     p = sub.add_parser("verify-serving",
                        help="assert every id in a file is served by the API")
     p.add_argument("--ids-file", required=True)
+    p.add_argument("--collection-id", required=True)
     p.add_argument("--api", default=API_DEFAULT)
 
     args = ap.parse_args()
@@ -325,22 +422,69 @@ def main() -> int:
                 print(item_id)
 
     elif args.cmd == "ndjson":
-        n = ndjson_write(sys.stdin, args.out)
+        n = ndjson_write(sys.stdin, args.out, args.expect_collection)
         print(n)
+
+    elif args.cmd == "audit-items":
+        if args.dir:
+            paths = sorted(
+                os.path.join(args.dir, f) for f in os.listdir(args.dir)
+                if f.endswith(".json") and f != "collection.json"
+            )
+        else:
+            paths = [l.rstrip("\n") for l in sys.stdin if l.strip()]
+
+        # Zero items is never a pass. A loop over an empty set prints nothing
+        # and exits 0, which is indistinguishable from "everything checked out"
+        # -- and here it would bless an unpublished catalogue.
+        if not paths:
+            print("FAIL: audit-items found no item JSONs to check", file=sys.stderr)
+            return 1
+
+        forbid = [k for k in (args.forbid_asset or "").split(",") if k.strip()]
+        forbid = [k.strip() for k in forbid]
+        r = audit_items(paths, args.collection_id, args.require_asset, forbid)
+        print(f"checked {r['checked']} item(s) against {args.collection_id}",
+              file=sys.stderr)
+
+        bad = False
+        for kind, label in (("wrong_collection", "name another collection"),
+                            ("missing_asset", f"lack asset {args.require_asset!r}"),
+                            ("forbidden_asset", f"still carry a retired asset key {forbid!r}"),
+                            ("unreadable", "could not be read")):
+            hits = r[kind]
+            if hits:
+                bad = True
+                print(f"FAIL: {len(hits)} item(s) {label}, e.g. {hits[:3]}",
+                      file=sys.stderr)
+
+        # The count belongs to the same statement, not a separate one: `--expect`
+        # exists so a run that silently processed a SUBSET -- a reused manifest
+        # is the way that happens -- fails here rather than publishing.
+        if args.expect is not None and r["checked"] != args.expect:
+            bad = True
+            print(f"FAIL: expected {args.expect} item(s), audited {r['checked']}",
+                  file=sys.stderr)
+
+        if bad:
+            return 1
+        print("OK: every item agrees with its collection", file=sys.stderr)
 
     elif args.cmd == "verify-serving":
         wanted = [l.rstrip("\n") for l in open(args.ids_file) if l.strip()]
         if not wanted:
             print("nothing to verify (0 ids)", file=sys.stderr)
             return 0
-        got = ids_serving(wanted, args.api)
+        got = ids_serving(wanted, args.collection_id, args.api)
         missing = sorted(set(wanted) - got)
-        print(f"requested {len(wanted)}, serving {len(got)}", file=sys.stderr)
+        print(f"requested {len(wanted)}, serving {len(got)} "
+              f"in {args.collection_id}", file=sys.stderr)
         if missing:
-            print(f"FAIL: {len(missing)} id(s) not served, e.g. {missing[:3]}",
-                  file=sys.stderr)
+            print(f"FAIL: {len(missing)} id(s) not served by "
+                  f"{args.collection_id}, e.g. {missing[:3]}", file=sys.stderr)
             return 1
-        print("OK: every requested id is served by the API", file=sys.stderr)
+        print(f"OK: every requested id is served by {args.collection_id}",
+              file=sys.stderr)
 
     return 0
 

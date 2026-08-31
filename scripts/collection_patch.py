@@ -12,13 +12,16 @@ load/save of a 98k-link collection rewrites every link object; a targeted edit
 touches only the fields named here, so a diff of the published file shows the
 metadata change and nothing else.
 
-Fields applied (see issue #30):
+Fields applied (#30, and the id since #34):
+  id          THE collection id, so a rebuild and an in-place patch cannot
+              drift. Renamed to stac-elevation-bc in #34 -- see COLLECTION_ID.
+  title       derived from the id, and written to the root link as well: pystac
+              copies it there, so the id is spelled three times in the file.
   providers   CC-BY-4.0 obliges attribution and the collection carried none.
               Roles split producer/licensor/host from processor, which matters
               if derived products (CHM) land in this collection later.
   keywords    so the collection is discoverable by something other than its id.
-  description names `image` as the bare-earth DEM, now that items also carry a
-              `dsm` asset and `image` no longer disambiguates on its own.
+  description names `dem` as the bare-earth asset beside `dsm`.
 
 The STAC Version Extension is handled SEPARATELY, by --version / --clear-version,
 and deliberately sits outside collection_patch()'s idempotence contract. If the
@@ -62,13 +65,28 @@ KEYWORDS = ["lidar", "elevation", "dem", "dsm", "british columbia", "lidarbc"]
 
 VERSION_EXT = "https://stac-extensions.github.io/version/v1.2.0/schema.json"
 
+# THE collection id. Every other definition in this repo reads this one:
+# collection_create.py builds the file with it, catalogue_register.sh defaults
+# to it, and item_create.py takes it from whichever collection.json it loaded.
+#
+# It was `stac-dem-bc` until #34. The collection stopped holding only DEMs at
+# v1.0.0, when every item gained a `dsm` asset, and the name described one of
+# two products -- less still as further products land here (#35).
+#
+# NOT the bucket. `s3://stac-dem-bc` keeps its name: it is IaC-managed in rtj,
+# renaming it is a separate and larger decision, and it appears in every asset
+# href and item link. The two used to be one fact spelled twice; they are now
+# genuinely two, which is why catalogue_register.sh reconciles them at runtime
+# rather than deriving one from the other.
+COLLECTION_ID = "stac-elevation-bc"
+COLLECTION_TITLE = f"Elevation models from British Columbia - {COLLECTION_ID}"
+
 DESCRIPTION = (
-    "A collection of Digital Elevation Models from British Columbia - as served "
-    "on lidarbc. Each item carries the bare-earth DEM as the `image` asset and, "
-    "where the same delivery published one, the digital surface model as the "
-    "`dsm` asset. The two are the same flight over the same footprint at the "
-    "same time. `image` is named for backward compatibility with existing "
-    "consumers; it is the bare-earth DEM."
+    "Bare-earth digital elevation models and digital surface models from "
+    "British Columbia - as served on lidarbc. Each item carries the bare-earth "
+    "DEM as the `dem` asset and, where the same delivery published one, the "
+    "digital surface model as the `dsm` asset. The two are the same flight over "
+    "the same footprint at the same time."
 )
 
 
@@ -142,17 +160,71 @@ def version_clear(collection: dict) -> bool:
     return changed
 
 
-def collection_patch(collection: dict) -> tuple[dict, list[str]]:
+def links_retitle(collection: dict, title: str) -> int:
+    """Set the root link's title. Returns how many links changed.
+
+    pystac copies the collection title onto the root link, so the collection id
+    appears in the published file THREE times -- `id`, `title`, and here. A
+    rename that moves two of the three leaves the root link asserting the old
+    name, and nothing else in the pipeline reads it, so nothing would report it.
+    """
+    n = 0
+    for link in collection.get("links", []):
+        if link.get("rel") != "root":
+            continue
+        if link.get("title") != title:
+            link["title"] = title
+            n += 1
+    return n
+
+
+def collection_patch(collection: dict, allow_id_change: bool = False) -> tuple[dict, list[str]]:
     """Return the patched collection and the names of fields that changed.
 
     Pure and idempotent: re-running against an already-patched collection
     returns an empty change list, which is what `--check` reports on.
+
+    The collection id belongs INSIDE this contract, unlike the version. A
+    version's correct value changes at every release, so folding it in would
+    make --check report "a patch is needed" forever. A collection id is a
+    constant fact about the collection, exactly like providers and keywords --
+    so the monthly run carries it, and --check can see a collection.json whose
+    id regressed after a rebuild from a stale checkout.
     """
+    # Changing the id is a MIGRATION, not a metadata patch, and it must not
+    # happen as a side effect of the monthly run.
+    #
+    # The id lives inside this contract because it is a constant fact about the
+    # collection (see COLLECTION_ID). But the monthly workflow calls this on
+    # every month with new URLs, so without this guard the first cron after a
+    # rename merges would publish a renamed collection.json over 102,460
+    # unmigrated item bodies -- performing half a migration by itself. Nothing
+    # would report it: the monthly audit reads the collection id from this very
+    # file and inspects only the items staged this month, so it passes green
+    # while S3 is split in two.
+    #
+    # Failing loudly is the point. It means "someone merged a rename and has not
+    # dispatched the migration", which is exactly the state that needs a human.
+    current = collection.get("id")
+    if current is not None and current != COLLECTION_ID and not allow_id_change:
+        raise RuntimeError(
+            f"collection id would change: {current!r} -> {COLLECTION_ID!r}. "
+            f"That is a migration, not a metadata patch, and the item bodies "
+            f"must move with it. Run the migration (workflow_dispatch, "
+            f"rename=true), which passes --allow-id-change. Patching the id "
+            f"alone would publish a collection nothing in it belongs to."
+        )
+
     changed = []
     n_links = links_encode(collection)
     if n_links:
         changed.append(f"{n_links} item link hrefs percent-encoded")
-    for field, value in (("providers", PROVIDERS),
+    n_titles = links_retitle(collection, COLLECTION_TITLE)
+    if n_titles:
+        changed.append("root link title")
+    for field, value in (("id", COLLECTION_ID),
+                         ("title", COLLECTION_TITLE),
+                         ("providers", PROVIDERS),
                          ("keywords", KEYWORDS),
                          ("description", DESCRIPTION)):
         if collection.get(field) != value:
@@ -165,6 +237,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Patch STAC collection metadata")
     parser.add_argument("--path", default=None,
                         help="collection.json to patch (default: $STAC_OUTPUT_DIR/collection.json)")
+    parser.add_argument("--allow-id-change", action="store_true",
+                        help="permit the collection id to move. Migration path "
+                             "ONLY -- the item bodies must move with it.")
     parser.add_argument("--check", action="store_true",
                         help="Report whether a patch is needed; exit 1 if it is. Writes nothing.")
     parser.add_argument("--version", default=None,
@@ -190,9 +265,24 @@ def main() -> int:
     with open(path) as fh:
         collection = json.load(fh)
 
-    item_links_before = sum(1 for l in collection.get("links", []) if l.get("rel") == "item")
+    # The hrefs, not merely how many. A count cannot see a link whose href
+    # MUTATED, and #34 introduces exactly that risk: the collection id is being
+    # renamed while the bucket in every item link keeps its old name, so a
+    # careless substitution would rewrite 102,460 hrefs to a bucket that does
+    # not exist. Item links are also the only complete list of what this
+    # collection publishes -- the S3 copy is the only one there is.
+    item_links_before = [
+        l.get("href", "") for l in collection.get("links", []) if l.get("rel") == "item"
+    ]
 
-    collection, changed = collection_patch(collection)
+    try:
+        collection, changed = collection_patch(
+            collection, allow_id_change=args.allow_id_change)
+    except RuntimeError as e:
+        # The message IS the diagnostic. A traceback buries it in CI log noise,
+        # and this one is read by whoever has to decide what to do next.
+        logger.error("%s", e)
+        return 1
 
     # Version handling sits outside collection_patch()'s contract on purpose --
     # see the module docstring. It is reported alongside, not folded in.
@@ -220,12 +310,23 @@ def main() -> int:
     try:
         with open(tmp, "w") as fh:
             json.dump(collection, fh)
-        item_links_after = sum(
-            1 for l in json.load(open(tmp)).get("links", []) if l.get("rel") == "item"
-        )
-        if item_links_after != item_links_before:
+        item_links_after = [
+            l.get("href", "")
+            for l in json.load(open(tmp)).get("links", []) if l.get("rel") == "item"
+        ]
+        # links_encode is the ONE transform allowed to touch an item href.
+        # Predicting the whole list rather than allowlisting a difference means
+        # this cannot be widened later by adding an exception.
+        expected = [encode_url_for_gdal(h) for h in item_links_before]
+        if item_links_after != expected:
+            if len(item_links_after) != len(expected):
+                raise RuntimeError(
+                    f"item link count changed during patch: "
+                    f"{len(expected)} -> {len(item_links_after)}"
+                )
+            bad = [(e, a) for e, a in zip(expected, item_links_after) if e != a]
             raise RuntimeError(
-                f"item link count changed during patch: {item_links_before} -> {item_links_after}"
+                f"{len(bad)} item link href(s) changed during patch, e.g. {bad[0]}"
             )
         os.replace(tmp, path)
     except Exception:
@@ -233,7 +334,7 @@ def main() -> int:
             os.remove(tmp)
         raise
 
-    logger.info("Patched %s (%d item links preserved)", path, item_links_before)
+    logger.info("Patched %s (%d item links preserved)", path, len(item_links_before))
     return 0
 
 

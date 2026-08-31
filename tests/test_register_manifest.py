@@ -218,8 +218,15 @@ def test_ndjson_write_empty_input_yields_zero(tmp_path):
 
 
 # =============================================================================
-# search_body — the API's default limit is 10
+# search_body — the API's default limit is 10, and an unscoped search answers
+# about every collection on the endpoint
 # =============================================================================
+
+# Deliberately not either real collection id. search_body must carry through
+# whatever it is handed; a fixture naming a real collection would let a
+# hardcoded id pass this file.
+COLL = "any-collection"
+
 
 def test_search_body_always_carries_a_limit():
     """The bug this pins cost a full verification pass.
@@ -231,23 +238,23 @@ def test_search_body_always_carries_a_limit():
     missing" about a catalogue that is entirely fine, and exits non-zero after
     the upsert has already succeeded.
     """
-    body = search_body([f"id-{i}" for i in range(600)])
+    body = search_body([f"id-{i}" for i in range(600)], COLL)
     assert body["limit"] == 600
 
 
 def test_search_body_limit_matches_the_id_count_at_every_size():
     for n in (1, 9, 10, 11, 500):
-        body = search_body([f"id-{i}" for i in range(n)])
+        body = search_body([f"id-{i}" for i in range(n)], COLL)
         assert body["limit"] == n, f"limit must equal the id count at n={n}"
 
 
 def test_search_body_limit_is_never_zero():
     """limit=0 would return nothing and read as 'everything is missing'."""
-    assert search_body([])["limit"] >= 1
+    assert search_body([], COLL)["limit"] >= 1
 
 
 def test_search_body_requests_only_ids():
-    body = search_body(["a"])
+    body = search_body(["a"], COLL)
     assert body["fields"] == {"include": ["id"]}
     assert body["ids"] == ["a"]
 
@@ -259,10 +266,43 @@ def test_search_body_would_have_caught_the_shipped_bug():
     on record passed. The assertion has to be on a list LONGER than the default
     limit or it proves nothing.
     """
-    small = search_body(["a", "b", "c"])
+    small = search_body(["a", "b", "c"], COLL)
     assert small["limit"] == 3
-    big = search_body([f"id-{i}" for i in range(11)])
+    big = search_body([f"id-{i}" for i in range(11)], COLL)
     assert big["limit"] == 11 and big["limit"] > 10
+
+
+def test_search_body_scopes_to_the_collection():
+    """Without `collections`, /search asks "is this id served ANYWHERE".
+
+    That is a different question from the one every caller means, and it was
+    invisible for as long as one collection existed on the endpoint. #34 puts
+    two there by design, sharing all 102,460 ids — so an unscoped verification
+    of stac-elevation-bc would pass green on stac-dem-bc's rows even if zero
+    items registered into the new collection, immediately after the upsert it
+    was meant to prove.
+    """
+    body = search_body(["a", "b"], COLL)
+    assert body["collections"] == [COLL]
+
+
+def test_search_body_carries_through_the_id_it_is_given():
+    """A body that ignored its argument would pass the assertion above if the
+    fixture happened to match a hardcoded default. Two distinct ids, checked."""
+    assert search_body(["a"], "one")["collections"] == ["one"]
+    assert search_body(["a"], "two")["collections"] == ["two"]
+
+
+@pytest.mark.parametrize("bad", ["", None])
+def test_search_body_refuses_an_empty_collection_id(bad):
+    """Fail loudly rather than fall back to an unscoped search.
+
+    An empty string is not the same as unset, and a `collections: [""]` body
+    would match nothing — which reads as "every item is missing" rather than
+    as a caller that forgot to pass the id.
+    """
+    with pytest.raises(ValueError, match="collection_id is required"):
+        search_body(["a"], bad)
 
 
 def test_href_to_id_is_the_exact_inverse_of_the_encoder():

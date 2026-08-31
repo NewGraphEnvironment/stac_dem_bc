@@ -33,6 +33,18 @@ on:
           not re-uploaded, and completed ids are skipped via the manifest.
         type: boolean
         default: false
+      rename:
+        description: >-
+          #34 ONE-TIME: migrate every published item to the renamed collection
+          and asset key. The target names are collection_patch.COLLECTION_ID and
+          stac_utils.ASSET_DEM -- named here rather than spelled out, so this
+          description cannot go stale. Rewrites all ~102k item
+          bodies in place; ids and hrefs are unchanged. Safe to re-run --
+          already-migrated items are detected and not re-uploaded. Do NOT set
+          this together with backfill: they write to the same directory, and
+          the second would fetch the published body over the first's output.
+        type: boolean
+        default: false
 
 permissions:
   id-token: write   # OIDC token for AWS
@@ -80,6 +92,22 @@ jobs:
       - name: Run pairing contract tests
         run: .venv/bin/python -m pytest tests/ -q
 
+      # Before anything writes. The check used to live inside the migrate step,
+      # which is ordered AFTER the backfill step -- so dispatching both ran the
+      # entire ~102k-item backfill and only then aborted. They share
+      # $STAC_OUTPUT_DIR, and whichever ran second would fetch the published
+      # body over the first's output.
+      #
+      # A step that FAILS, not an `if:` that skips: `if: inputs.rename &&
+      # !inputs.backfill` would silently do nothing and report success.
+      - name: Refuse conflicting one-time dispatches
+        if: inputs.backfill && inputs.rename
+        run: |
+          echo "::error title=Conflicting inputs::backfill and rename both set." \
+               "They rewrite the same items into the same directory, so the" \
+               "second would overwrite the first. Dispatch them separately."
+          exit 1
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::414155577829:role/role_gha_stac_dem_bc
@@ -122,7 +150,7 @@ jobs:
         run: .venv/bin/python scripts/dsm_pair.py
 
       - name: Fetch current collection from S3
-        if: steps.detect.outputs.new_urls == 'true' || inputs.backfill
+        if: steps.detect.outputs.new_urls == 'true' || inputs.backfill || inputs.rename
         run: |
           mkdir -p "$STAC_OUTPUT_DIR"
           curl -fsSL https://stac-dem-bc.s3.amazonaws.com/collection.json \
@@ -132,12 +160,41 @@ jobs:
       # never runs here and its metadata would never reach the live file.
       # Idempotent: a no-op once the published collection carries the fields.
       - name: Patch collection metadata
-        if: steps.detect.outputs.new_urls == 'true' || inputs.backfill
+        id: collpatch
+        if: steps.detect.outputs.new_urls == 'true' || inputs.backfill || inputs.rename
         # --clear-version: this run is about to append items, which makes any
         # version the collection carries FALSE rather than merely stale. A wrong
         # version says "you already have this one"; absent says "go and check".
         # The next release re-stamps with --version.
-        run: .venv/bin/python scripts/collection_patch.py --path "$STAC_OUTPUT_DIR/collection.json" --clear-version
+        # --allow-id-change ONLY on the rename dispatch. Without it a monthly
+        # run that met a stale published id would publish a renamed
+        # collection.json over unmigrated item bodies -- half a migration,
+        # performed by the cron, reported by nothing. It fails loudly instead,
+        # which is the correct answer to "someone merged a rename and has not
+        # dispatched it".
+        run: |
+          ARGS=(--path "$STAC_OUTPUT_DIR/collection.json" --clear-version)
+          if [ "${{ inputs.rename }}" = "true" ]; then
+            ARGS+=(--allow-id-change)
+          fi
+          BEFORE=$(cksum < "$STAC_OUTPUT_DIR/collection.json")
+          .venv/bin/python scripts/collection_patch.py "${ARGS[@]}"
+          AFTER=$(cksum < "$STAC_OUTPUT_DIR/collection.json")
+          # Whether collection.json ITSELF needs publishing, which is a separate
+          # question from whether any item does. The sync gate counts item files
+          # and excludes collection.json, and item_migrate writes no file for an
+          # already-correct item -- so a re-run against a catalogue whose items
+          # are migrated but whose collection.json never uploaded staged zero
+          # files, skipped the sync, and could never republish the collection.
+          # Registration then kept failing with advice to run the migration,
+          # which had just run green reporting Complete. A loop with no exit,
+          # and it generalises: ANY collection-metadata-only change could never
+          # reach S3.
+          if [ "$BEFORE" != "$AFTER" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Create STAC items (incremental)
         if: steps.detect.outputs.new_urls == 'true'
@@ -172,6 +229,8 @@ jobs:
               mkdir -p "$STAC_OUTPUT_DIR"
               curl -fsSL https://stac-dem-bc.s3.amazonaws.com/collection.json \
                 -o "$STAC_OUTPUT_DIR/collection.json"
+              # No --allow-id-change: this is the monthly path. See the patch
+              # step above.
               .venv/bin/python scripts/collection_patch.py --path "$STAC_OUTPUT_DIR/collection.json" --clear-version
             fi
             .venv/bin/python scripts/item_create.py --urls-file data/urls_pairing_changed.txt
@@ -194,12 +253,31 @@ jobs:
             --manifest data/backfill_done.txt \
             --workers 16 --verify 40
 
+      # #34 ONE-TIME. Runs AFTER the collection patch, which is what renames
+      # collection.json, and after item_create -- so any new items this month
+      # were already built with the new id (item_create reads collection.id off
+      # the fetched file) and the migration skips them via skip_already_staged.
+      # Ordering is load-bearing, not incidental.
+      #
+      # Running alongside backfill is refused by the first step in the job, not
+      # here: a check placed here would fire only after the backfill had already
+      # spent ~102k fetches writing into the same directory.
+      - name: Migrate published items to the renamed collection (dispatch only)
+        if: inputs.rename
+        run: |
+          .venv/bin/python scripts/item_migrate.py \
+            --collection "$STAC_OUTPUT_DIR/collection.json" \
+            --out-dir "$STAC_OUTPUT_DIR" \
+            --manifest data/migrate_done.txt \
+            --errors-log data/migrate_errors.txt \
+            --workers 16 --verify 40
+
       # Separate from the shortfall count above: this one gates validate/sync and
       # must include rebuilt items, since a pairing-only month produces item
       # JSONs and no new URLs at all.
       - name: Count items to publish
         id: publish
-        if: steps.detect.outputs.changes == 'true' || inputs.backfill
+        if: steps.detect.outputs.changes == 'true' || inputs.backfill || inputs.rename
         run: |
           TOTAL=$(find "$STAC_OUTPUT_DIR" -maxdepth 1 -type f -name "*.json" ! -name "collection.json" | wc -l | tr -d ' ')
           echo "items staged for publish: $TOTAL"
@@ -219,19 +297,79 @@ jobs:
       - name: Validate new items (gate)
         if: steps.publish.outputs.count != '0' && steps.publish.outputs.count != ''
         run: |
-          if [ "${{ inputs.backfill }}" = "true" ]; then
+          if [ "${{ inputs.backfill }}" = "true" ] || [ "${{ inputs.rename }}" = "true" ]; then
             .venv/bin/python scripts/item_validate.py \
               --items-dir "$STAC_OUTPUT_DIR" \
-              --output "$RUNNER_TEMP/validation_backfill.csv"
+              --output "$RUNNER_TEMP/validation_rewrite.csv"
           else
             .venv/bin/python scripts/item_validate.py --items-dir "$STAC_OUTPUT_DIR" --incremental
           fi
+
+      # Every item staged for publish must agree with the collection it is about
+      # to be published under. Nothing downstream can check this: item ids do not
+      # change during a rename, so set equality reports IN SYNC over a fully
+      # mixed catalogue; item_register.sh routes by each body's own `collection`
+      # field, so a stale item registers successfully; and both asset keys are
+      # legal STAC.
+      #
+      # The standing guard, and the reason #34 cannot silently recur. item_create
+      # reads the collection id from DATA (collection.id off the fetched file,
+      # so it self-heals) but the asset key from CODE (so it does not). A month
+      # that built items under the wrong id or the wrong asset key would publish
+      # them into a mixed catalogue that nothing downstream can see.
+      #
+      # Placed HERE, after the pairing rebuild and gated on the publish count
+      # rather than on new_urls, because both of those were holes: items rebuilt
+      # for a pairing change were never audited, and a pairing-only month
+      # (changes=true, new_urls=false) skipped the audit entirely while still
+      # publishing. It now sees exactly what the sync is about to upload.
+      - name: Audit newly created items (monthly)
+        if: >-
+          !inputs.backfill && !inputs.rename
+          && steps.publish.outputs.count != '0' && steps.publish.outputs.count != ''
+        run: |
+          COLLECTION=$(.venv/bin/python -c \
+            'import json,os; print(json.load(open(os.environ["STAC_OUTPUT_DIR"] + "/collection.json"))["id"])')
+          # Read from stac_utils, never spelled here. A literal in this file
+          # would be a second definition of the asset key, outside every guard
+          # this change added to prevent exactly that.
+          DEM=$(.venv/bin/python -c 'import sys; sys.path.insert(0,"scripts"); import stac_utils; print(stac_utils.ASSET_DEM)')
+          OLD=$(.venv/bin/python -c 'import sys; sys.path.insert(0,"scripts"); import item_migrate; print(",".join(item_migrate.ASSET_RENAMES))')
+          .venv/bin/python scripts/register_manifest.py audit-items \
+            --dir "$STAC_OUTPUT_DIR" --collection-id "$COLLECTION" \
+            --require-asset "$DEM" --forbid-asset "$OLD" \
+            --expect "${{ steps.publish.outputs.count }}"
+
+      # This step asserts HOMOGENEITY only. COMPLETENESS is item_migrate's own
+      # reconciliation (manifest + staged == published), which exits non-zero and
+      # so fails the job before this runs. One statement, one owner: expecting
+      # the published total HERE would be wrong on any resumed run, where the
+      # staged set is legitimately only the remainder.
+      #
+      # An empty directory is a failure inside audit-items, not a vacuous pass.
+      - name: Audit staged items against the collection (rewrite runs)
+        if: (inputs.backfill || inputs.rename) && steps.publish.outputs.count != '0'
+        run: |
+          COLLECTION=$(.venv/bin/python -c \
+            'import json,os; print(json.load(open(os.environ["STAC_OUTPUT_DIR"] + "/collection.json"))["id"])')
+          echo "auditing staged items against $COLLECTION"
+          ARGS=(--dir "$STAC_OUTPUT_DIR" --collection-id "$COLLECTION")
+          if [ "${{ inputs.rename }}" = "true" ]; then
+            # From the modules, never spelled here -- see the monthly audit.
+            DEM=$(.venv/bin/python -c 'import sys; sys.path.insert(0,"scripts"); import stac_utils; print(stac_utils.ASSET_DEM)')
+            OLD=$(.venv/bin/python -c 'import sys; sys.path.insert(0,"scripts"); import item_migrate; print(",".join(item_migrate.ASSET_RENAMES))')
+            ARGS+=(--require-asset "$DEM" --forbid-asset "$OLD")
+          fi
+          .venv/bin/python scripts/register_manifest.py audit-items "${ARGS[@]}"
 
       # Runs when there are new items OR only rebuilt ones: a pairing-only month
       # produces item JSONs and no new URLs, and skipping the sync would leave
       # them on the runner.
       - name: Sync catalog to S3
-        if: steps.publish.outputs.count != '0' && steps.publish.outputs.count != ''
+        id: sync
+        if: >-
+          (steps.publish.outputs.count != '0' && steps.publish.outputs.count != '')
+          || steps.collpatch.outputs.changed == 'true'
         run: bash scripts/s3_sync-ci.sh
 
       # always() so a FAILED run still persists what it completed. The first
@@ -239,20 +377,11 @@ jobs:
       # transient errors; because this step was skipped, the manifest recording
       # 98,038 successes was never committed and a re-run would have restarted
       # from zero. Progress state must survive the failure path.
-      - name: Commit refreshed caches
-        if: always() && (steps.detect.outputs.changes == 'true' || inputs.backfill)
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A data/
-          if git diff --cached --quiet; then
-            echo "no cache changes to commit"
-            exit 0
-          fi
-          git commit -m "Monthly incremental update: refresh caches ($(date -u +%Y-%m))"
-          git pull --rebase origin main
-          git push origin HEAD:main
-
+      # BEFORE the cache commit, deliberately. That step reverts a rewrite
+      # manifest whose items were never published, so uploading afterwards
+      # would capture the pre-run copy -- losing the record of exactly which
+      # items a failed run did complete, which is the thing the artifact is
+      # for. Both steps are always(), so the order is the only control.
       - name: Upload run logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -264,7 +393,57 @@ jobs:
             data/urls_access_checks.csv
             data/backfill_done.txt
             data/backfill_errors.txt
+            data/migrate_done.txt
+            data/migrate_errors.txt
           if-no-files-found: ignore
+
+      - name: Commit refreshed caches
+        if: always() && (steps.detect.outputs.changes == 'true' || inputs.backfill || inputs.rename)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A data/
+
+          # A rewrite manifest is a claim that its ids are PUBLISHED, because
+          # `todo = published - manifest` on the next run. If the sync did not
+          # run, they are not published -- and committing it would make every
+          # future run skip work that never reached S3, permanently and
+          # silently. That is the exact failure this whole change exists to
+          # prevent, arriving through its own progress file.
+          #
+          # This does NOT undo the always() above, which exists because a run
+          # completed 98,040 items and then exited non-zero on 2 transient
+          # failures, and the lost manifest would have restarted it from zero.
+          # A tolerated error rate still exits 0 and still reaches the sync, so
+          # that progress is still preserved. Only progress that was never
+          # published is dropped, and dropping it costs a re-fetch rather than a
+          # permanently unmigrated catalogue.
+          if [ "${{ steps.sync.outcome }}" != "success" ]; then
+            echo "sync did not run (outcome: ${{ steps.sync.outcome }}) -" \
+                 "discarding rewrite manifests so the work is redone, not skipped"
+            for f in data/migrate_done.txt data/backfill_done.txt; do
+              # Unstage always; restore only a file git actually tracks.
+              # Branching explicitly rather than suppressing stderr on a
+              # mutating command: `git checkout --` destroys working-tree
+              # content, `-q` already silences success, so a redirect here could
+              # only ever hide a real failure -- and this discard is the thing
+              # standing between a failed run and a permanently skipped item.
+              git reset -q -- "$f" || true          # not in HEAD on the first run
+              if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+                git checkout -q -- "$f"
+              else
+                echo "  $f is untracked; leaving it uncommitted"
+              fi
+            done
+          fi
+
+          if git diff --cached --quiet; then
+            echo "no cache changes to commit"
+            exit 0
+          fi
+          git commit -m "Monthly incremental update: refresh caches ($(date -u +%Y-%m))"
+          git pull --rebase origin main
+          git push origin HEAD:main
 
       - name: Session info
         if: always()

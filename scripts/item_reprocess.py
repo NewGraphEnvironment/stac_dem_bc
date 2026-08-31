@@ -21,6 +21,8 @@ from tqdm import tqdm
 from datetime import datetime, timezone
 
 from stac_utils import (
+    ASSET_DEM,
+    ASSET_DSM,
     item_create_from_cache,
     date_extract_from_path,
     datetime_parse_item,
@@ -100,14 +102,14 @@ def process_item(path_item: str, collection, results_lookup,
                 gdal_path,
                 id=item_id,
                 asset_media_type=media_type,
-                asset_name='image',
+                asset_name=ASSET_DEM,
                 asset_href=href_item,
                 with_proj=True,
                 collection=collection.id,
                 collection_url=PATH_S3_JSON,
                 asset_roles=["data"]
             )
-            item.assets['image'].href = href_item
+            item.assets[ASSET_DEM].href = href_item
 
         item.datetime = item_time
 
@@ -117,7 +119,7 @@ def process_item(path_item: str, collection, results_lookup,
         dsm_href = (dsm_lookup or {}).get(href_item)
         if dsm_href:
             item.add_asset(
-                "dsm",
+                ASSET_DSM,
                 pystac.Asset(
                     href=dsm_href,
                     media_type=media_type,

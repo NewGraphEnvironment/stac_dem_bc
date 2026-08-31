@@ -24,8 +24,15 @@
 #   scripts/item_register.sh --dryrun < item_paths.txt
 #
 # Env:
-#   STAC_HOST  ssh target (default: root@geopro)
-#   STAC_DB    pgstac database (default: stac)
+#   STAC_HOST        ssh target (default: root@geopro)
+#   STAC_DB          pgstac database (default: stac)
+#   STAC_COLLECTION  if set, refuse any item whose body names a different
+#                    collection. Items are routed by their OWN `collection`
+#                    field -- this script passes no collection id to pypgstac at
+#                    all -- so a stale item upserts into the PREVIOUS collection
+#                    successfully, with no error anywhere. That is the last
+#                    point at which a half-done rename (#34) can still be
+#                    caught, and it is invisible to every check downstream.
 #
 # See scripts/collection_register.sh for notes on the host, why it is root-only,
 # and the reserved-IP fallback when the tailnet is the suspect.
@@ -72,7 +79,11 @@ if [ "$EXPECTED" -eq 0 ]; then
   exit 0
 fi
 
-WRITTEN=$("$PY" scripts/register_manifest.py ndjson --out "$NDJSON" < "$PATHS")
+NDJSON_ARGS=(ndjson --out "$NDJSON")
+if [ -n "${STAC_COLLECTION:-}" ]; then
+  NDJSON_ARGS+=(--expect-collection "$STAC_COLLECTION")
+fi
+WRITTEN=$("$PY" scripts/register_manifest.py "${NDJSON_ARGS[@]}" < "$PATHS")
 
 if [ "$WRITTEN" -ne "$EXPECTED" ]; then
   echo "ERROR: assembled $WRITTEN line(s) from $EXPECTED path(s) — refusing to load" >&2
