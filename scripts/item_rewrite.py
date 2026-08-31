@@ -95,7 +95,11 @@ def manifest_load(path: str, migration: str) -> set:
     is no safe default: guessing "it is probably mine" is exactly the assumption
     that produces the 4.3% run.
     """
-    if not os.path.exists(path):
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        # A zero-byte file is unambiguous -- it lists no ids, so nothing can be
+        # skipped on account of it, and refusing would lock the tool out of a
+        # path someone merely touched. Only a NON-empty file with no header is
+        # ambiguous, and that is the dangerous case.
         return set()
 
     with open(path) as fh:
@@ -209,8 +213,14 @@ def run_rewrite(todo: list, edit: Edit, out_dir: str, manifest_fh, errors_fh,
                     errors_fh.flush()
                 else:
                     counts[outcome] += 1
-                    # The manifest records COMPLETION, so an interrupted run
-                    # resumes without re-fetching what already succeeded.
+                    # The manifest records a completed local WRITE, so an
+                    # interrupted run resumes without re-fetching. It is
+                    # therefore a claim that these ids are PUBLISHED only once
+                    # the caller has published them -- `todo = published -
+                    # manifest` on the next run, so persisting it after a run
+                    # that never synced would make the work be skipped forever
+                    # rather than redone. The CI job drops it when the sync did
+                    # not run; see update.yml's cache commit.
                     manifest_fh.write(f"{item_id}\n")
                     manifest_fh.flush()
     return counts

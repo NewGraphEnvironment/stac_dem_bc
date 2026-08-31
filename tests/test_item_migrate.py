@@ -314,3 +314,71 @@ def test_ndjson_write_passes_a_homogeneous_batch(tmp_path):
     out = str(tmp_path / "out.ndjson")
     assert ndjson_write(paths, out, expect_collection=NEW_ID) == 3
     assert sum(1 for _ in open(out)) == 3
+
+
+# =============================================================================
+# the manifest — resumability that must not become stranding
+# =============================================================================
+
+from item_rewrite import MANIFEST_HEADER, manifest_load, manifest_open  # noqa: E402
+
+
+def test_manifest_round_trips_its_own_ids(tmp_path):
+    p = str(tmp_path / "m.txt")
+    with manifest_open(p, "mine") as fh:
+        fh.write("a\n")
+        fh.write("b\n")
+    assert manifest_load(p, "mine") == {"a", "b"}
+
+
+def test_manifest_refuses_another_migrations_ledger(tmp_path):
+    """The 4,420-of-102,460 failure, as a test."""
+    p = str(tmp_path / "m.txt")
+    with manifest_open(p, "31-dsm-backfill") as fh:
+        fh.write("a\n")
+    with pytest.raises(RuntimeError, match="belongs to migration"):
+        manifest_load(p, "34-collection-rename")
+
+
+def test_manifest_refuses_a_headerless_ledger(tmp_path):
+    """Non-empty and unlabelled is the ambiguous case, so it fails loudly.
+
+    Guessing "it is probably mine" is exactly the assumption that produces a
+    run which skips 96% of the catalogue and exits 0.
+    """
+    p = tmp_path / "m.txt"
+    p.write_text("a\nb\n")
+    with pytest.raises(RuntimeError, match="no '# migration: ' header"):
+        manifest_load(str(p), "mine")
+
+
+def test_an_absent_or_empty_manifest_is_simply_empty(tmp_path):
+    """A zero-byte file lists no ids, so nothing can be skipped because of it.
+
+    Refusing it would lock the tool out of a path someone merely touched, while
+    protecting against nothing — the dangerous case is a NON-empty file with no
+    header, covered above.
+    """
+    assert manifest_load(str(tmp_path / "absent.txt"), "mine") == set()
+    empty = tmp_path / "empty.txt"
+    empty.write_text("")
+    assert manifest_load(str(empty), "mine") == set()
+
+
+def test_manifest_open_does_not_restamp_an_existing_ledger(tmp_path):
+    """A second header line would be read back as an id."""
+    p = str(tmp_path / "m.txt")
+    manifest_open(p, "mine").close()
+    manifest_open(p, "mine").close()
+    body = open(p).read()
+    assert body.count(MANIFEST_HEADER) == 1
+    assert manifest_load(p, "mine") == set()
+
+
+def test_manifest_load_survives_a_ledger_with_no_trailing_newline(tmp_path):
+    """A final line without a newline is still an id, and dropping it would
+    make the run redo one item -- harmless -- but dropping it from a
+    COMPLETENESS comparison would fail a healthy run."""
+    p = tmp_path / "m.txt"
+    p.write_text(f"{MANIFEST_HEADER}mine\na\nb")
+    assert manifest_load(str(p), "mine") == {"a", "b"}

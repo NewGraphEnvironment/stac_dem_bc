@@ -127,7 +127,9 @@ def main() -> int:
     parser.add_argument("--out-dir", default=None, help="Default: $STAC_OUTPUT_DIR")
     parser.add_argument("--manifest", default=MANIFEST)
     parser.add_argument("--errors-log", default=ERRORS_LOG)
-    parser.add_argument("--limit", type=int, default=None, help="Process at most N items")
+    parser.add_argument("--limit", type=int, default=None,
+                        help="Process at most N items (rehearsal only; suppresses "
+                             "the completeness check)")
     parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--dry-run", action="store_true", help="Report only; write nothing")
     parser.add_argument("--verify", type=int, default=0,
@@ -153,12 +155,18 @@ def main() -> int:
     # directory -- CI rebuilds items whose DSM pairing changed before this step.
     # Migrating one would fetch the published body and overwrite that rebuild
     # with an edited copy of the stale version, silently losing it.
+    # `if args.limit:` would read 0 as "no limit" and run the whole catalogue for
+    # someone who asked for nothing. Test for None, and reject a negative rather
+    # than silently slicing from the end.
+    if args.limit is not None and args.limit < 0:
+        parser.error("--limit must be >= 0")
+
     todo, staged = skip_already_staged(todo, out_dir)
     if staged:
         logger.info("Skipping %d id(s) already staged in %s by an earlier step",
                     len(staged), out_dir)
 
-    if args.limit:
+    if args.limit is not None:
         todo = todo[: args.limit]
     logger.info("To process: %d items", len(todo))
 
@@ -228,28 +236,39 @@ def main() -> int:
             return 1
         logger.info("Verify passed on %d items", checked)
 
-    # THE statement that covers all 102,460, and the only one that can. Both
-    # sides are derived from the published collection's item links, so they
-    # cannot drift apart the way a count taken from one artifact and a set
-    # produced from another can. A sample -- any sample -- says nothing about
-    # the population, and a mixed population is invisible to every other check
-    # this repo has.
-    if not args.limit and not staged:
-        migrated = manifest_load(args.manifest, MIGRATION)
+    # THE statement that covers all 102,460, and the only one that can. A sample
+    # -- any sample -- says nothing about the population, and a mixed population
+    # is invisible to every other check this repo has.
+    #
+    # Both sides come from the published collection's item links, so they cannot
+    # drift the way a count taken from one artifact and a set produced from
+    # another can.
+    #
+    # Staged ids count as migrated, and must: they were skipped precisely
+    # because an earlier step built a FRESHER body for them, and item_create
+    # builds with the current collection id and asset key. Suppressing the whole
+    # check whenever anything was staged would have disabled it on exactly the
+    # runs that matter -- CI rebuilds items whose DSM pairing changed, so a real
+    # cutover in a month with pairing changes would have asserted nothing.
+    if args.limit is None:
+        migrated = manifest_load(args.manifest, MIGRATION) | set(staged)
         if migrated != published:
             missing = published - migrated
             extra = migrated - published
-            logger.error("INCOMPLETE: %d published, %d in the manifest "
+            logger.error("INCOMPLETE: %d published, %d migrated "
                          "(%d never migrated, %d unknown)",
                          len(published), len(migrated), len(missing), len(extra))
             if missing:
                 logger.error("  e.g. never migrated: %s", sorted(missing)[:3])
+            if extra:
+                logger.error("  e.g. not in the published set: %s", sorted(extra)[:3])
             return 1
-        logger.info("Complete: all %d published items are in the manifest",
-                    len(published))
+        logger.info("Complete: all %d published items are migrated (%d in the "
+                    "manifest, %d staged by an earlier step)",
+                    len(published), len(migrated) - len(staged), len(staged))
     else:
-        logger.warning("Partial run (--limit or staged skips); completeness NOT "
-                       "asserted. Re-run without --limit before publishing.")
+        logger.warning("Partial run (--limit); completeness NOT asserted. "
+                       "Re-run without --limit before publishing.")
 
     return 0 if tolerable else 1
 

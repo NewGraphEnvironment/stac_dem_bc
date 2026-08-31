@@ -290,23 +290,20 @@ jobs:
       # field, so a stale item registers successfully; and both asset keys are
       # legal STAC.
       #
-      # --expect is what catches a run that silently processed a SUBSET. A reused
-      # manifest is how that happens: data/backfill_done.txt holds 98,040 ids
-      # against 102,460 published, and a migration reading it would write 4,420
-      # files and exit 0. Expecting the collection's own item-link count fails
-      # that here, before a byte reaches S3.
+      # This step asserts HOMOGENEITY only. COMPLETENESS is item_migrate's own
+      # reconciliation (manifest + staged == published), which exits non-zero and
+      # so fails the job before this runs. One statement, one owner: expecting
+      # the published total HERE would be wrong on any resumed run, where the
+      # staged set is legitimately only the remainder.
       #
-      # Only on a rewrite dispatch. A monthly run stages just the month's new
-      # items, so the count would legitimately differ from the published total.
+      # An empty directory is a failure inside audit-items, not a vacuous pass.
       - name: Audit staged items against the collection (rewrite runs)
         if: (inputs.backfill || inputs.rename) && steps.publish.outputs.count != '0'
         run: |
-          EXPECT=$(.venv/bin/python scripts/register_manifest.py ids-published \
-            --collection-file "$STAC_OUTPUT_DIR/collection.json" | wc -l | tr -d ' ')
           COLLECTION=$(.venv/bin/python -c \
             'import json,os; print(json.load(open(os.environ["STAC_OUTPUT_DIR"] + "/collection.json"))["id"])')
-          echo "auditing against $COLLECTION, expecting $EXPECT item(s)"
-          ARGS=(--dir "$STAC_OUTPUT_DIR" --collection-id "$COLLECTION" --expect "$EXPECT")
+          echo "auditing staged items against $COLLECTION"
+          ARGS=(--dir "$STAC_OUTPUT_DIR" --collection-id "$COLLECTION")
           if [ "${{ inputs.rename }}" = "true" ]; then
             ARGS+=(--require-asset dem --forbid-asset image)
           fi
@@ -316,6 +313,7 @@ jobs:
       # produces item JSONs and no new URLs, and skipping the sync would leave
       # them on the runner.
       - name: Sync catalog to S3
+        id: sync
         if: steps.publish.outputs.count != '0' && steps.publish.outputs.count != ''
         run: bash scripts/s3_sync-ci.sh
 
@@ -330,6 +328,30 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A data/
+
+          # A rewrite manifest is a claim that its ids are PUBLISHED, because
+          # `todo = published - manifest` on the next run. If the sync did not
+          # run, they are not published -- and committing it would make every
+          # future run skip work that never reached S3, permanently and
+          # silently. That is the exact failure this whole change exists to
+          # prevent, arriving through its own progress file.
+          #
+          # This does NOT undo the always() above, which exists because a run
+          # completed 98,040 items and then exited non-zero on 2 transient
+          # failures, and the lost manifest would have restarted it from zero.
+          # A tolerated error rate still exits 0 and still reaches the sync, so
+          # that progress is still preserved. Only progress that was never
+          # published is dropped, and dropping it costs a re-fetch rather than a
+          # permanently unmigrated catalogue.
+          if [ "${{ steps.sync.outcome }}" != "success" ]; then
+            echo "sync did not run (outcome: ${{ steps.sync.outcome }}) -" \
+                 "discarding rewrite manifests so the work is redone, not skipped"
+            for f in data/migrate_done.txt data/backfill_done.txt; do
+              git reset -q -- "$f" 2>/dev/null || true
+              git checkout -q -- "$f" 2>/dev/null || true
+            done
+          fi
+
           if git diff --cached --quiet; then
             echo "no cache changes to commit"
             exit 0
