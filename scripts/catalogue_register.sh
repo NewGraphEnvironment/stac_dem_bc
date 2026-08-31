@@ -121,9 +121,21 @@ FILE_COLLECTION_ID=$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1]
   "$WORK/collection.json")
 if [ "$FILE_COLLECTION_ID" != "$COLLECTION_ID" ]; then
   echo "ERROR: collection id mismatch." >&2
-  echo "       STAC_COLLECTION  = $COLLECTION_ID" >&2
+  echo "       expecting        = $COLLECTION_ID  (scripts/collection_patch.py)" >&2
   echo "       collection.json  = $FILE_COLLECTION_ID  (from $BUCKET_URL)" >&2
-  echo "       Set STAC_BUCKET_URL to the bucket for '$COLLECTION_ID'." >&2
+  echo >&2
+  echo "       Two causes, and they want opposite fixes:" >&2
+  echo >&2
+  echo "       1. The published catalogue has not been migrated to" >&2
+  echo "          '$COLLECTION_ID' yet. This is the EXPECTED state between" >&2
+  echo "          merging a rename and running the cutover. Run the migration" >&2
+  echo "          (workflow_dispatch, rename=true) -- do not set" >&2
+  echo "          STAC_COLLECTION to make this pass, which would register the" >&2
+  echo "          old catalogue under a name the code no longer uses." >&2
+  echo >&2
+  echo "       2. STAC_BUCKET_URL points at a different catalogue's bucket." >&2
+  echo "          Set it to the bucket serving '$COLLECTION_ID'. Note the" >&2
+  echo "          bucket and the collection do NOT share a name here." >&2
   exit 1
 fi
 
