@@ -15,6 +15,7 @@ The second one IS the statement "the bucket is out of scope", written as
 something that can fail.
 """
 
+import ast
 import io
 import json
 import os
@@ -61,20 +62,50 @@ def test_there_are_source_files_to_check():
     assert any(f.endswith("collection_patch.py") for f in files)
 
 
-def _code_lines(path):
-    """(lineno, text) for lines that are CODE, with comments stripped.
+def _docstring_lines(src):
+    """Line numbers occupied by docstrings — prose, never data.
 
-    Comments are removed rather than the file being skipped: a stale comment
-    must not fail the test, and — the direction that actually matters — a live
-    literal must not be able to hide by sitting next to one.
+    A docstring is discarded by the interpreter, so no live literal can hide in
+    one: nothing can read it back. Every OTHER string is data and stays in
+    scope. Found via the AST rather than by pattern, because a triple-quoted
+    string is only a docstring by POSITION, and one assigned to a variable would
+    look identical to any text-level scan.
+    """
+    lines = set()
+    tree = ast.parse(src)
+    holders = (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+    for node in ast.walk(tree):
+        if not isinstance(node, holders):
+            continue
+        body = getattr(node, "body", None)
+        if not body:
+            continue
+        first = body[0]
+        if (isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)):
+            lines.update(range(first.lineno, (first.end_lineno or first.lineno) + 1))
+    return lines
+
+
+def _code_lines(path):
+    """(lineno, text) for lines that are CODE, with prose stripped.
+
+    Comments and docstrings are removed rather than the file being skipped. A
+    stale comment must not fail the test — but, the direction that actually
+    matters, a live literal must not be able to hide by sitting next to one, so
+    the removal is token- and AST-accurate rather than a text scan.
     """
     with open(path) as fh:
         src = fh.read()
 
     if path.endswith(".py"):
+        prose = _docstring_lines(src)
         stripped = {}
         for tok in tokenize.generate_tokens(io.StringIO(src).readline):
             if tok.type == tokenize.COMMENT:
+                continue
+            if tok.start[0] in prose:
                 continue
             if tok.string.strip():
                 stripped.setdefault(tok.start[0], []).append(tok.string)
@@ -93,6 +124,47 @@ def _code_lines(path):
 
 def _hits(path, needle):
     return [(n, t.strip()) for n, t in _code_lines(path) if needle in t]
+
+
+def test_the_scanner_strips_prose_but_not_data(tmp_path):
+    """Both directions, because a scanner is only as good as what it still sees.
+
+    Skipping docstrings is safe — the interpreter discards them, so nothing can
+    read one back — but a triple-quoted string is a docstring only by POSITION.
+    One assigned to a variable is data and must stay in scope, and that is
+    exactly where a literal would hide from a text-level scan.
+    """
+    src = tmp_path / "probe.py"
+    src.write_text(
+        '"""A module docstring mentioning stac-dem-bc."""\n'
+        "# a comment mentioning stac-dem-bc\n"
+        'BUCKET = "stac-dem-bc"\n'
+        'PROSE = """\n'
+        "a triple-quoted string that is NOT a docstring: stac-dem-bc\n"
+        '"""\n'
+        "def f():\n"
+        '    """A function docstring mentioning stac-dem-bc."""\n'
+        "    return 1\n"
+    )
+    hits = _hits(str(src), OLD_ID)
+    # A multi-line string is one token, reported at the line it STARTS on, so
+    # the non-docstring string surfaces at its assignment (4) with its body
+    # carried in the text.
+    assert sorted(n for n, _ in hits) == [3, 4], f"got {hits}"
+    assert any(OLD_ID in t for n, t in hits if n == 4), \
+        "the body of a non-docstring string must stay in scope"
+
+
+def test_the_scanner_finds_a_literal_in_a_shell_script(tmp_path):
+    """Shell has no AST here, so its stripping is whole-line comments only —
+    which means a literal on a code line is still caught, and that is the half
+    that matters."""
+    src = tmp_path / "probe.sh"
+    src.write_text(
+        "# a comment mentioning stac-dem-bc\n"
+        'COLLECTION_ID="stac-dem-bc"\n'
+    )
+    assert [n for n, _ in _hits(str(src), OLD_ID)] == [2]
 
 
 def test_the_new_collection_id_is_defined_in_exactly_one_place():

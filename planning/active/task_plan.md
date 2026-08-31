@@ -130,7 +130,7 @@ the contract, the monthly run carries it and `--check` can see a regression.
 
 ## Phase 4 — The migration tool and the homogeneity gate
 
-- [ ] `scripts/item_migrate.py` — named for what it does; item ids do **not**
+- [x] `scripts/item_migrate.py` — named for what it does; item ids do **not**
       change, so `item_rename.py` would mislead. Own manifest
       `data/migrate_done.txt`, own errors log,
       `MIGRATION = "34-collection-rename"`.
@@ -140,27 +140,27 @@ the contract, the monthly run carries it and `--check` can see a regression.
       and continuing would bury it. Asset hrefs are NOT touched: they contain the
       literal segment `/dem/`, and `links[rel=collection]` points at the bucket,
       which keeps its name
-- [ ] Rebuild the assets dict by comprehension so `dem` sits where `image` sat —
+- [x] Rebuild the assets dict by comprehension so `dem` sits where `image` sat —
       a byte diff then shows one key changed, not one removed and one appended
-- [ ] Exit gate: `len(manifest_after) == len(published_item_ids())`, **both
+- [x] Exit gate: `len(manifest_after) == len(published_item_ids())`, **both
       derived from the published collection's item links** (one producer). A
       sample can never make that statement
-- [ ] `register_manifest.py audit-items --dir DIR --collection-id ID
+- [x] `register_manifest.py audit-items --dir DIR --collection-id ID
       --require-asset dem --forbid-asset image --expect N` — pure function plus
       subcommand, so tests can reach it
-- [ ] `ndjson_write(paths, out, expect_collection=None)` raises on a mismatch;
+- [x] `ndjson_write(paths, out, expect_collection=None)` raises on a mismatch;
       thread from `item_register.sh`. Last checkpoint before pgstac
-- [ ] `tests/test_item_migrate.py`: produces `dem` / removes `image`; never
+- [x] `tests/test_item_migrate.py`: produces `dem` / removes `image`; never
       leaves both; idempotent (second call `[]`); preserves asset order; sets the
       item `collection` field; **does not touch asset hrefs**; leaves
       `links[rel=collection]` on the old bucket; malformed items do not raise;
       refuses a foreign manifest. The href fixtures must carry `/dem/` and a
       `stac-dem-bc.s3.amazonaws.com` link — **assert those premises inline**, or
       the fixture cannot reach the text-substitution failure it exists to catch
-- [ ] `tests/test_register_manifest.py`: `_write_item(collection=...)` +
+- [x] `tests/test_register_manifest.py`: `_write_item(collection=...)` +
       `test_ndjson_write_refuses_an_item_from_another_collection`. Leave the
       bucket-URL fixtures at `:76,82,89` alone with a comment saying why
-- [ ] `test_item_migrate_and_collection_patch_agree_on_the_id`
+- [x] `test_item_migrate_and_collection_patch_agree_on_the_id`
 
 ## Phase 5 — Wire the migration into CI
 

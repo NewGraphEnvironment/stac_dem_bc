@@ -333,9 +333,26 @@ fi
 # with no collection row fail outright.
 ./scripts/collection_register.sh "$WORK/collection.json"
 
+# Audit every fetched body BEFORE any of it reaches pgstac. The bodies are
+# already on disk here, so the full-population check costs nothing -- and this
+# is the only place one is possible. The id reconciliation above compares
+# STAC_COLLECTION against collection.json's `id`: one field, in one file, out of
+# 102,461. item_register.sh then routes each item by its OWN `collection` field,
+# so a body naming the previous collection upserts into the previous collection
+# successfully, with no error anywhere.
+#
+# --expect ties the count to the same set the fetch guard above used, rather
+# than to a separately-derived number that could disagree on a healthy run.
+"$PY" scripts/register_manifest.py audit-items \
+  --dir "$FETCH_DIR" --collection-id "$COLLECTION_ID" --expect "$N_TODO"
+
 # find, never a glob: 102k filenames is ~6 MB of argv against a ~2 MB ARG_MAX,
 # and it would fail after the fetch had already succeeded.
-find "$FETCH_DIR" -maxdepth 1 -type f -name '*.json' | ./scripts/item_register.sh
+# STAC_COLLECTION makes the same assertion once more inside item_register.sh,
+# on the file it is about to hand pypgstac. Cheap, and the two are not
+# redundant: this one runs even when the audit above is bypassed.
+find "$FETCH_DIR" -maxdepth 1 -type f -name '*.json' | \
+  STAC_COLLECTION="$COLLECTION_ID" ./scripts/item_register.sh
 
 # --- verify ------------------------------------------------------------------
 
