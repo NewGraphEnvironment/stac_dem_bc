@@ -36,9 +36,9 @@ concepts behind the pipeline (COG, STAC, pgstac, validation caching).
 ## Query the collection
 
 Use [`bcdata`](https://github.com/bcgov/bcdata) to define an area of
-interest, then query the `stac-dem-bc` collection for DEM tiles
-intersecting it. Below: all DEMs covering the Bulkley River watershed
-group between 2018 and 2020.
+interest, then query the `stac-elevation-bc` collection for elevation
+tiles intersecting it. Below: all DEMs covering the Bulkley River
+watershed group between 2018 and 2020.
 
 ``` r
 aoi <- bcdata::bcdc_query_geodata("freshwater-atlas-watershed-groups") |>
@@ -52,7 +52,7 @@ date_end <- "2020-12-31T00:00:00Z"
 # use rstac to query the collection
 q <- rstac::stac("https://images.a11s.one/") |>
   rstac::stac_search(
-    collections = "stac-dem-bc",
+    collections = "stac-elevation-bc",
     intersects = jsonlite::fromJSON(
       geojsonsf::sf_geojson(
         aoi, atomise = TRUE, simplify = FALSE
@@ -75,7 +75,7 @@ saveRDS(r, "data/stac_result.rds")
 r <- readRDS("data/stac_result.rds")
 # build the table to display the info
 tab <- tibble::tibble(
-  url_download = purrr::map_chr(r$features, ~ purrr::pluck(.x, "assets", "image", "href"))
+  url_download = purrr::map_chr(r$features, ~ purrr::pluck(.x, "assets", "dem", "href"))
 )
 ```
 

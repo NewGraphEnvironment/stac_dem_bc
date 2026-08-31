@@ -630,9 +630,10 @@ pgstac, validation caching).</p>
 
 <h2 id="query-the-collection">Query the collection</h2>
 <p>Use <a href="https://github.com/bcgov/bcdata"><code>bcdata</code></a>
-to define an area of interest, then query the <code>stac-dem-bc</code>
-collection for DEM tiles intersecting it. Below: all DEMs covering the
-Bulkley River watershed group between 2018 and 2020.</p>
+to define an area of interest, then query the
+<code>stac-elevation-bc</code> collection for elevation tiles
+intersecting it. Below: all DEMs covering the Bulkley River watershed
+group between 2018 and 2020.</p>
 <div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a>aoi <span class="ot">&lt;-</span> bcdata<span class="sc">::</span><span class="fu">bcdc_query_geodata</span>(<span class="st">&quot;freshwater-atlas-watershed-groups&quot;</span>) <span class="sc">|&gt;</span></span>
 <span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a>  bcdata<span class="sc">::</span><span class="fu">filter</span>(WATERSHED_GROUP_NAME <span class="sc">==</span> <span class="st">&quot;Bulkley River&quot;</span>) <span class="sc">|&gt;</span></span>
 <span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a>  bcdata<span class="sc">::</span><span class="fu">collect</span>() <span class="sc">|&gt;</span></span>
@@ -644,7 +645,7 @@ Bulkley River watershed group between 2018 and 2020.</p>
 <span id="cb1-9"><a href="#cb1-9" tabindex="-1"></a><span class="co"># use rstac to query the collection</span></span>
 <span id="cb1-10"><a href="#cb1-10" tabindex="-1"></a>q <span class="ot">&lt;-</span> rstac<span class="sc">::</span><span class="fu">stac</span>(<span class="st">&quot;https://images.a11s.one/&quot;</span>) <span class="sc">|&gt;</span></span>
 <span id="cb1-11"><a href="#cb1-11" tabindex="-1"></a>  rstac<span class="sc">::</span><span class="fu">stac_search</span>(</span>
-<span id="cb1-12"><a href="#cb1-12" tabindex="-1"></a>    <span class="at">collections =</span> <span class="st">&quot;stac-dem-bc&quot;</span>,</span>
+<span id="cb1-12"><a href="#cb1-12" tabindex="-1"></a>    <span class="at">collections =</span> <span class="st">&quot;stac-elevation-bc&quot;</span>,</span>
 <span id="cb1-13"><a href="#cb1-13" tabindex="-1"></a>    <span class="at">intersects =</span> jsonlite<span class="sc">::</span><span class="fu">fromJSON</span>(</span>
 <span id="cb1-14"><a href="#cb1-14" tabindex="-1"></a>      geojsonsf<span class="sc">::</span><span class="fu">sf_geojson</span>(</span>
 <span id="cb1-15"><a href="#cb1-15" tabindex="-1"></a>        aoi, <span class="at">atomise =</span> <span class="cn">TRUE</span>, <span class="at">simplify =</span> <span class="cn">FALSE</span></span>
@@ -664,7 +665,7 @@ Bulkley River watershed group between 2018 and 2020.</p>
 <div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a>r <span class="ot">&lt;-</span> <span class="fu">readRDS</span>(<span class="st">&quot;data/stac_result.rds&quot;</span>)</span>
 <span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a><span class="co"># build the table to display the info</span></span>
 <span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a>tab <span class="ot">&lt;-</span> tibble<span class="sc">::</span><span class="fu">tibble</span>(</span>
-<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a>  <span class="at">url_download =</span> purrr<span class="sc">::</span><span class="fu">map_chr</span>(r<span class="sc">$</span>features, <span class="sc">~</span> purrr<span class="sc">::</span><span class="fu">pluck</span>(.x, <span class="st">&quot;assets&quot;</span>, <span class="st">&quot;image&quot;</span>, <span class="st">&quot;href&quot;</span>))</span>
+<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a>  <span class="at">url_download =</span> purrr<span class="sc">::</span><span class="fu">map_chr</span>(r<span class="sc">$</span>features, <span class="sc">~</span> purrr<span class="sc">::</span><span class="fu">pluck</span>(.x, <span class="st">&quot;assets&quot;</span>, <span class="st">&quot;dem&quot;</span>, <span class="st">&quot;href&quot;</span>))</span>
 <span id="cb2-5"><a href="#cb2-5" tabindex="-1"></a>)</span></code></pre></div>
 <br>
 
