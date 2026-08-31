@@ -84,7 +84,7 @@ policy forks with it.
 - [x] `tests/test_item_backfill.py` passes with **zero edits** — that is the
       proof the extraction was faithful, and it only works if the file does not
       change in this commit
-- [ ] Delete the `_tolerable()` mirror at `tests/test_item_backfill.py:139-142`
+- [x] Delete the `_tolerable()` mirror at `tests/test_item_backfill.py:139-142`
       in favour of importing the real gate (one fact derived twice)
 
 ## Phase 2 — Asset key `image` → `dem` for newly created items

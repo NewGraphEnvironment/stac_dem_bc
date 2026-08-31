@@ -133,13 +133,11 @@ def test_malformed_items_do_not_raise(bad):
 # The exit gate. A strict zero-error rule failed a release over 2 of 98,040.
 # ---------------------------------------------------------------------------
 
-from item_backfill import ERROR_ABS_MAX, ERROR_RATE_MAX  # noqa: E402
-
-
-def _tolerable(errors, processed):
-    """Mirror of the gate in main(), so the policy is testable without I/O."""
-    rate = errors / processed if processed else 0.0
-    return errors <= ERROR_ABS_MAX and rate <= ERROR_RATE_MAX
+# The REAL gate, not a mirror of it. This was previously re-implemented here
+# so the policy could be tested without I/O -- one fact derived twice, agreeing
+# by coincidence with nothing to keep it agreeing. main() now calls the same
+# function these tests do.
+from item_rewrite import error_tolerable as _tolerable  # noqa: E402
 
 
 def test_the_real_ci_failure_is_now_tolerated():
@@ -169,3 +167,14 @@ def test_zero_errors_is_tolerated():
 
 def test_gate_does_not_divide_by_zero_on_an_empty_run():
     assert _tolerable(0, 0)
+
+
+def test_the_gate_under_test_is_the_one_main_uses():
+    """A mirror of a gate is not a test of it.
+
+    This file used to re-implement the tolerance rule locally, which meant the
+    assertions below could stay green while main() drifted. Assert the identity
+    rather than trusting the import to have been wired up.
+    """
+    import item_backfill
+    assert item_backfill.error_tolerable is _tolerable
