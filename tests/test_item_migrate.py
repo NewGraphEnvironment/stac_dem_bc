@@ -441,7 +441,7 @@ def test_migrate_refuses_a_rename_map_that_collides():
 # =============================================================================
 
 def _run_migrate(tmp_path, monkeypatch, published_ids, written, errored,
-                 extra_argv=(), deterministic=()):
+                 extra_argv=(), deterministic=(), prestage=None):
     """Drive item_migrate.main() with the fan-out replaced.
 
     The interaction under test only shows up in main(), between the error gate
@@ -476,7 +476,14 @@ def _run_migrate(tmp_path, monkeypatch, published_ids, written, errored,
             "--out-dir", str(tmp_path / "out"), "--manifest", str(manifest),
             "--errors-log", str(tmp_path / "err.txt"), *extra_argv]
     monkeypatch.setattr("sys.argv", argv)
-    os.makedirs(tmp_path / "out", exist_ok=True)
+    out = tmp_path / "out"
+    os.makedirs(out, exist_ok=True)
+    # `prestage` puts real files in out_dir, which is the ONLY way to reach the
+    # staged-shape gate: skip_already_staged returns [] for an empty directory,
+    # so a harness that always creates a fresh one leaves both branches of that
+    # gate unexecuted while the suite reports green.
+    for item_id, body in (prestage or {}).items():
+        (out / f"{item_id}.json").write_text(json.dumps(body))
     return migrate_mod.main()
 
 
@@ -586,3 +593,70 @@ def test_a_transient_failure_is_still_called_transient(tmp_path, monkeypatch, ca
         _run_migrate(tmp_path, monkeypatch, ids, written=ids[:-1], errored=ids[-1:])
     assert "RE-RUN to pick them up" in caplog.text
     assert "CANNOT be migrated without a human" not in caplog.text
+
+
+# =============================================================================
+# the staged-shape gate — reachable only with files actually on disk
+# =============================================================================
+
+def test_a_staged_item_in_the_wrong_shape_is_fatal(tmp_path, monkeypatch):
+    """`item_backfill --out-dir D` then `item_migrate --out-dir D` used to
+    report the whole catalogue complete having migrated nothing.
+
+    skip_already_staged only knows "a file exists"; the reconciliation counts
+    staged ids as covered. Without the content check, staging un-migrated bodies
+    is indistinguishable from having migrated them.
+    """
+    ids = [f"id-{i}" for i in range(5)]
+    rc = _run_migrate(tmp_path, monkeypatch, ids, written=ids[2:], errored=[],
+                      prestage={i: published(item_id=i) for i in ids[:2]})
+    assert rc == 1
+
+
+def test_a_staged_item_already_in_the_migrated_shape_counts(tmp_path, monkeypatch):
+    """The other branch, and the control.
+
+    Without it the test above would pass for a gate that rejects everything
+    staged — which would break the CI ordering it exists to support, where the
+    pairing rebuild legitimately writes correct items first.
+    """
+    ids = [f"id-{i}" for i in range(5)]
+    good = {}
+    for i in ids[:2]:
+        body = published(item_id=i)
+        item_migrate(body)
+        good[i] = body
+    rc = _run_migrate(tmp_path, monkeypatch, ids, written=ids[2:], errored=[],
+                      prestage=good)
+    assert rc == 0, "correctly-staged items must count toward completeness"
+
+
+def test_an_intolerable_run_does_not_promise_to_publish(tmp_path, monkeypatch, caplog):
+    """The message and the exit code must agree about what is going to happen.
+
+    Above tolerance, main() returns 1 -- which in CI skips the sync, which
+    discards the manifest, which throws away everything the run completed.
+    Saying "the run still publishes what it completed" there is a promise the
+    run is about to break, and it is the reader who pays: they would not go
+    looking for the cause.
+    """
+    import logging
+    ids = [f"id-{i}" for i in range(100)]
+    with caplog.at_level(logging.WARNING):
+        rc = _run_migrate(tmp_path, monkeypatch, ids, written=ids[:90],
+                          errored=ids[90:])
+    assert rc == 1
+    assert "still publishes what it completed" not in caplog.text
+    assert "discarded, not published" in caplog.text
+
+
+def test_a_tolerable_run_does_promise_to_publish(tmp_path, monkeypatch, caplog):
+    """The control: the promise must still be made when it will be kept."""
+    import logging
+    ids = [f"id-{i}" for i in range(3000)]
+    with caplog.at_level(logging.WARNING):
+        rc = _run_migrate(tmp_path, monkeypatch, ids, written=ids[:-2],
+                          errored=ids[-2:])
+    assert rc == 0
+    assert "still publishes what it completed" in caplog.text
+    assert "discarded, not published" not in caplog.text

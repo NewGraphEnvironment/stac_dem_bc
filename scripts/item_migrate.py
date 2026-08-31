@@ -347,13 +347,25 @@ def main() -> int:
                 logger.error("  %s -> %s", i, errors[i])
             logger.error("  full list: %s", args.errors_log)
 
-        if transient:
+        if transient and tolerable:
             logger.warning("%d item(s) remain unmigrated, all of them this "
                            "run's transient fetch failures. The run still "
                            "publishes what it completed; RE-RUN to pick them "
                            "up, and do not register until a run reports "
                            "Complete.", len(transient))
             logger.warning("  failed ids: %s", args.errors_log)
+        elif transient:
+            # `tolerable` is False, so main() returns 1 -- which in CI skips the
+            # sync, which discards the manifest, which throws away everything
+            # this run completed. Promising a publish here would be a message
+            # that contradicts what the run is about to do. The exit itself is
+            # correct: an error rate this high means something is broken, and
+            # publishing half a catalogue on the strength of it is worse.
+            logger.error("%d item(s) failed, ABOVE tolerance. This run's work "
+                         "is discarded, not published -- fix the cause and run "
+                         "again from the last committed manifest.",
+                         len(transient))
+            logger.error("  failed ids: %s", args.errors_log)
         else:
             logger.info("Complete: all %d published items are migrated (%d in "
                         "the manifest, %d staged by an earlier step)",

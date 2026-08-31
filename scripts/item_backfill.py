@@ -37,6 +37,7 @@ Usage:
 
 import argparse
 import csv
+import json
 import logging
 import os
 import sys
@@ -172,6 +173,26 @@ def main() -> int:
     if staged and not args.dry_run:
         logger.info("Skipping %d id(s) already staged in %s by an earlier step",
                     len(staged), out_dir)
+        # The same content check item_migrate makes, and for the same reason:
+        # "a file exists" is not "this item is correct", and the reconciliation
+        # below counts staged ids as covered. Unreachable through today's CI
+        # wiring, where only item_create writes here first -- but a local
+        # rehearsal sharing an out-dir, or any future step ordering, would
+        # otherwise pass the reconciliation without verifying anything.
+        wrong = []
+        for item_id in staged:
+            path = os.path.join(out_dir, f"{item_id}.json")
+            try:
+                with open(path) as fh:
+                    body = json.load(fh)
+                if item_edit(body, dsm_lookup.get(item_id)):
+                    wrong.append(item_id)
+            except (OSError, ValueError) as e:
+                wrong.append(f"{item_id} ({e})")
+        if wrong:
+            logger.error("%d staged item(s) are NOT already correct, so they "
+                         "cannot be counted as done: %s", len(wrong), wrong[:3])
+            return 1
 
     # `if args.limit:` reads 0 as "no limit" and would rewrite all 102,460 items
     # for someone who asked for none.
@@ -249,9 +270,12 @@ def main() -> int:
                          len(published), len(unattempted))
             logger.error("  e.g. %s", sorted(unattempted)[:3])
             return 1
-        if missing:
+        if missing and tolerable:
             logger.warning("%d item(s) remain, all of them this run's transient "
                            "failures; re-run to pick them up", len(missing))
+        elif missing:
+            logger.error("%d item(s) failed, ABOVE tolerance. This run's work "
+                         "is discarded, not published.", len(missing))
         else:
             logger.info("Complete: all %d published items are covered",
                         len(published))
