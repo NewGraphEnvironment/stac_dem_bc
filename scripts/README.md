@@ -61,6 +61,37 @@ When validation finds problems, these scripts help:
 | `item_reprocess.py` | Re-create invalid items with improved handling (e.g. placeholder dates for files missing date information) |
 | `dsm_verify.py` | Verify on a stratified sample that a DSM really does share its paired DEM's COG status and footprint — the evidence behind inheriting the media type rather than measuring all ~96k |
 
+### Rewriting what is already published
+
+Some fixes cannot be made by building new items, because the defect is in the
+~102k item JSONs already on S3. These rewrite them **in place** — fetch, edit the
+one or two fields we mean to change, write back — rather than rebuilding, which
+would silently swap ~60k items from one code path to another (60,324 of 100,345
+metadata-cache rows predate spatial-metadata caching).
+
+| Script | What it does |
+|--------|--------------|
+| `item_rewrite.py` | The shared harness. Library only, no CLI: fetch with retry, a resumable manifest, the error-rate gate, and verification by re-derivation. Every behaviour in it has a named incident behind it |
+| `item_backfill.py` | #31: add the `dsm` asset to published items, and percent-encode the 90 legacy hrefs carrying literal spaces |
+| `item_migrate.py` | #34: move published items to the renamed collection and the renamed DEM asset key |
+
+Three things to know before running either:
+
+- **The manifest is a claim that its ids are PUBLISHED**, because the next run
+  computes `todo = published - manifest`. It carries a `# migration:` header and
+  is refused by any other migration — `data/backfill_done.txt` holds 98,040 ids
+  against 102,460 published, so reading it as #34's would have rewritten 4.3% of
+  the catalogue and exited 0. The CI job discards it when the sync did not run,
+  because progress that was never published must be redone, not skipped.
+- **Completeness is asserted over the whole population**, not a sample: the
+  manifest plus anything staged by an earlier step must equal the published set.
+  A sample says nothing about a population, and a half-rewritten catalogue is
+  invisible to every other check here — item ids do not change, so set equality
+  still reports `IN SYNC`.
+- **They never touch `collection.json`**, asset hrefs, or `links[rel=collection]`.
+  Item ids and hrefs are unchanged, so every link stays valid; the collection's
+  own edit is `collection_patch.py`.
+
 ### Supporting Scripts
 
 | Script | What it does |
@@ -200,11 +231,13 @@ scripts/catalogue_register.sh --drift    # register whatever it is missing
 | `collection_register.sh` | upsert one `collection.json` (run first — the FK requires it) |
 | `item_register.sh` | upsert items; paths on **stdin**, never argv |
 | `collection_unregister.sh` | the only destructive script here; for #34's cutover |
-| `register_manifest.py` | id/NDJSON logic, so the shell stays thin and the logic is testable |
+| `register_manifest.py` | id/NDJSON logic, so the shell stays thin and the logic is testable. `audit-items` is the homogeneity check below |
 
 Measured 2026-08-30 against the live catalogue of 102,460 items: `--verify` takes **3m40s**, nearly all of it enumerating registered ids from the API (11 requests of 10,000). A 3-item upsert is a couple of seconds. The database load itself is seconds even at full scale; historically it is the *fetch* of item JSONs from S3 that dominates a full `--all` run, at roughly 45 minutes.
 
-Verification is by **set equality in both directions** — missing and orphaned — never by a count. The API has no aggregation extension (`/aggregate` 404s) and returns `numberMatched: null`, and a `/search` on a list of ids silently omits the ones that do not exist. So "I asked for N and got N back" can be true while the sets differ.
+Verification is by **set equality in both directions** — missing and orphaned — never by a count. The API has no aggregation extension (`/aggregate` 404s) and returns `numberMatched: null`, and a `/search` on a list of ids silently omits the ones that do not exist. So "I asked for N and got N back" can be true while the sets differ. Every `/search` is scoped with `collections`: without it the question is "is this id served *anywhere*", which was harmless while one collection existed and became wrong the moment #34 put two on the endpoint sharing all 102,460 ids.
+
+Set equality has one blind spot, and #34 is exactly it. **Item ids do not change during a collection rename**, so a catalogue where half the items name the old collection and half the new is reported `IN SYNC` — and `item_register.sh` routes each item by its *own* `collection` field, so a stale body upserts into the old collection successfully, with no error anywhere. The property that breaks is *homogeneity*, not size, and `register_manifest.py audit-items` is what checks it. `catalogue_register.sh` runs it over every fetched body before anything reaches the database: the files are already on disk at that point, so the full-population check is free.
 
 Registration still runs from a laptop rather than from CI, because no GitHub Actions runner can reach the host today — there is no Tailscale action and no SSH deploy key in any of these repos. That decision belongs in the infrastructure repo and unblocks every catalogue repo at once.
 
@@ -212,7 +245,7 @@ Once registered, the collection is browsable in QGIS (STAC Data Source Manager),
 
 ## Tests
 
-`tests/` holds the pairing contract suite (51 tests, offline). Fixtures under
+`tests/` holds the contract suites (offline, and a hard gate in CI). Fixtures under
 `tests/fixtures/` are **real objectstore listings** taken 2026-08-28, so the tests
 exercise the filename generations that actually exist rather than idealised ones.
 
@@ -228,8 +261,10 @@ has seen fail is decoration.
 ## DEM/DSM Pairing
 
 A DEM and its DSM come from the same flight over the same footprint at the same
-time, so they belong on one STAC item as two assets — `image` (bare-earth DEM,
-named for backward compatibility) and `dsm` (digital surface model).
+time, so they belong on one STAC item as two assets — `dem` (bare earth) and
+`dsm` (digital surface model). The DEM asset was keyed `image` until #34, which
+renamed it in the same break as the collection; both keys come from
+`stac_utils.ASSET_DEM` / `ASSET_DSM` and appear as literals nowhere else.
 
 There is no manifest, so the relationship is inferred from filenames, and the
 naming convention is not uniform across deliveries. **Matching is on parsed
