@@ -89,17 +89,17 @@ policy forks with it.
 
 ## Phase 2 — Asset key `image` → `dem` for newly created items
 
-- [ ] `stac_utils.py`: `ASSET_DEM = "dem"`, `ASSET_DSM = "dsm"`; point all four
+- [x] `stac_utils.py`: `ASSET_DEM = "dem"`, `ASSET_DSM = "dsm"`; point all four
       writers at them (`stac_utils.py:358`, `item_create.py:148,155`,
       `item_reprocess.py:103,110`)
-- [ ] `item_backfill.py:120`'s read of `assets["image"]` — it inherits media type
+- [x] `item_backfill.py:120`'s read of `assets["image"]` — it inherits media type
       onto a new `dsm` and **silently downgrades COG → plain tiff** if missed
-- [ ] `tests/test_asset_key.py::test_no_script_writes_a_literal_asset_key` —
+- [x] `tests/test_asset_key.py::test_no_script_writes_a_literal_asset_key` —
       `ast.parse` every `scripts/*.py`; no `add_asset()` first arg, no
       `asset_name=`, no `.assets[...]` subscript may be an `ast.Constant`. A
       structural invariant, because the `rio_stac` fallback reads a remote raster
       and no runtime test can compare the two paths
-- [ ] **Restore the bug:** put `'image'` back at `item_create.py:148`, confirm
+- [x] **Restore the bug:** put `'image'` back at `item_create.py:148`, confirm
       red, revert
 
 ## Phase 3 — The collection id becomes one constant

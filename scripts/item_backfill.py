@@ -54,6 +54,8 @@ from item_rewrite import (
     verify_rewrite,
 )
 from stac_utils import (
+    ASSET_DEM,
+    ASSET_DSM,
     PATH_S3,
     encode_url_for_gdal,
     get_output_dir,
@@ -70,6 +72,23 @@ ERRORS_LOG = "data/backfill_errors.txt"
 # exit 0. See item_rewrite.manifest_load.
 MIGRATION = "31-dsm-backfill"
 
+# The bare-earth asset was keyed `image` when this script ran, and `dem` after
+# #34. This is a recovery path, so it can meet either shape and must not assume
+# the one that happened to exist when it was written -- reading only the current
+# key would silently fall through to the default media type and downgrade every
+# DSM it attached from COG to plain tiff. Order matters: current key first.
+DEM_KEYS = (ASSET_DEM, "image")
+
+
+def _dem_asset(item: dict) -> dict:
+    """The bare-earth asset, whichever key this item spells it with."""
+    assets = item.get("assets", {})
+    for key in DEM_KEYS:
+        if key in assets:
+            return assets[key]
+    return {}
+
+
 def item_edit(item: dict, dsm_href: str | None) -> list[str]:
     """Apply the backfill edits in place. Returns the names of what changed.
 
@@ -85,14 +104,14 @@ def item_edit(item: dict, dsm_href: str | None) -> list[str]:
             asset["href"] = fixed
             changed.append(f"href:{key}")
 
-    if dsm_href and "dsm" not in item.get("assets", {}):
-        image = item.get("assets", {}).get("image", {})
-        item.setdefault("assets", {})["dsm"] = {
+    if dsm_href and ASSET_DSM not in item.get("assets", {}):
+        dem = _dem_asset(item)
+        item.setdefault("assets", {})[ASSET_DSM] = {
             "href": encode_url_for_gdal(dsm_href),
             # Inherited from the DEM asset already on this item -- the published
             # record IS the DEM's measured COG status, so no cache lookup and no
             # second network read is needed to honour that decision.
-            "type": image.get("type", "image/tiff; application=geotiff"),
+            "type": dem.get("type", "image/tiff; application=geotiff"),
             "roles": ["data"],
             "title": "Digital surface model",
         }
