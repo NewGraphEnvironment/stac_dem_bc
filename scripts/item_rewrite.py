@@ -195,12 +195,23 @@ def item_fetch(item_id: str) -> dict:
         return json.load(r)
 
 
+# Outcome prefixes. The two kinds of failure need OPPOSITE advice, so they are
+# distinguishable from the outcome string rather than by guessing:
+#   fetch  transient. A re-run picks it up, and the error-rate gate judges it.
+#   edit   deterministic. The item's own content is wrong; every re-run raises
+#          the identical error, and only a human can resolve it.
+ERR_FETCH = "error:fetch:"
+ERR_EDIT = "error:edit:"
+
+
 def process_one(item_id: str, edit: Edit, out_dir: str,
                 attempts: int = 3) -> tuple:
-    """Returns (item_id, outcome): written | unchanged | error:<msg>.
+    """Returns (item_id, outcome): written | unchanged | error:fetch|edit:<msg>.
 
-    Retries before giving up, so that transient failures never reach the run's
-    exit code at all.
+    Retries the FETCH before giving up, so transient failures never reach the
+    run's exit code at all. An edit failure is not retried and is tagged
+    separately -- it cannot improve on a second attempt, and telling an operator
+    to re-run it would send them round a loop.
     """
     last = ""
     for attempt in range(attempts):
@@ -245,22 +256,24 @@ def process_one(item_id: str, edit: Edit, out_dir: str,
                 raise
             return item_id, "written"
         except Exception as e:  # noqa: BLE001 - reported per item, never fatal
-            return item_id, f"error:{e}"
-    return item_id, f"error:{last}"
+            return item_id, f"{ERR_EDIT}{e}"
+    return item_id, f"{ERR_FETCH}{last}"
 
 
 def run_rewrite(todo: list, edit: Edit, out_dir: str, manifest_fh, errors_fh,
                 workers: int = 16, desc: str = "Rewriting") -> tuple:
-    """Fan out over `todo`. Returns ({written, unchanged, error}, errored_ids).
+    """Fan out over `todo`. Returns ({written, unchanged, error}, {id: outcome}).
 
-    The id SET matters as much as the count. A caller reconciling its manifest
-    against the published set will see this run's failures as "never migrated",
-    and cannot otherwise tell them apart from an item that was never attempted
-    -- which is a different fault with a different remedy.
+    The failures come back as a MAPPING, not a count and not a bare set. A
+    caller reconciling its manifest against the published set sees this run's
+    failures as "never migrated" and cannot otherwise tell them apart from an
+    item that was never attempted -- a different fault with a different remedy.
+    And the outcome string is what separates a transient fetch failure, which a
+    re-run fixes, from a deterministic edit failure, which it never will.
     """
     lock = threading.Lock()
     counts = {"written": 0, "unchanged": 0, "error": 0}
-    errored = set()
+    errors = {}
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
         futures = [ex.submit(process_one, i, edit, out_dir) for i in todo]
@@ -270,7 +283,7 @@ def run_rewrite(todo: list, edit: Edit, out_dir: str, manifest_fh, errors_fh,
             with lock:
                 if outcome.startswith("error:"):
                     counts["error"] += 1
-                    errored.add(item_id)
+                    errors[item_id] = outcome
                     errors_fh.write(f"{item_id}\t{outcome}\n")
                     errors_fh.flush()
                 else:
@@ -285,7 +298,7 @@ def run_rewrite(todo: list, edit: Edit, out_dir: str, manifest_fh, errors_fh,
                     # not run; see update.yml's cache commit.
                     manifest_fh.write(f"{item_id}\n")
                     manifest_fh.flush()
-    return counts, errored
+    return counts, errors
 
 
 def verify_rewrite(sample_ids: list, out_dir: str, edit: Edit,

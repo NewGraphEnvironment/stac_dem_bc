@@ -441,7 +441,7 @@ def test_migrate_refuses_a_rename_map_that_collides():
 # =============================================================================
 
 def _run_migrate(tmp_path, monkeypatch, published_ids, written, errored,
-                 extra_argv=()):
+                 extra_argv=(), deterministic=()):
     """Drive item_migrate.main() with the fan-out replaced.
 
     The interaction under test only shows up in main(), between the error gate
@@ -460,10 +460,16 @@ def _run_migrate(tmp_path, monkeypatch, published_ids, written, errored,
         for i in written:
             manifest_fh.write(f"{i}\n")
         manifest_fh.flush()
+        from item_rewrite import ERR_EDIT, ERR_FETCH
+        errs = {}
         for i in errored:
-            errors_fh.write(f"{i}\terror:boom\n")
+            errs[i] = f"{ERR_FETCH}timed out"
+        for i in deterministic:
+            errs[i] = f"{ERR_EDIT}carries both keys"
+        for i, o in errs.items():
+            errors_fh.write(f"{i}\t{o}\n")
         return ({"written": len(written), "unchanged": 0,
-                 "error": len(errored)}, set(errored))
+                 "error": len(errs)}, errs)
 
     monkeypatch.setattr(migrate_mod, "run_rewrite", fake_run_rewrite)
     argv = ["item_migrate.py", "--collection", str(coll),
@@ -548,3 +554,35 @@ def test_audit_with_no_forbidden_keys_forbids_nothing(tmp_path):
     for empty in (None, [], ()):
         r = audit_items([p], NEW_ID, require_asset=ASSET_DEM, forbid_assets=empty)
         assert not r["forbidden_asset"]
+
+
+def test_a_deterministic_failure_is_not_called_transient(tmp_path, monkeypatch, caplog):
+    """An item carrying BOTH asset keys makes item_migrate raise, every time.
+
+    It lands in the error map like a timed-out fetch does, so the reconciliation
+    used to fold it in with "all of them this run's transient failures ...
+    RE-RUN to pick them up". Re-running raises the identical error forever, so
+    an operator following that advice loops. The two causes need opposite
+    answers, and the outcome prefix is what tells them apart.
+    """
+    import logging
+    ids = [f"id-{i}" for i in range(3000)]
+    with caplog.at_level(logging.WARNING):
+        rc = _run_migrate(tmp_path, monkeypatch, ids, written=ids[:-1],
+                          errored=[], deterministic=ids[-1:])
+    text = caplog.text
+    assert "CANNOT be migrated without a human" in text
+    assert "RE-RUN to pick them up" not in text, \
+        "a deterministic failure must never be advertised as re-runnable"
+    assert rc == 0, "one bad item must not discard 2,999 good migrations"
+
+
+def test_a_transient_failure_is_still_called_transient(tmp_path, monkeypatch, caplog):
+    """The control. Without it the assertion above passes for a run that never
+    says anything about transient failures at all."""
+    import logging
+    ids = [f"id-{i}" for i in range(3000)]
+    with caplog.at_level(logging.WARNING):
+        _run_migrate(tmp_path, monkeypatch, ids, written=ids[:-1], errored=ids[-1:])
+    assert "RE-RUN to pick them up" in caplog.text
+    assert "CANNOT be migrated without a human" not in caplog.text

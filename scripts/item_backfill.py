@@ -201,7 +201,7 @@ def main() -> int:
     # ids could not be identified from it.
     errors_fh = open(args.errors_log, "w")
     try:
-        counts, errored = run_rewrite(todo, edit, out_dir, manifest_fh, errors_fh,
+        counts, errors = run_rewrite(todo, edit, out_dir, manifest_fh, errors_fh,
                                        workers=args.workers, desc="Backfilling")
     finally:
         manifest_fh.close()
@@ -243,7 +243,7 @@ def main() -> int:
     if args.limit is None:
         rewritten = manifest_load(args.manifest, MIGRATION) | set(staged)
         missing = published - rewritten
-        unattempted = missing - errored
+        unattempted = missing - set(errors)
         if unattempted:
             logger.error("INCOMPLETE: %d published, %d never attempted",
                          len(published), len(unattempted))

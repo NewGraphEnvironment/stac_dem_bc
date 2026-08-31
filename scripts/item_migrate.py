@@ -48,6 +48,8 @@ import sys
 
 from collection_patch import COLLECTION_ID
 from item_rewrite import (
+    ERR_EDIT,
+    ERR_FETCH,
     ERROR_ABS_MAX,
     ERROR_RATE_MAX,
     error_tolerable,
@@ -236,8 +238,8 @@ def main() -> int:
     # a previous run's failing ids became unrecoverable from the log.
     errors_fh = open(args.errors_log, "w")
     try:
-        counts, errored = run_rewrite(todo, edit, out_dir, manifest_fh, errors_fh,
-                                      workers=args.workers, desc="Migrating")
+        counts, errors = run_rewrite(todo, edit, out_dir, manifest_fh, errors_fh,
+                                     workers=args.workers, desc="Migrating")
     finally:
         manifest_fh.close()
         errors_fh.close()
@@ -320,18 +322,37 @@ def main() -> int:
         # migration could only ever finish on a run where none of 102,460
         # fetches failed three times. A loop with no exit, produced by two
         # guards that are each correct alone.
-        unattempted = missing - errored
+        # Three causes now, needing three different answers. Telling an operator
+        # to re-run something that cannot succeed sends them round a loop, which
+        # is the same misdirection as a guard that fires and then points at the
+        # wrong fix.
+        transient = {i for i, o in errors.items() if o.startswith(ERR_FETCH)}
+        deterministic = {i for i, o in errors.items() if o.startswith(ERR_EDIT)}
+        unattempted = missing - transient - deterministic
+
         if unattempted:
             logger.error("INCOMPLETE: %d published, %d never attempted",
                          len(published), len(unattempted))
             logger.error("  e.g. %s", sorted(unattempted)[:3])
             return 1
-        if missing:
+
+        if deterministic:
+            # The item's own content is wrong -- a half-done prior run leaving
+            # both asset keys is the reachable case. Every re-run raises the
+            # identical error. Say so, and do NOT say "re-run".
+            logger.error("%d item(s) CANNOT be migrated without a human: their "
+                         "published content is inconsistent, and re-running "
+                         "raises the same error every time.", len(deterministic))
+            for i in sorted(deterministic)[:3]:
+                logger.error("  %s -> %s", i, errors[i])
+            logger.error("  full list: %s", args.errors_log)
+
+        if transient:
             logger.warning("%d item(s) remain unmigrated, all of them this "
-                           "run's transient failures. The run still publishes "
-                           "what it completed; RE-RUN to pick them up, and do "
-                           "not register until a run reports Complete.",
-                           len(missing))
+                           "run's transient fetch failures. The run still "
+                           "publishes what it completed; RE-RUN to pick them "
+                           "up, and do not register until a run reports "
+                           "Complete.", len(transient))
             logger.warning("  failed ids: %s", args.errors_log)
         else:
             logger.info("Complete: all %d published items are migrated (%d in "
