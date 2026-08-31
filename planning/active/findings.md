@@ -170,7 +170,74 @@ bucket rename, which is a third and separate decision.
 Nothing a data consumer sees changes on a repo rename, and GitHub redirects old
 URLs — so it has a different blast radius and no ordering dependency on #34.
 
+## Defects found while building this, and what they generalize to
+
+### A progress manifest is a claim about a step that may not have run
+
+**The most serious defect on this branch was in this branch's own machinery, and
+it was the exact failure the branch exists to prevent.**
+
+`run_rewrite` appends an id to the manifest when the LOCAL WRITE succeeds. The CI
+cache commit is `always()`, deliberately — a run once completed 98,040 items,
+exited non-zero on 2 transient failures, and the lost manifest would have
+restarted it from zero. But the sync step is skipped on failure. So a run failing
+anywhere between the migration and the publish committed a manifest asserting
+items were done that never reached S3, and because `todo = published - manifest`,
+every later run skipped them. Permanently. Silently. With the completeness check
+and the audit both passing while S3 stayed mixed.
+
+**Generalizes to:** a resumability ledger records the step that wrote it, not the
+step the reader cares about. Before persisting one, ask *what does an entry in
+this file claim, and did the thing it claims actually happen?* Where the answer
+depends on a later step, the ledger must be gated on that step, not on the one
+that produced it. Sibling of "a cache written before the work succeeds strands
+its inputs permanently" in `code-check.md`, one level meaner: there the cache is
+written too early within one process; here it is written at the right moment and
+persisted by a *different* mechanism whose condition is wrong.
+
+### A guard suppressed on exactly the runs that need it
+
+`item_migrate`'s completeness reconciliation was skipped whenever anything had
+been staged by an earlier step. That reads as caution. It is the CI shape: the
+pairing rebuild writes into the same directory, so a real cutover in a month with
+pairing changes would have asserted nothing at all. Staged ids now *count* as
+migrated, which they are — `item_create` built them with the current id and key.
+
+**Generalizes to:** when a guard has a "cannot assert this here" branch, work out
+which real runs take it. If the answer is "the ones that matter", the branch is
+the bug.
+
+### One fact derived twice — inside the step written to catch that class
+
+The CI audit compared the staged file count against the *published* total. That
+is correct only on a first complete run; on any resumed run the staged set is
+legitimately the remainder. Homogeneity and completeness are now one statement
+each, with one owner each.
+
+### A guard that fires correctly and then misdirects
+
+The collection-id mismatch guard fires between merge and cutover — correctly, and
+by design. Its message said to point `STAC_BUCKET_URL` at "the bucket for
+stac-elevation-bc", which is the bucket the operator already has, because the
+bucket keeps its old name. The obvious way to make it pass would have registered
+the old catalogue under a name the code no longer uses.
+
+**Generalizes to:** a diagnostic is part of the guard. Check what someone would
+*do* on reading it, not just that the guard fired.
+
+### Smaller, same session
+
+| defect | why it mattered |
+|---|---|
+| `if args.limit:` read `--limit 0` as "no limit" | a rehearsal flag would have run all 102,460 items |
+| non-atomic item write | a truncated JSON syncs to S3, and satisfies both resumability checks so it is never revisited |
+| zero-byte manifest refused | `touch` would lock the tool out, protecting against nothing |
+
 ## Errors Encountered
 
 | Error | Resolution |
 |-------|------------|
+| `test_search_body_*` failed after adding a required arg | every call site in tests updated; the parameter is required rather than defaulted, because a default is what would have gone unnoticed |
+| identity scan flagged `item_migrate.py`'s docstring | strip docstrings via the AST (prose the interpreter discards), not by text; every other string stays in scope |
+| identity scan flagged `update.yml`'s dispatch description | reworded to name the constants — a hardcoded name in a UI string goes stale anyway |
+| `--limit 0` test appeared to show a completeness bug | the test was wrong, not the code; but it exposed that `--limit 0` was read as "no limit" |
