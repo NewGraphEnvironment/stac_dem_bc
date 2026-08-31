@@ -20,7 +20,14 @@ import sys
 import pystac
 from pystac import Collection, Extent, SpatialExtent, TemporalExtent
 
-from collection_patch import DESCRIPTION, KEYWORDS, PROVIDERS, version_stamp
+from collection_patch import (
+    COLLECTION_ID,
+    COLLECTION_TITLE,
+    DESCRIPTION,
+    KEYWORDS,
+    PROVIDERS,
+    version_stamp,
+)
 from stac_utils import (
     BBOX_BC,
     date_extract_from_path,
@@ -51,7 +58,7 @@ def main():
 
     path_local = get_output_dir(test_only=args.test)
     path_collection = f"{path_local}/collection.json"
-    collection_id = "stac-dem-bc"
+    collection_id = COLLECTION_ID
 
     logger.info("Mode: %s", "TEST (dev output)" if args.test else "PRODUCTION (prod output)")
     logger.info("Output: %s", path_collection)
@@ -98,15 +105,16 @@ def main():
 
     # Create collection
     extent = Extent(spatial=spatial_extent, temporal=temporal_extent)
-    # providers/keywords/description come from collection_patch so a full
-    # rebuild and an in-place patch of the published collection cannot drift.
-    # See issue #30: CC-BY-4.0 obliges attribution the metadata did not carry.
+    # id/title/providers/keywords/description all come from collection_patch,
+    # so a full rebuild and an in-place patch of the published collection cannot
+    # drift. See #30 (CC-BY-4.0 obliges attribution the metadata did not carry)
+    # and #34 (the id, which used to be a literal here as well as there).
     collection = Collection(
         id=collection_id,
         description=DESCRIPTION,
         extent=extent,
         license="CC-BY-4.0",
-        title=f"Digital Elevation Models from British Columbia - {collection_id}",
+        title=COLLECTION_TITLE,
         href=path_collection,
         providers=[pystac.Provider.from_dict(p) for p in PROVIDERS],
         keywords=list(KEYWORDS),

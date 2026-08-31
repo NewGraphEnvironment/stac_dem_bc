@@ -20,6 +20,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 from collection_patch import (  # noqa: E402
+    COLLECTION_ID,
     VERSION_EXT,
     collection_patch,
     version_clear,
@@ -28,7 +29,13 @@ from collection_patch import (  # noqa: E402
 
 
 def _collection(**extra):
-    c = {"id": "stac-dem-bc", "type": "Collection", "links": []}
+    # The CURRENT id, not a literal. These tests are about version handling, so
+    # the fixture should be a collection that is otherwise already patched --
+    # a stale id here would make every collection_patch() call below report an
+    # `id` change it is not testing for, and the assertions would go on passing
+    # while describing a different world. The rename itself is covered in
+    # tests/test_collection_identity.py.
+    c = {"id": COLLECTION_ID, "type": "Collection", "links": []}
     c.update(extra)
     return c
 

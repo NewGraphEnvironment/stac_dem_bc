@@ -57,7 +57,7 @@ trustworthy.
 - [x] `catalogue_qa.py:72-75`: compare `sorted(assets.keys())`, not `len(assets)`
       (one line; *not* a cutover gate — it has no tests and a hardcoded personal
       `--local-dir` default)
-- [ ] Baseline, on a tailnet machine — must be clean before anything moves, or
+- [x] Baseline, on a tailnet machine — must be clean before anything moves, or
       "the rename lost items" and "we were already behind" become
       indistinguishable:
       `scripts/catalogue_register.sh --verify` must print IN SYNC, then
@@ -109,21 +109,21 @@ Inside `collection_patch()`'s idempotence contract, alongside `PROVIDERS` /
 correct value changes every release; a collection id is a constant fact. Inside
 the contract, the monthly run carries it and `--check` can see a regression.
 
-- [ ] `collection_patch.py`: `COLLECTION_ID`, `COLLECTION_TITLE`, and
+- [x] `collection_patch.py`: `COLLECTION_ID`, `COLLECTION_TITLE`, and
       `links_retitle(collection, title)` for the **root link's title** — the
       fourth spelling a two-field patch would leave contradicting the other three
-- [ ] Rewrite `DESCRIPTION` (`:65-72`): name `dem`, delete the backward-compat
+- [x] Rewrite `DESCRIPTION` (`:65-72`): name `dem`, delete the backward-compat
       sentence, which expires with this change
-- [ ] Strengthen the item-link invariant at `:223-229`: assert the item link
+- [x] Strengthen the item-link invariant at `:223-229`: assert the item link
       **hrefs** round-trip (`== [encode_url_for_gdal(h) for h in before]`), not
       just the count — renaming the id introduces an href-mutation failure the
       count cannot see
-- [ ] `collection_create.py:54,109` import the constants; no literal id left
-- [ ] `catalogue_register.sh:42` reads the constant and **aborts if the read
+- [x] `collection_create.py:54,109` import the constants; no literal id left
+- [x] `catalogue_register.sh:42` reads the constant and **aborts if the read
       fails** rather than falling back to a literal. Keep the `:97-105` guard
       verbatim — it is the cutover's primary safety. Rewrite the `:25-27` header:
       "two knobs over one fact" is now **false**, since the bucket keeps its name
-- [ ] Tests: the new id is defined in exactly one place under `scripts/`; every
+- [x] Tests: the new id is defined in exactly one place under `scripts/`; every
       surviving `stac-dem-bc` in `scripts/` is inside a bucket URL (that *is*
       "the bucket is out of scope", stated as a test). Strip comments before
       matching, so a live literal cannot hide as one

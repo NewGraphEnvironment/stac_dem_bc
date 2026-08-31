@@ -22,10 +22,14 @@
 # Env:
 #   STAC_HOST        ssh target (default: root@geopro)
 #   STAC_DB          pgstac database (default: stac)
-#   STAC_COLLECTION  collection id (default: stac-dem-bc)
+#   STAC_COLLECTION  collection id (default: collection_patch.COLLECTION_ID)
 #   STAC_BUCKET_URL  bucket serving collection.json (default: the stac-dem-bc
-#                    bucket). MUST move together with STAC_COLLECTION -- they are
-#                    two knobs over one fact, and the script reconciles them.
+#                    bucket). These were once two knobs over ONE fact, because
+#                    the collection and the bucket shared a name. Since #34 they
+#                    are genuinely two -- the collection is stac-elevation-bc and
+#                    the bucket is still stac-dem-bc -- so neither can be derived
+#                    from the other, and the script reconciles them at runtime
+#                    against the id inside the fetched collection.json instead.
 #   STAC_API         API base (default: https://images.a11s.one)
 #   FETCH_JOBS       parallel S3 fetches (default: 20)
 #
@@ -37,9 +41,29 @@
 
 set -euo pipefail
 
+PY="${PYTHON:-.venv/bin/python}"
+[ -x "$PY" ] || PY=python3
+
 HOST="${STAC_HOST:-root@geopro}"
 DB="${STAC_DB:-stac}"
-COLLECTION_ID="${STAC_COLLECTION:-stac-dem-bc}"
+# Read from collection_patch rather than repeated here. A second literal is a
+# second definition, and the two would disagree exactly once -- during a rename,
+# which is when being wrong is most expensive.
+#
+# Assigned and THEN tested, not tested inline: a failing command substitution
+# leaves an empty string, and an empty collection id reads as "no collection"
+# rather than as "the lookup broke". Failing loudly beats falling back to a
+# literal that is stale by construction.
+if [ -n "${STAC_COLLECTION:-}" ]; then
+  COLLECTION_ID="$STAC_COLLECTION"
+else
+  COLLECTION_ID=$("$PY" -c 'import sys; sys.path.insert(0, "scripts"); import collection_patch; print(collection_patch.COLLECTION_ID)' 2>/dev/null) || COLLECTION_ID=""
+  if [ -z "$COLLECTION_ID" ]; then
+    echo "ERROR: could not read COLLECTION_ID from scripts/collection_patch.py." >&2
+    echo "       Run from the repo root, or set STAC_COLLECTION explicitly." >&2
+    exit 1
+  fi
+fi
 API="${STAC_API:-https://images.a11s.one}"
 JOBS="${FETCH_JOBS:-20}"
 BUCKET_URL="${STAC_BUCKET_URL:-https://stac-dem-bc.s3.amazonaws.com}"
@@ -62,9 +86,6 @@ if [ -z "$MODE" ]; then
   echo "Usage: $0 [--dryrun] (--drift | --all | --ids-file F | --verify)" >&2
   exit 1
 fi
-
-PY="${PYTHON:-.venv/bin/python}"
-[ -x "$PY" ] || PY=python3
 
 WORK=$(mktemp -d -t catalogue_register.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
@@ -89,11 +110,13 @@ echo "fetching published collection.json ..."
 curl -fsSL --max-time 300 "$BUCKET_URL/collection.json" -o "$WORK/collection.json"
 "$PY" scripts/register_manifest.py ids-published \
   --collection-file "$WORK/collection.json" > "$WORK/published.txt"
-# STAC_COLLECTION and STAC_BUCKET_URL must move together. They are independent
-# knobs over the same fact, and the API answers an unknown collection with
-# 200 / zero features / no next link -- so pointing them at different collections
-# reports every published item as missing, then "registers" them under an id the
-# fetch never came from. Reconciled here rather than discovered later.
+# STAC_COLLECTION and STAC_BUCKET_URL name two DIFFERENT things since #34 -- the
+# collection is stac-elevation-bc, the bucket is still stac-dem-bc -- so neither
+# can be checked against the other by name. What reconciles them is the id
+# INSIDE the fetched file. It matters because the API answers an unknown
+# collection with 200 / zero features / no next link, so a mismatched pair
+# reports every published item as missing and then "registers" them under an id
+# the fetch never came from. Caught here rather than discovered later.
 FILE_COLLECTION_ID=$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("id",""))' \
   "$WORK/collection.json")
 if [ "$FILE_COLLECTION_ID" != "$COLLECTION_ID" ]; then
