@@ -185,8 +185,26 @@ def process_one(item_id: str, edit: Edit, out_dir: str,
             changed = edit(item_id, item)
             if not changed:
                 return item_id, "unchanged"
-            with open(os.path.join(out_dir, f"{item_id}.json"), "w") as fh:
-                json.dump(item, fh)
+            # Write via a temp file and rename, for the same reason
+            # collection_patch does: an interrupted write must not leave a
+            # TRUNCATED item, which would be synced to S3 as a published item
+            # nothing can parse. A run killed by the job timeout is the real
+            # case at this scale, and it lands mid-write on whatever item was
+            # in flight. os.replace is atomic on the same filesystem.
+            #
+            # It also protects the resumability logic: skip_already_staged and
+            # the completeness check both treat "a file exists" as "this id is
+            # done", and a half-written file would satisfy both.
+            dest = os.path.join(out_dir, f"{item_id}.json")
+            tmp = f"{dest}.tmp"
+            try:
+                with open(tmp, "w") as fh:
+                    json.dump(item, fh)
+                os.replace(tmp, dest)
+            except Exception:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+                raise
             return item_id, "written"
         except Exception as e:  # noqa: BLE001 - reported per item, never fatal
             last = str(e)
@@ -287,6 +305,9 @@ def skip_already_staged(todo: list, out_dir: str) -> tuple:
     """
     kept, skipped = [], []
     for item_id in todo:
+        # `.json` exactly. A leftover `<id>.json.tmp` from an interrupted write
+        # is not a staged item, and os.path.exists on the real name is already
+        # false for it -- stated here so the distinction is not re-litigated.
         if os.path.exists(os.path.join(out_dir, f"{item_id}.json")):
             skipped.append(item_id)
         else:

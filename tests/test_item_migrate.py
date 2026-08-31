@@ -382,3 +382,44 @@ def test_manifest_load_survives_a_ledger_with_no_trailing_newline(tmp_path):
     p = tmp_path / "m.txt"
     p.write_text(f"{MANIFEST_HEADER}mine\na\nb")
     assert manifest_load(str(p), "mine") == {"a", "b"}
+
+
+def test_a_written_item_is_never_left_truncated(tmp_path, monkeypatch):
+    """A partial write would be synced to S3 as an unparseable published item.
+
+    It would also satisfy both resumability checks -- skip_already_staged and
+    the completeness reconciliation treat "a file exists" as "this id is done"
+    -- so a truncated file would be counted as migrated and never revisited.
+
+    Simulated by failing mid-serialise, which is what a job timeout does to
+    whatever item is in flight.
+    """
+    import item_rewrite
+
+    class Boom(Exception):
+        pass
+
+    real_dump = item_rewrite.json.dump
+
+    def exploding_dump(obj, fh, *a, **kw):
+        fh.write('{"partial": ')      # bytes on disk, then death
+        raise Boom("killed mid-write")
+
+    monkeypatch.setattr(item_rewrite.json, "dump", exploding_dump)
+    monkeypatch.setattr(item_rewrite, "item_fetch", lambda i: published(item_id=i))
+
+    item_id, outcome = item_rewrite.process_one(
+        "x", lambda i, d: item_migrate(d), str(tmp_path), attempts=1)
+
+    assert outcome.startswith("error:")
+    assert not (tmp_path / "x.json").exists(), \
+        "a failed write must leave NO file, not a truncated one"
+    assert list(tmp_path.iterdir()) == [], "and no leftover temp either"
+
+    # And the same call succeeds once the writer works, so the test above is
+    # about the failure and not about a path that never worked.
+    monkeypatch.setattr(item_rewrite.json, "dump", real_dump)
+    item_id, outcome = item_rewrite.process_one(
+        "x", lambda i, d: item_migrate(d), str(tmp_path), attempts=1)
+    assert outcome == "written"
+    assert json.load(open(tmp_path / "x.json"))["collection"] == NEW_ID
