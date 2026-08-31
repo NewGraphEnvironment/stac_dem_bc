@@ -318,12 +318,15 @@ find "$FETCH_DIR" -maxdepth 1 -type f -name '*.json' | ./scripts/item_register.s
 
 echo "verifying by set equality ..."
 # Delegated to register_manifest.py rather than inlined, because the request
-# body needs a `limit` and that is exactly the kind of detail an inline heredoc
-# loses. The API's default limit is 10: a body without one returns the first 10
-# ids of however many were asked for, which reads as "590 of my 600 items are
-# missing" and fails a verification whose subject was fine. Measured, and pinned
-# by tests/test_register_manifest.py.
+# body needs two details an inline heredoc would lose, each of which fails
+# silently when omitted. The API's default limit is 10: a body without one
+# returns the first 10 ids of however many were asked for, which reads as
+# "590 of my 600 items are missing" and fails a verification whose subject was
+# fine. And without `collections`, /search answers about every collection on
+# the endpoint -- so during #34, when two collections share all 102,460 ids,
+# verifying the new one would pass on the old one's rows. Both measured, and
+# pinned by tests/test_register_manifest.py.
 "$PY" scripts/register_manifest.py verify-serving \
-  --ids-file "$WORK/todo.txt" --api "$API"
+  --ids-file "$WORK/todo.txt" --collection-id "$COLLECTION_ID" --api "$API"
 
 echo "DONE: $N_TODO item(s) registered to $COLLECTION_ID"

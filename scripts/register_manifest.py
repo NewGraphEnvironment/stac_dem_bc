@@ -160,26 +160,42 @@ def ids_registered(collection_id: str, api: str = API_DEFAULT,
     return ids
 
 
-def search_body(ids) -> dict:
-    """The POST /search body for an id lookup.
+def search_body(ids, collection_id: str) -> dict:
+    """The POST /search body for an id lookup, scoped to one collection.
 
-    Pure, and separated out purely so it can be asserted on offline. The
-    `limit` is the whole reason: the API's DEFAULT LIMIT IS 10, so a body
-    without one silently returns the first 10 of however many ids were asked
-    for. That reads as "590 of my 600 items are missing" and fails a
-    verification whose subject was in fact fine. Measured against the live API:
-    600 registered ids, no limit -> 10 features; limit=600 -> 600.
+    Pure, and separated out purely so it can be asserted on offline. Two
+    parameters, each of which exists because omitting it fails silently.
+
+    `limit`: the API's DEFAULT LIMIT IS 10, so a body without one silently
+    returns the first 10 of however many ids were asked for. That reads as
+    "590 of my 600 items are missing" and fails a verification whose subject
+    was in fact fine. Measured against the live API: 600 registered ids, no
+    limit -> 10 features; limit=600 -> 600.
+
+    `collections`: without it a /search asks "is this id served ANYWHERE",
+    which is a different question from the one every caller means. It was
+    harmless for as long as one collection existed. #34 puts two collections
+    on the endpoint by design, sharing all 102,460 ids -- so an unscoped
+    verification of the NEW collection passes green while the OLD one is
+    answering, even if zero items registered. The collection id is required
+    rather than defaulted, because a default is exactly the thing that would
+    have gone unnoticed here.
     """
     ids = list(ids)
+    if not collection_id:
+        raise ValueError("collection_id is required: an unscoped /search "
+                         "answers about every collection on the endpoint")
     return {
+        "collections": [collection_id],
         "ids": ids,
         "limit": max(len(ids), 1),
         "fields": {"include": ["id"]},
     }
 
 
-def ids_serving(ids, api: str = API_DEFAULT, chunk: int = 500, session=None) -> set:
-    """Which of these ids the API actually serves, as a set.
+def ids_serving(ids, collection_id: str, api: str = API_DEFAULT,
+                chunk: int = 500, session=None) -> set:
+    """Which of these ids the API serves IN THIS COLLECTION, as a set.
 
     Batched because a very long id list is a real request-size ceiling. Returns
     a SET so the caller compares sets — a /search omits ids that do not exist
@@ -191,7 +207,7 @@ def ids_serving(ids, api: str = API_DEFAULT, chunk: int = 500, session=None) -> 
     got = set()
     for i in range(0, len(ids), chunk):
         batch = ids[i:i + chunk]
-        page = _post(session, url, search_body(batch))
+        page = _post(session, url, search_body(batch, collection_id))
         got.update(f["id"] for f in page.get("features", []))
     return got
 
@@ -269,6 +285,7 @@ def main() -> int:
     p = sub.add_parser("verify-serving",
                        help="assert every id in a file is served by the API")
     p.add_argument("--ids-file", required=True)
+    p.add_argument("--collection-id", required=True)
     p.add_argument("--api", default=API_DEFAULT)
 
     args = ap.parse_args()
@@ -333,14 +350,16 @@ def main() -> int:
         if not wanted:
             print("nothing to verify (0 ids)", file=sys.stderr)
             return 0
-        got = ids_serving(wanted, args.api)
+        got = ids_serving(wanted, args.collection_id, args.api)
         missing = sorted(set(wanted) - got)
-        print(f"requested {len(wanted)}, serving {len(got)}", file=sys.stderr)
+        print(f"requested {len(wanted)}, serving {len(got)} "
+              f"in {args.collection_id}", file=sys.stderr)
         if missing:
-            print(f"FAIL: {len(missing)} id(s) not served, e.g. {missing[:3]}",
-                  file=sys.stderr)
+            print(f"FAIL: {len(missing)} id(s) not served by "
+                  f"{args.collection_id}, e.g. {missing[:3]}", file=sys.stderr)
             return 1
-        print("OK: every requested id is served by the API", file=sys.stderr)
+        print(f"OK: every requested id is served by {args.collection_id}",
+              file=sys.stderr)
 
     return 0
 

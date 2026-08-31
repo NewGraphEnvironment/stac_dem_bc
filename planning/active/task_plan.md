@@ -51,10 +51,10 @@ a schedule; it can be deferred at any time at the cost of ~205k rows in pgstac.
 Independent of the rename. Merge first so the cutover's own verification is
 trustworthy.
 
-- [ ] `register_manifest.py`: `search_body(ids, collection_id)` sets
+- [x] `register_manifest.py`: `search_body(ids, collection_id)` sets
       `"collections": [collection_id]`; thread it through `ids_serving` and
       `verify-serving`. Test: `test_search_body_scopes_to_the_collection`
-- [ ] `catalogue_qa.py:72-75`: compare `sorted(assets.keys())`, not `len(assets)`
+- [x] `catalogue_qa.py:72-75`: compare `sorted(assets.keys())`, not `len(assets)`
       (one line; *not* a cutover gate — it has no tests and a hardcoded personal
       `--local-dir` default)
 - [ ] Baseline, on a tailnet machine — must be clean before anything moves, or
@@ -63,7 +63,7 @@ trustworthy.
       `scripts/catalogue_register.sh --verify` must print IN SYNC, then
       `register_manifest.py ids-registered --collection-id stac-dem-bc`
       saved to `~/stac-dem-bc-baseline-ids.txt`
-- [ ] Confirm `data/urls_pairing_changed.txt` is empty (see Phase 5 clobber guard)
+- [x] Confirm `data/urls_pairing_changed.txt` is empty (see Phase 5 clobber guard)
 
 ## Phase 1 — Extract the rewrite harness (no behaviour change)
 

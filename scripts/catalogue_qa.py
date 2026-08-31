@@ -68,11 +68,13 @@ def compare_items(local_json: dict, s3_json: dict, item_file: str) -> list:
     if local_json.get('bbox') != s3_json.get('bbox'):
         diffs.append("BBox mismatch")
 
-    # Compare asset count
-    local_assets = len(local_json.get('assets', {}))
-    s3_assets = len(s3_json.get('assets', {}))
+    # Compare asset KEYS, not their count. A count cannot see a rename:
+    # {image, dsm} and {dem, dsm} both count 2, so the #34 asset rename would
+    # have been invisible to this check in either direction.
+    local_assets = sorted(local_json.get('assets', {}))
+    s3_assets = sorted(s3_json.get('assets', {}))
     if local_assets != s3_assets:
-        diffs.append(f"Asset count mismatch: local={local_assets} vs s3={s3_assets}")
+        diffs.append(f"Asset key mismatch: local={local_assets} vs s3={s3_assets}")
 
     return diffs
 
