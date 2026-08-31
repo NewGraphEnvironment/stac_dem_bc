@@ -62,3 +62,58 @@ branch exists to prevent, arriving through its own progress file — see
 Phases 6-8 are operational and are triggered by hand: dispatch the rename,
 register, verify, update downstream consumers, drop the old collection, release.
 Target dispatch **Sep 1**, ahead of the Sep 3 cron.
+
+## Session 2026-08-31 (evening) — the cutover, phases 6–7
+
+PR #39 merged as `e8ea5b8`. **#34 deliberately kept OPEN** — the PR body said
+`Closes #34`, which would have closed an issue whose subject (a renamed
+catalogue) had not happened yet. Changed to `Relates to`, and confirmed no commit
+carried a trailer either. **No tag cut**: `NEWS.md` states that a tag means "the
+catalogue is in this state", and it was not yet; v2.0.0 belongs after the drop.
+
+### What ran
+
+| | |
+|---|---|
+| rename dispatch | run 33434241580, 48m51s, every step green |
+| items migrated | **102,460 written, 0 unchanged, 0 error** — 12m35s |
+| completeness | `Complete: all 102460 published items are migrated` |
+| audit before sync | 102,460 checked — every item agrees with its collection |
+| registration | 102,460 fetched (0 failed), audited, loaded |
+| set equality ×2 | `IN SYNC: 102460 published, all registered, no orphans` |
+
+### Verified against the world, not the run's own report
+
+- S3 `collection.json`: new id, new title in **both** places incl. the root link;
+  102,460 item links; version cleared.
+- Four item bodies sampled across the collection, one of them among the 90 with
+  `%20` hrefs: all `stac-elevation-bc`, keyed `dem`, `dem` href byte-identical
+  with `/dem/` intact, collection link still on the old bucket. All 90 present.
+- pgstac, exact, both collections fully homogeneous:
+  `stac-dem-bc 102460 | 0 dem | 102460 image | 95888 dsm`
+  `stac-elevation-bc 102460 | 102460 dem | 0 image | 95888 dsm`
+- **A real client query**: bbox + datetime → 5 tiles keyed `dem`; the download
+  href returns **HTTP 200, 195 MB**.
+- **The real rtj consumer**: `epochs_for()` → 10 rows, every href non-empty.
+
+### Landed
+
+- `stac_dem_bc` main: README.Rmd + README.md + index.html + regenerated
+  `data/stac_result.rds` (64 features against the live collection). The published
+  site carried a query that would return nothing after the drop.
+
+### Open, and rtj#252 BLOCKS the drop
+
+| PR | why |
+|---|---|
+| [rtj#252](https://github.com/NewGraphEnvironment/rtj/pull/252) | `scripts/dem/_shared.R` — the only live code consumer anywhere; reads both the id and the asset key |
+| [fly#46](https://github.com/NewGraphEnvironment/fly/pull/46) | roxygen prose |
+| [stac_floodplains_bc#25](https://github.com/NewGraphEnvironment/stac_floodplains_bc/pull/25) | one line of prose |
+
+### Remaining (phase 7 tail + phase 8)
+
+Merge rtj#252 → `collection_unregister.sh --yes stac-dem-bc` (**irreversible**;
+after it pgstac's rows are the last copy of the old-shaped catalogue, and `--all`
+cannot rebuild them) → `--version 2.0.0` + re-register the collection → NEWS +
+tag → file the repo-rename issue → `/planning-archive`.
+

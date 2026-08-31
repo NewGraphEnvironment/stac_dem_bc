@@ -191,21 +191,21 @@ run logs as evidence. Mirrors the existing `backfill` dispatch precedent.
 Target **Sep 1**. Do not dispatch Sep 2–4: a failure queued behind the cron is
 the messiest state to read.
 
-- [ ] Rehearsal, laptop, scratch only:
+- [x] Rehearsal, laptop, scratch only:
       `item_migrate.py --limit 20 --dry-run`, then `--limit 200 --verify 20`
-- [ ] Dispatch `gh workflow run update.yml -f rename=true` (~55–65 min; the
+- [x] Dispatch `gh workflow run update.yml -f rename=true` (~55–65 min; the
       2026-08-29 backfill over 98,040 items took 47m01s)
-- [ ] Verify S3: `collection.json` has the new `id`, the new `title` **in both
+- [x] Verify S3: `collection.json` has the new `id`, the new `title` **in both
       places**, 102,460 item links, no `version`
-- [ ] Register, tailnet (~45 min): `catalogue_register.sh --all --dryrun`, then
+- [x] Register, tailnet (~45 min): `catalogue_register.sh --all --dryrun`, then
       `--all`. Collection first (FK), then items. **Add `audit-items` between the
       fetch and the register** — the script has already fetched all 102,460
       bodies into `$FETCH_DIR`, so the full-population check is free and aborts
       before anything reaches pgstac. This closes the gap that the script
       reconciles `STAC_COLLECTION` against `collection.json` but never against
       item bodies
-- [ ] `catalogue_register.sh --verify` → `IN SYNC: 102460`, no orphans
-- [ ] pgstac audit on the host — one row per collection, grouping
+- [x] `catalogue_register.sh --verify` → `IN SYNC: 102460`, no orphans
+- [x] pgstac audit on the host — one row per collection, grouping
       `pgstac.items` by `collection` with counts filtered on whether
       `content->'assets'` holds `dem` / `image`. Expect
       `stac-elevation-bc | 102460 | 102460 | 0`. Check `\d pgstac.items` first —
@@ -214,19 +214,19 @@ the messiest state to read.
 
 ## Phase 7 — Downstream, then drop the old collection
 
-- [ ] `rtj/scripts/dem/_shared.R` — `:12` `COLLECTION <- "stac-dem-bc"` and
+- [x] `rtj/scripts/dem/_shared.R` — `:12` `COLLECTION <- "stac-dem-bc"` and
       `:95` `f$assets$image$href`. **The one live downstream code consumer**;
       separate PR in `rtj`, its own worktree
-- [ ] `rtj/docs/stac-endpoints.md:12,28`; `fly/R/fly_footprint.R:342` + its
+- [x] `rtj/docs/stac-endpoints.md:12,28`; `fly/R/fly_footprint.R:342` + its
       `.Rd`; `stac_floodplains_bc/README.md:15` (all prose)
-- [ ] `README.Rmd:80` (`collections =`) **and** `:104`
+- [x] `README.Rmd:80` (`collections =`) **and** `:104`
       (`pluck(..., "image", ...)`) in one pass, then regenerate
       `data/stac_result.rds` with `update_query=TRUE`. They fail differently —
       the `pluck` loudly, the `collections=` **silently** as an empty table — so
       only a real regeneration proves both
 - [ ] `scripts/README.md:231`; a "superseded" header note on
       `stac_create_item.qmd` rather than editing its `image` literals
-- [ ] **Gate:** the regenerated README query actually returned tiles and a
+- [x] **Gate:** the regenerated README query actually returned tiles and a
       download href resolves. Schema validation does not prove a consumer works
 - [ ] `collection_unregister.sh stac-dem-bc` (reports, deletes nothing) — the
       count must read **102,460**; anything else means something is still
