@@ -246,7 +246,12 @@ def main() -> int:
                 counts["written"], counts["unchanged"], counts["error"])
 
     processed = sum(counts.values())
-    tolerable = error_tolerable(counts["error"], processed)
+    # The population, not this run's share of it. A resumable job's runs shrink
+    # towards zero, so measuring against the run tightens the gate the closer
+    # you get to finishing -- see error_tolerable. A --limit rehearsal is not
+    # doing the whole job and passes no population.
+    tolerable = error_tolerable(counts["error"], processed,
+                                population=0 if args.limit is not None else len(published))
     if counts["error"]:
         rate = counts["error"] / processed if processed else 0.0
         logger.warning("error rate %.5f (%d/%d); tolerance %.5f / %d abs -> %s",

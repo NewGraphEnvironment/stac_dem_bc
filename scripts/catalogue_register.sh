@@ -355,8 +355,17 @@ fi
 #
 # --expect ties the count to the same set the fetch guard above used, rather
 # than to a separately-derived number that could disagree on a healthy run.
+# The asset key as well as the collection id. A body can name the right
+# collection and still carry the retired key -- half of the rename, which
+# nothing downstream can see. Both values are read from the modules, never
+# spelled here.
+AUDIT_DEM=$("$PY" -c 'import sys; sys.path.insert(0, "scripts"); import stac_utils; print(stac_utils.ASSET_DEM)')
+AUDIT_OLD=$("$PY" -c 'import sys; sys.path.insert(0, "scripts"); import item_migrate; print(",".join(item_migrate.ASSET_RENAMES))')
+[ -n "$AUDIT_DEM" ] || { echo "ERROR: could not read the asset key constants" >&2; exit 1; }
+
 "$PY" scripts/register_manifest.py audit-items \
-  --dir "$FETCH_DIR" --collection-id "$COLLECTION_ID" --expect "$N_TODO"
+  --dir "$FETCH_DIR" --collection-id "$COLLECTION_ID" --expect "$N_TODO" \
+  --require-asset "$AUDIT_DEM" --forbid-asset "$AUDIT_OLD"
 
 # find, never a glob: 102k filenames is ~6 MB of argv against a ~2 MB ARG_MAX,
 # and it would fail after the fetch had already succeeded.

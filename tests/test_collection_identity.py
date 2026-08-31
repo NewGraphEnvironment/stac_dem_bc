@@ -297,7 +297,7 @@ def test_the_fixture_can_reach_every_outcome():
 
 
 def test_patch_moves_the_id_in_all_three_places():
-    c, changed = _patch(_published())
+    c, changed = _patch(_published(), allow_id_change=True)
     assert c["id"] == collection_patch.COLLECTION_ID
     assert c["title"] == collection_patch.COLLECTION_TITLE
     root = [l for l in c["links"] if l["rel"] == "root"][0]
@@ -311,7 +311,7 @@ def test_patch_leaves_the_root_link_href_on_the_bucket():
     They are different facts sharing one line of JSON, which is exactly the
     shape a careless substitution gets wrong.
     """
-    c, _ = _patch(_published())
+    c, _ = _patch(_published(), allow_id_change=True)
     root = [l for l in c["links"] if l["rel"] == "root"][0]
     assert root["href"] == f"{BUCKET}/collection.json"
     assert OLD_ID in root["href"]
@@ -320,7 +320,7 @@ def test_patch_leaves_the_root_link_href_on_the_bucket():
 def test_patch_does_not_move_item_links_off_the_bucket():
     """102,460 hrefs point at a bucket that keeps its name. Renaming them would
     break every published item and could not be undone from the API."""
-    c, _ = _patch(_published(n_items=5))
+    c, _ = _patch(_published(n_items=5), allow_id_change=True)
     for link in [l for l in c["links"] if l["rel"] == "item"]:
         assert link["href"].startswith(BUCKET), link["href"]
         assert collection_patch.COLLECTION_ID not in link["href"]
@@ -328,7 +328,7 @@ def test_patch_does_not_move_item_links_off_the_bucket():
 
 def test_patch_still_encodes_spaces_and_changes_nothing_else_in_hrefs():
     before = [l["href"] for l in _published()["links"] if l["rel"] == "item"]
-    c, _ = _patch(_published())
+    c, _ = _patch(_published(), allow_id_change=True)
     after = [l["href"] for l in c["links"] if l["rel"] == "item"]
     assert len(after) == len(before)
     assert after[-1] == before[-1].replace(" ", "%20")
@@ -337,7 +337,7 @@ def test_patch_still_encodes_spaces_and_changes_nothing_else_in_hrefs():
 
 def test_patch_is_idempotent_after_the_rename():
     """The contract --check reports on. A second run must report nothing."""
-    c, first = _patch(_published())
+    c, first = _patch(_published(), allow_id_change=True)
     assert first, "the first run must have something to do"
     _, second = _patch(c)
     assert second == []
@@ -345,7 +345,7 @@ def test_patch_is_idempotent_after_the_rename():
 
 def test_patch_of_an_already_renamed_collection_reports_no_change():
     c = _published()
-    _patch(c)
+    _patch(c, allow_id_change=True)
     # Through JSON, so the second run sees a document rather than the same
     # objects the first run mutated in place.
     fresh = json.loads(json.dumps(c))
@@ -374,3 +374,55 @@ def test_links_retitle_adds_a_title_to_a_root_link_that_has_none():
     c = {"links": [{"rel": "root", "href": f"{BUCKET}/collection.json"}]}
     assert links_retitle(c, "NEW") == 1
     assert c["links"][0]["title"] == "NEW"
+
+
+# =============================================================================
+# changing the id is a MIGRATION, not a metadata patch
+# =============================================================================
+
+def test_patch_refuses_to_move_the_id_without_permission():
+    """The monthly workflow calls collection_patch on every month with new URLs.
+
+    Without this guard the first cron after a rename merges would publish a
+    renamed collection.json over 102,460 unmigrated item bodies — performing
+    half a migration by itself. Nothing would report it: the monthly audit reads
+    the collection id from this very file and inspects only the items staged
+    that month, so it passes green while S3 is split in two.
+    """
+    with pytest.raises(RuntimeError, match="that is a migration|is a migration"):
+        _patch(_published())
+
+
+def test_the_refusal_names_both_ids_and_the_remedy():
+    """A guard that fires and then misdirects is how someone reaches for the
+    override that makes it pass."""
+    try:
+        _patch(_published())
+    except RuntimeError as e:
+        msg = str(e)
+    assert OLD_ID in msg and collection_patch.COLLECTION_ID in msg
+    assert "rename=true" in msg
+
+
+def test_patch_moves_the_id_when_permitted():
+    c, changed = _patch(_published(), allow_id_change=True)
+    assert c["id"] == collection_patch.COLLECTION_ID
+    assert "id" in changed
+
+
+def test_patch_of_a_current_collection_needs_no_permission():
+    """The monthly path must keep working once the migration has happened —
+    otherwise this guard has replaced one broken month with every month."""
+    c, _ = _patch(_published(), allow_id_change=True)
+    fresh = json.loads(json.dumps(c))
+    _, changed = _patch(fresh)          # no permission, and none needed
+    assert changed == []
+
+
+def test_a_collection_with_no_id_is_not_treated_as_a_rename():
+    """A hand-built or truncated file has no id to move FROM. Refusing it would
+    block a legitimate first write."""
+    c = {"links": [{"rel": "root", "href": f"{BUCKET}/collection.json"}]}
+    out, changed = _patch(c)
+    assert out["id"] == collection_patch.COLLECTION_ID
+    assert "id" in changed

@@ -167,7 +167,9 @@ def main() -> int:
     # fresher rebuild -- which, for a tile whose DSM was withdrawn, silently
     # restores the dsm asset the rebuild had just removed.
     todo, staged = skip_already_staged(todo, out_dir)
-    if staged:
+    # Not on a dry run: a preview must not report on a directory it was never
+    # going to write to. Same rule as item_migrate.
+    if staged and not args.dry_run:
         logger.info("Skipping %d id(s) already staged in %s by an earlier step",
                     len(staged), out_dir)
 
@@ -209,7 +211,12 @@ def main() -> int:
                 counts["written"], counts["unchanged"], counts["error"])
 
     processed = sum(counts.values())
-    tolerable = error_tolerable(counts["error"], processed)
+    # The population, not this run's share of it. A resumable job's runs shrink
+    # towards zero, so measuring against the run tightens the gate the closer
+    # you get to finishing -- see error_tolerable. A --limit rehearsal is not
+    # doing the whole job and passes no population.
+    tolerable = error_tolerable(counts["error"], processed,
+                                population=0 if args.limit is not None else len(published))
     if counts["error"]:
         rate = counts["error"] / processed if processed else 0.0
         logger.warning("error rate %.5f (%d/%d); tolerance %.5f / %d abs -> %s",

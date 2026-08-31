@@ -157,8 +157,13 @@ def test_the_local_run_error_count_is_also_tolerated():
 def test_a_systemic_failure_is_not_tolerated():
     """The gate must still fail when something is actually broken."""
     assert not _tolerable(5000, 98040)      # 5% - credentials, DNS, bucket gone
-    assert not _tolerable(500, 98040)       # over the absolute cap
-    assert not _tolerable(3, 100)           # small run, 3% - rate catches it
+    assert not _tolerable(500, 98040)       # 0.51% - the RATE catches this one
+    assert not _tolerable(3, 100)           # small run, 3% - rate again
+    # The absolute cap only binds above ~200k processed, where 200 errors is
+    # under the rate. Below that the rate is always the binding constraint --
+    # worth stating, because the comment here used to claim otherwise.
+    assert not _tolerable(201, 1_000_000)   # under the rate, over the abs cap
+    assert _tolerable(199, 1_000_000)       # under both
 
 
 def test_zero_errors_is_tolerated():
@@ -178,3 +183,49 @@ def test_the_gate_under_test_is_the_one_main_uses():
     """
     import item_backfill
     assert item_backfill.error_tolerable is _tolerable
+
+
+# ---------------------------------------------------------------------------
+# The denominator. These jobs are RESUMABLE, so a run's own size shrinks
+# towards zero as the work completes.
+# ---------------------------------------------------------------------------
+
+def test_the_rate_is_measured_against_the_population_not_the_run():
+    """Measured against the run, the gate TIGHTENS the closer you get to done.
+
+    A resume with 2 items remaining and 1 transient failure is a 50% error
+    rate, which exceeds tolerance, which exits 1, which skips the sync, which
+    discards the manifest, which leaves the same 2 items to try again forever.
+    The last items of a 102,460-item migration could never land.
+
+    Against the population that failure is 1 in 102,460, which is what it is.
+    """
+    assert not _tolerable(1, 2), "the shrinking denominator, unguarded"
+    assert _tolerable(1, 2, 102_460), "the same failure, measured honestly"
+
+
+def test_a_systemic_failure_is_not_excused_by_the_population():
+    """The population must not become a way to pass everything -- otherwise
+    this has removed the gate rather than corrected its denominator."""
+    assert not _tolerable(5_000, 102_460, 102_460)
+    assert not _tolerable(201, 102_460, 102_460)   # the absolute cap still binds
+
+
+def test_a_rehearsal_is_judged_on_what_it_attempted():
+    """A --limit run is not doing the whole job, so it passes no population.
+    Without this, 5 failures out of 5 would read as 5 in 102,460 and pass."""
+    assert not _tolerable(5, 5)
+    assert not _tolerable(5, 5, 0)
+
+
+def test_both_callers_pass_the_population():
+    """The function being right is half of it; the wiring is the other half.
+
+    Restoring the shrinking denominator left the whole suite green until this
+    existed, because nothing asserted either caller had been changed.
+    """
+    import inspect
+    for mod in ("item_migrate", "item_backfill"):
+        src = inspect.getsource(__import__(mod).main)
+        assert "population=" in src, f"{mod}.main must pass a population"
+        assert "len(published)" in src, f"{mod}.main must use the published set"

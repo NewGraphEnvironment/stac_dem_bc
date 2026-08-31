@@ -271,7 +271,7 @@ def ndjson_write(paths, out, expect_collection: str | None = None) -> int:
 # =============================================================================
 
 def audit_items(paths, collection_id: str, require_asset: str | None = None,
-                forbid_asset: str | None = None) -> dict:
+                forbid_assets=None) -> dict:
     """Which items disagree with the collection they claim to belong to.
 
     The property is HOMOGENEITY, not size, and nothing else in this repo checks
@@ -303,8 +303,16 @@ def audit_items(paths, collection_id: str, require_asset: str | None = None,
         assets = doc.get("assets") or {}
         if require_asset is not None and require_asset not in assets:
             out["missing_asset"].append(path)
-        if forbid_asset is not None and forbid_asset in assets:
-            out["forbidden_asset"].append(path)
+        # A LIST, not a string. A rename map can have more than one old key, and
+        # the caller builds this from ASSET_RENAMES -- so a single-string
+        # parameter meant the workflow's comma-joined value ("image,other")
+        # matched no real asset key and the check silently stopped checking
+        # anything. A guard that fails toward "nothing to report" is worse than
+        # no guard, because it still reads as a pass.
+        for key in (forbid_assets or ()):
+            if key in assets:
+                out["forbidden_asset"].append(path)
+                break
     return out
 
 
@@ -347,7 +355,9 @@ def main() -> int:
     p.add_argument("--dir", help="directory of item JSONs (default: paths on stdin)")
     p.add_argument("--collection-id", required=True)
     p.add_argument("--require-asset", help="every item must carry this asset key")
-    p.add_argument("--forbid-asset", help="no item may carry this asset key")
+    p.add_argument("--forbid-asset",
+                   help="no item may carry any of these asset keys "
+                        "(comma-separated; a rename map may retire more than one)")
     p.add_argument("--expect", type=int,
                    help="the number of items there should be. Derive it from the "
                         "artifact the consumer reads, not from a separate count.")
@@ -431,15 +441,16 @@ def main() -> int:
             print("FAIL: audit-items found no item JSONs to check", file=sys.stderr)
             return 1
 
-        r = audit_items(paths, args.collection_id, args.require_asset,
-                        args.forbid_asset)
+        forbid = [k for k in (args.forbid_asset or "").split(",") if k.strip()]
+        forbid = [k.strip() for k in forbid]
+        r = audit_items(paths, args.collection_id, args.require_asset, forbid)
         print(f"checked {r['checked']} item(s) against {args.collection_id}",
               file=sys.stderr)
 
         bad = False
         for kind, label in (("wrong_collection", "name another collection"),
                             ("missing_asset", f"lack asset {args.require_asset!r}"),
-                            ("forbidden_asset", f"still carry asset {args.forbid_asset!r}"),
+                            ("forbidden_asset", f"still carry a retired asset key {forbid!r}"),
                             ("unreadable", "could not be read")):
             hits = r[kind]
             if hits:

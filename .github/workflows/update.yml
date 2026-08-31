@@ -160,12 +160,41 @@ jobs:
       # never runs here and its metadata would never reach the live file.
       # Idempotent: a no-op once the published collection carries the fields.
       - name: Patch collection metadata
+        id: collpatch
         if: steps.detect.outputs.new_urls == 'true' || inputs.backfill || inputs.rename
         # --clear-version: this run is about to append items, which makes any
         # version the collection carries FALSE rather than merely stale. A wrong
         # version says "you already have this one"; absent says "go and check".
         # The next release re-stamps with --version.
-        run: .venv/bin/python scripts/collection_patch.py --path "$STAC_OUTPUT_DIR/collection.json" --clear-version
+        # --allow-id-change ONLY on the rename dispatch. Without it a monthly
+        # run that met a stale published id would publish a renamed
+        # collection.json over unmigrated item bodies -- half a migration,
+        # performed by the cron, reported by nothing. It fails loudly instead,
+        # which is the correct answer to "someone merged a rename and has not
+        # dispatched it".
+        run: |
+          ARGS=(--path "$STAC_OUTPUT_DIR/collection.json" --clear-version)
+          if [ "${{ inputs.rename }}" = "true" ]; then
+            ARGS+=(--allow-id-change)
+          fi
+          BEFORE=$(cksum < "$STAC_OUTPUT_DIR/collection.json")
+          .venv/bin/python scripts/collection_patch.py "${ARGS[@]}"
+          AFTER=$(cksum < "$STAC_OUTPUT_DIR/collection.json")
+          # Whether collection.json ITSELF needs publishing, which is a separate
+          # question from whether any item does. The sync gate counts item files
+          # and excludes collection.json, and item_migrate writes no file for an
+          # already-correct item -- so a re-run against a catalogue whose items
+          # are migrated but whose collection.json never uploaded staged zero
+          # files, skipped the sync, and could never republish the collection.
+          # Registration then kept failing with advice to run the migration,
+          # which had just run green reporting Complete. A loop with no exit,
+          # and it generalises: ANY collection-metadata-only change could never
+          # reach S3.
+          if [ "$BEFORE" != "$AFTER" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Create STAC items (incremental)
         if: steps.detect.outputs.new_urls == 'true'
@@ -200,6 +229,8 @@ jobs:
               mkdir -p "$STAC_OUTPUT_DIR"
               curl -fsSL https://stac-dem-bc.s3.amazonaws.com/collection.json \
                 -o "$STAC_OUTPUT_DIR/collection.json"
+              # No --allow-id-change: this is the monthly path. See the patch
+              # step above.
               .venv/bin/python scripts/collection_patch.py --path "$STAC_OUTPUT_DIR/collection.json" --clear-version
             fi
             .venv/bin/python scripts/item_create.py --urls-file data/urls_pairing_changed.txt
@@ -336,7 +367,9 @@ jobs:
       # them on the runner.
       - name: Sync catalog to S3
         id: sync
-        if: steps.publish.outputs.count != '0' && steps.publish.outputs.count != ''
+        if: >-
+          (steps.publish.outputs.count != '0' && steps.publish.outputs.count != '')
+          || steps.collpatch.outputs.changed == 'true'
         run: bash scripts/s3_sync-ci.sh
 
       # always() so a FAILED run still persists what it completed. The first

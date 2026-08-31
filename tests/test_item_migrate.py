@@ -229,7 +229,7 @@ def test_audit_passes_a_fully_migrated_population(tmp_path):
         it = published(with_dsm=bool(i % 2), item_id=f"x{i}")
         item_migrate(it)
         paths.append(_write(tmp_path, f"x{i}", it))
-    r = audit_items(paths, NEW_ID, require_asset=ASSET_DEM, forbid_asset="image")
+    r = audit_items(paths, NEW_ID, require_asset=ASSET_DEM, forbid_assets=["image"])
     assert r["checked"] == 3
     assert not r["wrong_collection"] and not r["missing_asset"]
     assert not r["forbidden_asset"] and not r["unreadable"]
@@ -248,7 +248,7 @@ def test_audit_catches_a_mixed_population(tmp_path):
         paths.append(_write(tmp_path, f"good{i}", it))
     paths.append(_write(tmp_path, "stale", published(item_id="stale")))
 
-    r = audit_items(paths, NEW_ID, require_asset=ASSET_DEM, forbid_asset="image")
+    r = audit_items(paths, NEW_ID, require_asset=ASSET_DEM, forbid_assets=["image"])
     assert r["checked"] == 3
     assert len(r["wrong_collection"]) == 1
     assert len(r["forbidden_asset"]) == 1
@@ -260,7 +260,7 @@ def test_audit_reports_paths_not_counts(tmp_path):
     """A count of offenders is no more use than a count of items — you have to
     be able to go and look at one."""
     p = _write(tmp_path, "stale", published(item_id="stale"))
-    r = audit_items([p], NEW_ID, require_asset=ASSET_DEM, forbid_asset="image")
+    r = audit_items([p], NEW_ID, require_asset=ASSET_DEM, forbid_assets=["image"])
     assert r["wrong_collection"] == [p]
 
 
@@ -513,3 +513,38 @@ def test_a_fully_complete_run_succeeds(tmp_path, monkeypatch):
     returns 1."""
     ids = [f"id-{i}" for i in range(10)]
     assert _run_migrate(tmp_path, monkeypatch, ids, written=ids, errored=[]) == 0
+
+
+def test_audit_forbids_every_retired_key_not_just_the_first(tmp_path):
+    """The workflow builds --forbid-asset from ASSET_RENAMES, which is a MAP.
+
+    While it holds one entry a single-string parameter worked. A second entry
+    would have produced "image,other" — matching no real asset key, so the
+    check would have silently stopped checking anything while still reporting
+    OK. A guard that fails toward "nothing to report" is worse than no guard.
+    """
+    it = published(item_id="legacy")
+    it["assets"] = {"other_old_key": {"href": DEM}}
+    it["collection"] = NEW_ID
+    p = _write(tmp_path, "legacy", it)
+    r = audit_items([p], NEW_ID, forbid_assets=["image", "other_old_key"])
+    assert r["forbidden_asset"] == [p]
+
+
+def test_audit_reports_an_item_once_even_when_it_carries_two_retired_keys(tmp_path):
+    it = published(item_id="both")
+    it["assets"] = {"image": {"href": DEM}, "other_old_key": {"href": DEM}}
+    it["collection"] = NEW_ID
+    p = _write(tmp_path, "both", it)
+    r = audit_items([p], NEW_ID, forbid_assets=["image", "other_old_key"])
+    assert r["forbidden_asset"] == [p], "one path, not one per matching key"
+
+
+def test_audit_with_no_forbidden_keys_forbids_nothing(tmp_path):
+    """The control: an empty list must not reject a legitimate item."""
+    it = published(item_id="ok")
+    item_migrate(it)
+    p = _write(tmp_path, "ok", it)
+    for empty in (None, [], ()):
+        r = audit_items([p], NEW_ID, require_asset=ASSET_DEM, forbid_assets=empty)
+        assert not r["forbidden_asset"]

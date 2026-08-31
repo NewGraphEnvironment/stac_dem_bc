@@ -61,15 +61,29 @@ MANIFEST_HEADER = "# migration: "
 Edit = Callable[[str, dict], list]
 
 
-def error_tolerable(errors: int, processed: int) -> bool:
+def error_tolerable(errors: int, processed: int, population: int = 0) -> bool:
     """The run's exit gate, as a function so a test can assert on the real one.
 
     It was previously re-implemented inside the test suite, which made it one
     fact derived twice: the copy happened to agree, and nothing made it.
+
+    `population` is the size of the whole job, not this run's share of it, and
+    it is the denominator whenever it is given. These jobs are RESUMABLE, so a
+    run's own size shrinks towards zero as the work completes -- measure against
+    it and the gate tightens the closer you get to done. Measured: a resume with
+    2 items remaining and 1 transient failure is a 50% error rate, which
+    EXCEEDS tolerance, which exits 1, which skips the sync, which discards the
+    manifest, which leaves the same 2 items to try again forever. The last items
+    of a 102,460-item migration could never land.
+
+    Against the population that same failure is 1 in 102,460, which is what it
+    actually is. Callers that are not doing the whole job (a --limit rehearsal)
+    pass no population and are judged on what they attempted.
     """
     if errors == 0:
         return True
-    rate = errors / processed if processed else 1.0
+    denominator = population if population > 0 else processed
+    rate = errors / denominator if denominator else 1.0
     return errors <= ERROR_ABS_MAX and rate <= ERROR_RATE_MAX
 
 

@@ -178,7 +178,7 @@ def links_retitle(collection: dict, title: str) -> int:
     return n
 
 
-def collection_patch(collection: dict) -> tuple[dict, list[str]]:
+def collection_patch(collection: dict, allow_id_change: bool = False) -> tuple[dict, list[str]]:
     """Return the patched collection and the names of fields that changed.
 
     Pure and idempotent: re-running against an already-patched collection
@@ -191,6 +191,30 @@ def collection_patch(collection: dict) -> tuple[dict, list[str]]:
     so the monthly run carries it, and --check can see a collection.json whose
     id regressed after a rebuild from a stale checkout.
     """
+    # Changing the id is a MIGRATION, not a metadata patch, and it must not
+    # happen as a side effect of the monthly run.
+    #
+    # The id lives inside this contract because it is a constant fact about the
+    # collection (see COLLECTION_ID). But the monthly workflow calls this on
+    # every month with new URLs, so without this guard the first cron after a
+    # rename merges would publish a renamed collection.json over 102,460
+    # unmigrated item bodies -- performing half a migration by itself. Nothing
+    # would report it: the monthly audit reads the collection id from this very
+    # file and inspects only the items staged this month, so it passes green
+    # while S3 is split in two.
+    #
+    # Failing loudly is the point. It means "someone merged a rename and has not
+    # dispatched the migration", which is exactly the state that needs a human.
+    current = collection.get("id")
+    if current is not None and current != COLLECTION_ID and not allow_id_change:
+        raise RuntimeError(
+            f"collection id would change: {current!r} -> {COLLECTION_ID!r}. "
+            f"That is a migration, not a metadata patch, and the item bodies "
+            f"must move with it. Run the migration (workflow_dispatch, "
+            f"rename=true), which passes --allow-id-change. Patching the id "
+            f"alone would publish a collection nothing in it belongs to."
+        )
+
     changed = []
     n_links = links_encode(collection)
     if n_links:
@@ -213,6 +237,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Patch STAC collection metadata")
     parser.add_argument("--path", default=None,
                         help="collection.json to patch (default: $STAC_OUTPUT_DIR/collection.json)")
+    parser.add_argument("--allow-id-change", action="store_true",
+                        help="permit the collection id to move. Migration path "
+                             "ONLY -- the item bodies must move with it.")
     parser.add_argument("--check", action="store_true",
                         help="Report whether a patch is needed; exit 1 if it is. Writes nothing.")
     parser.add_argument("--version", default=None,
@@ -248,7 +275,14 @@ def main() -> int:
         l.get("href", "") for l in collection.get("links", []) if l.get("rel") == "item"
     ]
 
-    collection, changed = collection_patch(collection)
+    try:
+        collection, changed = collection_patch(
+            collection, allow_id_change=args.allow_id_change)
+    except RuntimeError as e:
+        # The message IS the diagnostic. A traceback buries it in CI log noise,
+        # and this one is read by whoever has to decide what to do next.
+        logger.error("%s", e)
+        return 1
 
     # Version handling sits outside collection_patch()'s contract on purpose --
     # see the module docstring. It is reported alongside, not folded in.
