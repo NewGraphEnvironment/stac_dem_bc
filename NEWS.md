@@ -9,6 +9,82 @@ convention as [`stac_uav_bc`](https://github.com/NewGraphEnvironment/stac_uav_bc
 (`Type: Project`, pinned at `0.0.0.9000`) and is deliberately **not** versioned —
 matching `water-temp-bc`. Releases live here and in git tags.
 
+## v2.0.0 (2026-09-01)
+
+**Breaking, in two ways at once.** The collection is renamed and the bare-earth
+asset key with it, in one break rather than two — which is the whole reason #31
+deferred them to here.
+
+| | before | after |
+|---|---|---|
+| collection | `stac-dem-bc` | **`stac-elevation-bc`** |
+| bare-earth asset | `image` | **`dem`** |
+| item ids | unchanged | unchanged |
+| S3 bucket | `stac-dem-bc` | **unchanged** |
+
+```r
+rstac::stac_search(collections = "stac-elevation-bc", ...)
+purrr::pluck(feature, "assets", "dem", "href")
+```
+
+### Why (#34)
+
+The collection stopped holding only DEMs at v1.0.0, when every item gained a
+`dsm` asset. The name described one of two products, and `image` was never
+descriptive — it became actively ambiguous beside `dsm`, to the point where the
+published description had to spend a sentence saying which was which. That
+sentence is gone.
+
+**Item ids do not change.** The `-dem-` segment is the source product directory,
+and it is what keeps the DEM/DSM/CHM tiling apart from the finer `pointcloud`
+tiling. Dropping it would break every external item reference and buy nothing.
+
+**The S3 bucket keeps its name.** Renaming it is a separate and larger decision:
+it is IaC-managed, and it appears in all 102,460 item link hrefs. So every asset
+href and every download link is byte-identical to v1.1.0.
+
+### How it was done
+
+All 102,460 published item JSONs were rewritten **in place** — fetch, edit two
+fields, write back — rather than rebuilt. 60,324 of 100,345 metadata-cache rows
+predate spatial-metadata caching, so a rebuild would have silently swapped ~60k
+items from one code path to another, invisibly in any spot check.
+
+`scripts/item_migrate.py`, on the harness extracted as `scripts/item_rewrite.py`:
+102,460 written, 0 unchanged, **0 errors**, in 12m35s.
+
+### The thing that made this hard
+
+**A half-done rename is invisible to every check this repo had.** Item ids do not
+change, so set equality reports `IN SYNC` over a fully mixed catalogue;
+`item_register.sh` routes each item by its *own* `collection` field, so a stale
+body upserts into the old collection successfully with no error; both asset keys
+are legal STAC; and a count of assets cannot tell `{image,dsm}` from `{dem,dsm}`.
+
+The property that breaks is **homogeneity, not size**. `register_manifest.py
+audit-items` now checks it, and `catalogue_register.sh` runs it over every fetched
+body before anything reaches the database — the files are already on disk there,
+so the full-population check is free.
+
+Also fixed, and it would have made the cutover's own verification worthless:
+`search_body` had no `collections` filter, so `verify-serving` asked "is this id
+served *anywhere*". Harmless with one collection; this release created two by
+design, sharing all 102,460 ids.
+
+### Verified
+
+- Set equality both directions, twice: `IN SYNC: 102460 published, all
+  registered, no orphans`
+- pgstac, exact and homogeneous: 102,460 items, 102,460 with `dem`, **0** with
+  `image`, 95,888 with `dsm`
+- A real client query returning tiles, with the download resolving `HTTP 200`
+- The one live downstream consumer (`rtj/scripts/dem/_shared.R`) run against the
+  live API before its change was merged
+
+The old collection served alongside the new one throughout and was dropped only
+after all of the above. There was no window in which the API served less than it
+did before.
+
 ## v1.1.0 (2026-08-30)
 
 The catalogue is unchanged from v1.0.0 — same 102,460 items, same content. What
