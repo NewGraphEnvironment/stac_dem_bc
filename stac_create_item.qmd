@@ -4,6 +4,16 @@ format: html
 engine: knitr
 ---
 
+> [!WARNING]
+> **Superseded — do not run.** This notebook is the pre-2026 exploration that
+> `scripts/item_create.py` grew out of, and it has not been maintained since. It still
+> builds items under the **old** collection id `stac-dem-bc` and the **old**
+> asset key `image`, both of which were renamed in #34 — so running it and
+> syncing would republish the previous catalogue over the current one.
+>
+> The live path is `scripts/item_create.py`, exercised by the monthly workflow.
+> Kept for the record of how the catalogue was first built.
+
 ```{r env-activate}
 # Auto-install reticulate if not present
 if (!require("reticulate", quietly = TRUE)) {
