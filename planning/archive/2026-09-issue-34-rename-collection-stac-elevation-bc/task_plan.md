@@ -224,31 +224,31 @@ the messiest state to read.
       `data/stac_result.rds` with `update_query=TRUE`. They fail differently —
       the `pluck` loudly, the `collections=` **silently** as an empty table — so
       only a real regeneration proves both
-- [ ] `scripts/README.md:231`; a "superseded" header note on
+- [x] `scripts/README.md:231`; a "superseded" header note on
       `stac_create_item.qmd` rather than editing its `image` literals
 - [x] **Gate:** the regenerated README query actually returned tiles and a
       download href resolves. Schema validation does not prove a consumer works
-- [ ] `collection_unregister.sh stac-dem-bc` (reports, deletes nothing) — the
+- [x] `collection_unregister.sh stac-dem-bc` (reports, deletes nothing) — the
       count must read **102,460**; anything else means something is still
       mutating the old collection. Only then `--yes`
 
 ## Phase 8 — Release and spin-out
 
-- [ ] `collection_patch.py --version 2.0.0`, upload the one file, re-register it
+- [x] `collection_patch.py --version 2.0.0`, upload the one file, re-register it
       (Phase 5's `--clear-version` leaves it unversioned in between)
-- [ ] `NEWS.md` v2.0.0 — a major break; tag
-- [ ] File the **repo rename** issue: `stac_dem_bc` → `stac_elevation_bc`, noting
+- [x] `NEWS.md` v2.0.0 — a major break; tag
+- [x] File the **repo rename** issue: `stac_dem_bc` → `stac_elevation_bc`, noting
       that `rtj/env/prod/main.tf:103` must be applied in the same window or the
       monthly workflow loses AWS auth (the role *ARN* is safe — `role_gha_*` is
       derived from the bucket, not the repo)
-- [ ] `/planning-archive`
+- [x] `/planning-archive`
 
 ## Validation
 
-- [ ] `pytest tests/ -q` green at every commit (it is a hard CI gate at
+- [x] `pytest tests/ -q` green at every commit (it is a hard CI gate at
       `update.yml:81`)
-- [ ] `/code-check` clean on each commit
-- [ ] Every new guard tested against **both** answers — one input that must fire
+- [x] `/code-check` clean on each commit
+- [x] Every new guard tested against **both** answers — one input that must fire
       it, one that must not
-- [ ] PWF checkboxes match landed work
-- [ ] `/planning-archive` on completion
+- [x] PWF checkboxes match landed work
+- [x] `/planning-archive` on completion
