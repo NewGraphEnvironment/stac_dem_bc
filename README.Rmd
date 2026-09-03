@@ -129,7 +129,7 @@ tab <- purrr::map_dfr(r$features, function(f) {
 
 
 ```{r tab-cap, echo=FALSE, results="asis", eval=identical(params$rmd_on, TRUE)}
-my_caption <- "Download links for every asset returned by the query above — one row per asset, so the bare-earth `dem` and its `dsm` appear together."
+my_caption <- "Download links for every asset returned by the query above — one row per asset, so a paired item shows its `dem` and `dsm` together."
 my_tab_caption_rmd()
 ```
 
@@ -138,6 +138,14 @@ my_tab_caption_rmd()
 tab |>
   my_dt_table(cols_freeze_left = 2, escape = FALSE)
 ```
+
+<br>
+
+Every row above is a `dem`, because the Bulkley was flown between 2000 and 2020 and
+those deliveries published no surface model. Province-wide **95,888 of 102,460 items
+carry a `dsm`** — the same flight over the same footprint at the same time — but the
+coverage is concentrated in the 2024 deliveries, so whether you get one depends on
+when your area was last flown rather than on where it is.
 
 
 ## QGIS Data Source Manager (v3.42+)

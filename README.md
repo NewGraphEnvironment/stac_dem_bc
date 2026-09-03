@@ -102,6 +102,15 @@ tab <- purrr::map_dfr(r$features, function(f) {
 Please see <http://www.newgraphenvironment.com/stac_dem_bc> for the
 published table of collection links.
 
+<br>
+
+Every row above is a `dem`, because the Bulkley was flown between 2000
+and 2020 and those deliveries published no surface model. Province-wide
+**95,888 of 102,460 items carry a `dsm`** — the same flight over the
+same footprint at the same time — but the coverage is concentrated in
+the 2024 deliveries, so whether you get one depends on when your area
+was last flown rather than on where it is.
+
 ## QGIS Data Source Manager (v3.42+)
 
 QGIS 3.42 added native STAC support — connect directly to the catalog
