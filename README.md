@@ -144,8 +144,7 @@ The same `images.a11s.one` STAC API serves several complementary BC
 collections:
 
 - [`stac_floodplains_bc`](https://github.com/NewGraphEnvironment/stac_floodplains_bc)
-  — floodplain land-cover change, delineated from these DEMs
-  (`stac-floodplains-bc`)
+  — floodplain land-cover change (`stac-floodplains-bc`)
 - [`stac_airphoto_bc`](https://github.com/NewGraphEnvironment/stac_airphoto_bc)
   — historic airphoto thumbnails, 1963–2019 (`stac-airphoto-bc`)
 - [`stac_uav_bc`](https://github.com/NewGraphEnvironment/stac_uav_bc) —
