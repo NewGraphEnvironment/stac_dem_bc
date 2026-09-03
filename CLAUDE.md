@@ -22,11 +22,37 @@ This project maintains the STAC catalog for BC's LidarBC DEM collection with aut
 - **Result:** 100-item test passed, ready for VM automation
 
 **Phase 4: DSM as a second asset ✅ COMPLETE (2026-08-29, v1.0.0, #31)**
-- Every item carries `dsm` beside the bare-earth `image`, paired on tile id +
+- Every item carries `dsm` beside the bare-earth DEM asset, paired on tile id +
   acquisition date + utm zone; convention recorded as an assertion, not a lookup
 - 90 published items whose `href`s carried literal spaces repaired (#25's tail)
 - `providers`/`keywords` on the collection (#30)
 - **Published: 102,460 items, 95,888 carrying `dsm`** (API served 60,126 before)
+
+**Phase 6: The rename ✅ COMPLETE (2026-09-01, v2.0.0, #34)**
+- Collection `stac-dem-bc` → **`stac-elevation-bc`**; bare-earth asset key
+  `image` → **`dem`**. One break, because #31 deferred both to this point.
+- **Three names that used to be two, and they are all different now:**
+
+  | thing | name |
+  |---|---|
+  | repo | `stac_dem_bc` (rename tracked as #40) |
+  | STAC collection | `stac-elevation-bc` |
+  | S3 bucket | `stac-dem-bc` — **unchanged, deliberately** |
+
+  The bucket is IaC-managed in rtj and appears in all 102,460 item link hrefs, so
+  renaming it is a separate and larger decision. `tests/test_collection_identity.py`
+  asserts that every surviving `stac-dem-bc` under `scripts/` is a bucket URL.
+- **Item ids do not change** — the `-dem-` segment is the source product
+  directory, and it keeps the DEM/DSM/CHM tiling apart from the finer
+  `pointcloud` tiling (#35). So the rewrite was in place: no new objects, no
+  orphans, every href byte-identical.
+- 102,460 items rewritten in 12m35s, **0 errors**; no downtime (load-then-delete)
+- `scripts/item_rewrite.py` is the shared harness; `item_migrate.py` and
+  `item_backfill.py` are its two callers
+- **A half-done rename is invisible to every pre-existing check** — ids do not
+  change, so set equality reports IN SYNC over a mixed catalogue. The property is
+  *homogeneity*: `register_manifest.py audit-items`, run over every fetched body
+  before anything reaches pgstac.
 
 **Phase 5: Client-side registration ✅ COMPLETE (2026-08-30, v1.1.0, #27)**
 - `scripts/catalogue_register.sh --drift` upserts whatever the API is missing;
@@ -54,14 +80,15 @@ This project maintains the STAC catalog for BC's LidarBC DEM collection with aut
 - 99.86% success rate (81 items failed/missing)
 - **Bottleneck:** Network I/O reading remote GeoTIFFs for metadata
 
-**Current Status (v1.1.0, 2026-08-30):**
+**Current Status (v2.0.0, 2026-09-01):**
+- ✅ **Collection is `stac-elevation-bc`, bare-earth asset is `dem`** (#34). The
+  live collection serves `version: 2.0.0`; `stac-dem-bc` is dropped and 404s.
 - ✅ Catalogue versioned by NEWS.md + git tags — a tag means "S3 and the API are in
   this state", following `stac_uav_bc`. `DESCRIPTION` is a `Type: Project`
   dependency manifest and is deliberately **not** versioned (matches water-temp-bc)
 - ✅ DSM paired and published as a second asset (#31)
 - ✅ Client-side pgstac registration, upsert-only (#27) — `scripts/catalogue_register.sh --drift`
-- ✅ Collection carries a version via the STAC Version Extension (#27); the live
-  collection serves `version: 1.1.0`
+- ✅ Collection carries a version via the STAC Version Extension (#27)
 - ✅ Incremental update capability (change detection working)
 - ✅ Validation caching (GeoTIFF validation)
 - ✅ STAC JSON validation layer (new)
