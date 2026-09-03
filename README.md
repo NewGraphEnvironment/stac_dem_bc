@@ -1,4 +1,4 @@
-stac_dem_bc
+stac-elevation-bc
 ================
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
@@ -7,14 +7,13 @@ stac_dem_bc
 ![updates](https://img.shields.io/badge/updates-monthly-blue)
 ![api](https://img.shields.io/badge/api-images.a11s.one-orange)
 
-[`stac_dem_bc`](https://github.com/NewGraphEnvironment/stac_dem_bc)
-serves British Columbia’s [LidarBC](https://lidar.gov.bc.ca/) elevation
-data as a [SpatioTemporal Asset Catalog (STAC)](https://stacspec.org/) —
-**102,460 tiles** on the provincial objectstore, searchable by location
-and time from the [`rstac` R
-package](https://brazil-data-cube.github.io/rstac/), QGIS (v3.42+), or
-any STAC-compliant client. The API endpoint is <https://images.a11s.one>
-and the collection is **`stac-elevation-bc`**.
+**`stac-elevation-bc`** serves British Columbia’s
+[LidarBC](https://lidar.gov.bc.ca/) elevation data as a [SpatioTemporal
+Asset Catalog (STAC)](https://stacspec.org/) — **102,460 tiles** on the
+provincial objectstore, searchable by location and time from the
+[`rstac` R package](https://brazil-data-cube.github.io/rstac/), QGIS
+(v3.42+), or any STAC-compliant client. The endpoint is
+<https://images.a11s.one>.
 
 Each item carries up to two assets from the same flight over the same
 footprint:
@@ -23,12 +22,6 @@ footprint:
 |----|----|
 | `dem` | bare-earth digital elevation model — every item has one |
 | `dsm` | digital surface model, where the delivery published one — **95,888 of 102,460** |
-
-> **Renamed 2026-09-01 (v2.0.0).** The collection was `stac-dem-bc` and
-> the bare-earth asset key was `image`; both moved in one break once the
-> catalogue stopped holding only DEMs. Item ids and every download URL
-> are unchanged. See
-> [\#34](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/34).
 
 <br>
 
@@ -87,10 +80,21 @@ saveRDS(r, "data/stac_result.rds")
 
 ``` r
 r <- readRDS("data/stac_result.rds")
-# build the table to display the info
-tab <- tibble::tibble(
-  url_download = purrr::map_chr(r$features, ~ purrr::pluck(.x, "assets", "dem", "href"))
-)
+
+# One row per ASSET, not per item. Every item carries a bare-earth `dem`, and
+# most also carry a `dsm` from the same flight -- a dem-only column hid half of
+# what the collection serves.
+tab <- purrr::map_dfr(r$features, function(f) {
+  purrr::imap_dfr(f$assets, function(a, key) {
+    tibble::tibble(
+      tile     = f$id,
+      date     = substr(f$properties$datetime, 1, 10),
+      type     = key,
+      download = glue::glue('<a href="{a$href}" target="_blank">{basename(a$href)}</a>')
+    )
+  })
+}) |>
+  dplyr::arrange(tile, type)
 ```
 
 <br>
@@ -146,10 +150,7 @@ the goal open since the first build — and the July catch-up grew the
 collection from 58k to ~98k fully-validated items. Items now also carry
 the **digital surface model** alongside the bare-earth DEM
 ([\#31](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/31)),
-paired on tile id and acquisition date — and in September the collection
-was renamed **`stac-elevation-bc`** to match what it actually holds
-([\#34](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/34)).
-Still ahead:
+paired on tile id and acquisition date. Still ahead:
 
 - **Registration from CI** — registration is now a client-side upsert in
   this repo (`scripts/catalogue_register.sh`), but it still runs from a
@@ -158,8 +159,9 @@ Still ahead:
   infrastructure repo, and it unblocks every catalogue repo at once.
 - **Upstream-deletion handling**
   ([\#28](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/28))
-  — propagate objectstore removals to the catalog; on hold until the
-  September run shows whether recent removals were renames.
+  — propagate objectstore removals to the catalog. The September run
+  settled the open question — the deleted tiles did not reappear under
+  new names, so they are deletions rather than a rename in flight.
 - **Surface models published as point cloud only** — 1,211 DEM tiles
   across 11 mapsheet-years have a `dsm/` directory holding only `.laz`.
   Recorded as a declared coverage gap in `data/dsm_pairing_report.md`;
