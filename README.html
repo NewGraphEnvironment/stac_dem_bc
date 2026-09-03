@@ -608,11 +608,39 @@ padding-top: 0px;
 <img role="img" aria-label="api" src="data:image/svg+xml;charset=utf-8;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMzAiIGhlaWdodD0iMjAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iYXBpOiBpbWFnZXMuYTExcy5vbmUiPjx0aXRsZT5hcGk6IGltYWdlcy5hMTFzLm9uZTwvdGl0bGU+PGZpbHRlciBpZD0iYmx1ciI+PGZlR2F1c3NpYW5CbHVyIHN0ZERldmlhdGlvbj0iMTYiLz48L2ZpbHRlcj48bGluZWFyR3JhZGllbnQgaWQ9InMiIHgyPSIwIiB5Mj0iMTAwJSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjYmJiIiBzdG9wLW9wYWNpdHk9Ii4xIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLW9wYWNpdHk9Ii4xIi8+PC9saW5lYXJHcmFkaWVudD48Y2xpcFBhdGggaWQ9InIiPjxyZWN0IHdpZHRoPSIxMzAiIGhlaWdodD0iMjAiIHJ4PSIzIi8+PC9jbGlwUGF0aD48ZyBjbGlwLXBhdGg9InVybCgjcikiPjxyZWN0IHdpZHRoPSIyNyIgaGVpZ2h0PSIyMCIgZmlsbD0iIzU1NSIvPjxyZWN0IHg9IjI3IiB3aWR0aD0iMTAzIiBoZWlnaHQ9IjIwIiBmaWxsPSIjZWE3MjMzIi8+PHJlY3Qgd2lkdGg9IjEzMCIgaGVpZ2h0PSIyMCIgZmlsbD0idXJsKCNzKSIvPjwvZz48ZyBmaWxsPSIjZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iVmVyZGFuYSxHZW5ldmEsRGVqYVZ1IFNhbnMsc2Fucy1zZXJpZiIgdGV4dC1yZW5kZXJpbmc9Imdlb21ldHJpY1ByZWNpc2lvbiIgZm9udC1zaXplPSIxMTAiPjxnIHRyYW5zZm9ybT0ic2NhbGUoLjEpIj48ZyBhcmlhLWhpZGRlbj0idHJ1ZSIgZmlsbD0iIzAxMDEwMSI+PHRleHQgeD0iMTQ1IiB5PSIxNTAiIGZpbGwtb3BhY2l0eT0iLjgiIGZpbHRlcj0idXJsKCNibHVyKSIgdGV4dExlbmd0aD0iMTcwIj5hcGk8L3RleHQ+PHRleHQgeD0iMTQ1IiB5PSIxNTAiIGZpbGwtb3BhY2l0eT0iLjMiIHRleHRMZW5ndGg9IjE3MCI+YXBpPC90ZXh0PjwvZz48dGV4dCB4PSIxNDUiIHk9IjE0MCIgdGV4dExlbmd0aD0iMTcwIj5hcGk8L3RleHQ+PC9nPjxnIHRyYW5zZm9ybT0ic2NhbGUoLjEpIj48ZyBhcmlhLWhpZGRlbj0idHJ1ZSIgZmlsbD0iIzAxMDEwMSI+PHRleHQgeD0iNzc1IiB5PSIxNTAiIGZpbGwtb3BhY2l0eT0iLjgiIGZpbHRlcj0idXJsKCNibHVyKSIgdGV4dExlbmd0aD0iOTMwIj5pbWFnZXMuYTExcy5vbmU8L3RleHQ+PHRleHQgeD0iNzc1IiB5PSIxNTAiIGZpbGwtb3BhY2l0eT0iLjMiIHRleHRMZW5ndGg9IjkzMCI+aW1hZ2VzLmExMXMub25lPC90ZXh0PjwvZz48dGV4dCB4PSI3NzUiIHk9IjE0MCIgdGV4dExlbmd0aD0iOTMwIj5pbWFnZXMuYTExcy5vbmU8L3RleHQ+PC9nPjwvZz48L3N2Zz4=" alt="api" /></p>
 <p><a href="https://github.com/NewGraphEnvironment/stac_dem_bc"><code>stac_dem_bc</code></a>
 serves British Columbia’s <a href="https://lidar.gov.bc.ca/">LidarBC</a>
-digital elevation model collection — nearly 100,000 GeoTIFFs on the
-provincial objectstore as of July 2026 — as a <a href="https://stacspec.org/">SpatioTemporal Asset Catalog (STAC)</a>,
-searchable by location and time from the <a href="https://brazil-data-cube.github.io/rstac/"><code>rstac</code> R
+elevation data as a <a href="https://stacspec.org/">SpatioTemporal Asset
+Catalog (STAC)</a> — <strong>102,460 tiles</strong> on the provincial
+objectstore, searchable by location and time from the <a href="https://brazil-data-cube.github.io/rstac/"><code>rstac</code> R
 package</a>, QGIS (v3.42+), or any STAC-compliant client. The API
-endpoint is <a href="https://images.a11s.one">https://images.a11s.one</a>.</p>
+endpoint is <a href="https://images.a11s.one">https://images.a11s.one</a> and the
+collection is <strong><code>stac-elevation-bc</code></strong>.</p>
+<p>Each item carries up to two assets from the same flight over the same
+footprint:</p>
+<table>
+<thead>
+<tr>
+<th>asset</th>
+<th>what it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dem</code></td>
+<td>bare-earth digital elevation model — every item has one</td>
+</tr>
+<tr>
+<td><code>dsm</code></td>
+<td>digital surface model, where the delivery published one —
+<strong>95,888 of 102,460</strong></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Renamed 2026-09-01 (v2.0.0).</strong> The collection was
+<code>stac-dem-bc</code> and the bare-earth asset key was
+<code>image</code>; both moved in one break once the catalogue stopped
+holding only DEMs. Item ids and every download URL are unchanged. See <a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/34">#34</a>.</p>
+</blockquote>
 <br>
 
 <p>The catalog refreshes monthly: a scheduled <a href=".github/workflows/update.yml">GitHub Actions workflow</a> detects
@@ -701,10 +729,15 @@ the same endpoint</h2>
 <p>The same <code>images.a11s.one</code> STAC API serves several
 complementary BC collections:</p>
 <ul>
-<li><a href="https://github.com/NewGraphEnvironment/stac_uav_bc"><code>stac_uav_bc</code></a>
-— UAV imagery, organized by watershed</li>
+<li><a href="https://github.com/NewGraphEnvironment/stac_floodplains_bc"><code>stac_floodplains_bc</code></a>
+— floodplain land-cover change, delineated from these DEMs
+(<code>stac-floodplains-bc</code>)</li>
 <li><a href="https://github.com/NewGraphEnvironment/stac_airphoto_bc"><code>stac_airphoto_bc</code></a>
-— historic airphoto thumbnails (1963–2019)</li>
+— historic airphoto thumbnails, 1963–2019
+(<code>stac-airphoto-bc</code>)</li>
+<li><a href="https://github.com/NewGraphEnvironment/stac_uav_bc"><code>stac_uav_bc</code></a>
+— UAV imagery, organized by watershed
+(<code>imagery-uav-bc-prod</code>)</li>
 </ul>
 <h2 id="roadmap">Roadmap</h2>
 <p>The big one landed in 2026: the catalog is now
@@ -713,7 +746,10 @@ complementary BC collections:</p>
 collection from 58k to ~98k fully-validated items. Items now also carry
 the <strong>digital surface model</strong> alongside the bare-earth DEM
 (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/31">#31</a>),
-paired on tile id and acquisition date. Still ahead:</p>
+paired on tile id and acquisition date — and in September the collection
+was renamed <strong><code>stac-elevation-bc</code></strong> to match
+what it actually holds (<a href="https://github.com/NewGraphEnvironment/stac_dem_bc/issues/34">#34</a>).
+Still ahead:</p>
 <ul>
 <li><strong>Registration from CI</strong> — registration is now a
 client-side upsert in this repo

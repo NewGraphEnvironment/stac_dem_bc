@@ -8,13 +8,27 @@ stac_dem_bc
 ![api](https://img.shields.io/badge/api-images.a11s.one-orange)
 
 [`stac_dem_bc`](https://github.com/NewGraphEnvironment/stac_dem_bc)
-serves British Columbia’s [LidarBC](https://lidar.gov.bc.ca/) digital
-elevation model collection — nearly 100,000 GeoTIFFs on the provincial
-objectstore as of July 2026 — as a [SpatioTemporal Asset Catalog
-(STAC)](https://stacspec.org/), searchable by location and time from the
-[`rstac` R package](https://brazil-data-cube.github.io/rstac/), QGIS
-(v3.42+), or any STAC-compliant client. The API endpoint is
-<https://images.a11s.one>.
+serves British Columbia’s [LidarBC](https://lidar.gov.bc.ca/) elevation
+data as a [SpatioTemporal Asset Catalog (STAC)](https://stacspec.org/) —
+**102,460 tiles** on the provincial objectstore, searchable by location
+and time from the [`rstac` R
+package](https://brazil-data-cube.github.io/rstac/), QGIS (v3.42+), or
+any STAC-compliant client. The API endpoint is <https://images.a11s.one>
+and the collection is **`stac-elevation-bc`**.
+
+Each item carries up to two assets from the same flight over the same
+footprint:
+
+| asset | what it is |
+|----|----|
+| `dem` | bare-earth digital elevation model — every item has one |
+| `dsm` | digital surface model, where the delivery published one — **95,888 of 102,460** |
+
+> **Renamed 2026-09-01 (v2.0.0).** The collection was `stac-dem-bc` and
+> the bare-earth asset key was `image`; both moved in one break once the
+> catalogue stopped holding only DEMs. Item ids and every download URL
+> are unchanged. See
+> [\#34](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/34).
 
 <br>
 
@@ -116,10 +130,13 @@ Using the field of view in QGIS to filter results
 The same `images.a11s.one` STAC API serves several complementary BC
 collections:
 
-- [`stac_uav_bc`](https://github.com/NewGraphEnvironment/stac_uav_bc) —
-  UAV imagery, organized by watershed
+- [`stac_floodplains_bc`](https://github.com/NewGraphEnvironment/stac_floodplains_bc)
+  — floodplain land-cover change, delineated from these DEMs
+  (`stac-floodplains-bc`)
 - [`stac_airphoto_bc`](https://github.com/NewGraphEnvironment/stac_airphoto_bc)
-  — historic airphoto thumbnails (1963–2019)
+  — historic airphoto thumbnails, 1963–2019 (`stac-airphoto-bc`)
+- [`stac_uav_bc`](https://github.com/NewGraphEnvironment/stac_uav_bc) —
+  UAV imagery, organized by watershed (`imagery-uav-bc-prod`)
 
 ## Roadmap
 
@@ -129,7 +146,10 @@ the goal open since the first build — and the July catch-up grew the
 collection from 58k to ~98k fully-validated items. Items now also carry
 the **digital surface model** alongside the bare-earth DEM
 ([\#31](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/31)),
-paired on tile id and acquisition date. Still ahead:
+paired on tile id and acquisition date — and in September the collection
+was renamed **`stac-elevation-bc`** to match what it actually holds
+([\#34](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/34)).
+Still ahead:
 
 - **Registration from CI** — registration is now a client-side upsert in
   this repo (`scripts/catalogue_register.sh`), but it still runs from a
