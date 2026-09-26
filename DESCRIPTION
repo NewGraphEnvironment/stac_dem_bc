@@ -13,4 +13,4 @@ Imports:
     ngr,
     readr
 Remotes:
-    NewGraphEnvironment/ngr@519c03baa8554b9a82ff995dbe510bfb923a624d
+    NewGraphEnvironment/ngr
