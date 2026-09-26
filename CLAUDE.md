@@ -225,6 +225,13 @@ Hazards in the registration path:
   (`/aggregate` 404s) and returns `numberMatched: null`, and a `/search` on a list
   of ids silently omits the ones that do not exist — so "asked for N, got N" can be
   true while the sets differ. Compare id **sets**, in both directions.
+  Enumerating ids is the only count the API gives: `POST /search` with
+  `fields: {include: ["id"]}`, keyset-paged on the `next` link's `body.token`
+  (102,460 ids in 11 requests, ~212 s, measured 2026-08-30). A `/search` body with
+  no `limit` returns **10** features however many ids it names — a verifier once
+  shipped that failed every run over 10 items because its only test used 3. Items
+  carry no `updated`/`created`, so the only true write timestamp is
+  `max(updated_at)` on `pgstac.items`, queried on the host.
 - `data/dem_dsm_pairs.csv` and the item JSONs are large enough that concatenation
   must use `find -exec cat {} +`, never a glob — see the ARG_MAX entry in the
   code-check conventions below.
@@ -320,7 +327,7 @@ WHY: Reprocessing same URLs (e.g., after failures, testing) would create duplica
 - Features: versioning, lifecycle policies, CORS, public access controls
 - Reproducible, version-controlled server setups (future)
 
-**Note:** The monthly update runs on GitHub-hosted runners (no VM). S3 buckets and the OIDC role are IaC-managed in rtj; the pgstac host (geoserv) is rtj-provisioned.
+**Note:** The monthly update runs on GitHub-hosted runners (no VM). S3 buckets and the OIDC role are IaC-managed in rtj; the pgstac host is rtj-provisioned. `geoserv` names the server stack (its containers and `/opt/geoserv`), not a host — the host is the one `scripts/catalogue_register.sh` defaults to.
 
 ### File Locations
 - **Main repo:** `/Users/airvine/Projects/repo/stac_dem_bc`
