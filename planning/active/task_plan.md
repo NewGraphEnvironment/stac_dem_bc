@@ -76,18 +76,21 @@ Policy resolved in the shell, keyed on whether the collection is this repo's
 
 ## Phase 2: Implementation
 
-- [ ] `catalogue_register.sh`: resolve `OWN_COLLECTION_ID` from `collection_patch`
+- [x] `catalogue_register.sh`: resolve `OWN_COLLECTION_ID` from `collection_patch`
   (reuse the existing lookup at lines 57–66 rather than a second one) and the
   asset policy per the table; refuse env overrides on the own collection; print
   the resolved policy beside `collection :` / `mode :` at startup, so `--verify`
   and `--dryrun` (which exit before the audit) still show it
-- [ ] Build audit args as an array; pass `--require-asset`/`--forbid-asset` only
+- [x] Build audit args as an array; pass `--require-asset`/`--forbid-asset` only
   when non-empty (bash 3.2 `set -u` empty-array safe: `${ARR[@]+"${ARR[@]}"}`)
-- [ ] Move the audit block above `./scripts/collection_register.sh`; update its
+- [x] Move the audit block above `./scripts/collection_register.sh`; update its
   comment so "before any write" is true and says why the order matters
-- [ ] Header `Env:` block documents `STAC_REQUIRE_ASSET` / `STAC_FORBID_ASSET`
-- [ ] Full `pytest` green; restore the old hard-coded audit line and confirm the
+- [x] Header `Env:` block documents `STAC_REQUIRE_ASSET` / `STAC_FORBID_ASSET`
+- [x] Full `pytest` green; restore the old hard-coded audit line and confirm the
   foreign-collection case goes red, then revert
+- [x] (review) "This repo's catalogue" = collection id OR bucket (by name, `same-bucket`)
+  OR any item link in the bucket (`hrefs-in-bucket`) — plan review, rounds 1–2
+- [x] (review) `audit-items` prints the asset rules as applied — plan review Gap 2
 
 ## Phase 3: Docs and cross-repo
 

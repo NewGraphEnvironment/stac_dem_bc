@@ -41,3 +41,17 @@ A `STAC_REQUIRE_ASSET` env (default `stac_utils.ASSET_DEM`) and skip `--forbid-a
 
 | Error | Resolution |
 |-------|------------|
+| e2e tests hung: the env scrub ran AFTER setting the fixture `STAC_BUCKET_URL`, so the script fell back to the real bucket and began fetching ~102k items | Scrub first, then set; plus a `curl` PATH stub that refuses any non-`file://` URL, so a harness bug fails at the first request |
+
+## Plan review (2026-09-27)
+
+See `review-plan.md`. Two real defects in the design, both fixed in Phase 2: the
+rename-window hole (own = collection OR bucket) and audit-items echoing a forbid
+list that parsed to nothing.
+
+## Live check against the real airphoto items (read-only, local)
+
+`audit-items --dir ~/Projects/repo/stac_airphoto_bc/data/stac --collection-id stac-airphoto-bc`:
+- rules as #42 now resolves them (none): `OK ... (no asset checks)`, 10,100 checked
+- pre-#42 rules (`require=dem forbid=image`): `FAIL: 10100 item(s) lack asset 'dem'` —
+  the issue's measurement, reproduced

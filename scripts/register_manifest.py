@@ -15,6 +15,7 @@ scripts/catalogue_register.sh.
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import urllib.parse
@@ -267,6 +268,43 @@ def ndjson_write(paths, out, expect_collection: str | None = None) -> int:
 
 
 # =============================================================================
+# Which bucket a URL names -- the catalogue's identity when the id is not enough
+# =============================================================================
+
+# Virtual-hosted (`<bucket>.s3[.<region>|-<region>|.dualstack...].amazonaws.com`)
+# and path-style (`s3[...].amazonaws.com/<bucket>`). Bucket names may contain
+# dots, so the virtual-hosted bucket is everything before the LAST `.s3` label.
+_S3_VIRTUAL = re.compile(r"^(?P<bucket>[a-z0-9][a-z0-9.-]*)\.s3(?:[.-][a-z0-9-]+)*\.amazonaws\.com$")
+_S3_PATH = re.compile(r"^s3(?:[.-][a-z0-9-]+)*\.amazonaws\.com$")
+
+
+def s3_bucket_name(url: str) -> str | None:
+    """The S3 bucket a URL addresses, or None when it is not an S3 URL.
+
+    catalogue_register.sh decides whose catalogue it is registering partly by
+    bucket (#42), and one bucket has many spellings: regional or global
+    endpoint, http or https, virtual-hosted or path-style, any case in the
+    host. All of them answer 200 for the same collection.json, so comparing
+    URL strings would read an alias of this repo's bucket as someone else's --
+    and a foreign catalogue gets no asset audit.
+    """
+    parts = urllib.parse.urlsplit(url.strip())
+    scheme = parts.scheme.lower()
+    host = (parts.hostname or "").lower()
+    if scheme == "s3":
+        return host or None
+    if scheme not in ("http", "https"):
+        return None
+    m = _S3_VIRTUAL.match(host)
+    if m and not _S3_PATH.match(host):
+        return m.group("bucket")
+    if _S3_PATH.match(host):
+        seg = parts.path.lstrip("/").split("/", 1)[0]
+        return seg.lower() or None
+    return None
+
+
+# =============================================================================
 # Population homogeneity — the property a half-done migration breaks
 # =============================================================================
 
@@ -362,6 +400,17 @@ def main() -> int:
                    help="the number of items there should be. Derive it from the "
                         "artifact the consumer reads, not from a separate count.")
 
+    p = sub.add_parser("same-bucket",
+                       help="print 'same' if both URLs address one S3 bucket, "
+                            "'different' if not (or either is not an S3 URL)")
+    p.add_argument("url_a")
+    p.add_argument("url_b")
+
+    p = sub.add_parser("hrefs-in-bucket",
+                       help="count item links whose href is in the given S3 bucket")
+    p.add_argument("--collection-file", required=True)
+    p.add_argument("--bucket-url", required=True)
+
     p = sub.add_parser("verify-serving",
                        help="assert every id in a file is served by the API")
     p.add_argument("--ids-file", required=True)
@@ -444,8 +493,15 @@ def main() -> int:
         forbid = [k for k in (args.forbid_asset or "").split(",") if k.strip()]
         forbid = [k.strip() for k in forbid]
         r = audit_items(paths, args.collection_id, args.require_asset, forbid)
-        print(f"checked {r['checked']} item(s) against {args.collection_id}",
-              file=sys.stderr)
+        # The asset rules as APPLIED, not as passed: "--forbid-asset ," is a
+        # non-empty argument that parses to no keys, and a caller printing its
+        # own flags would report a check that never ran (#42).
+        if args.require_asset or forbid:
+            rules = f"require={args.require_asset or '-'} forbid={','.join(forbid) or '-'}"
+        else:
+            rules = "no asset checks"
+        print(f"checked {r['checked']} item(s) against {args.collection_id} "
+              f"({rules})", file=sys.stderr)
 
         bad = False
         for kind, label in (("wrong_collection", "name another collection"),
@@ -468,7 +524,23 @@ def main() -> int:
 
         if bad:
             return 1
-        print("OK: every item agrees with its collection", file=sys.stderr)
+        print(f"OK: every item agrees with its collection ({rules})",
+              file=sys.stderr)
+
+    elif args.cmd == "same-bucket":
+        # An answer on stdout, not an exit status: an uncaught exception exits
+        # 1 too, and a caller reading 1 as "different" would fail toward the
+        # foreign policy -- which is the one with no asset audit.
+        a, b = s3_bucket_name(args.url_a), s3_bucket_name(args.url_b)
+        print("same" if (a is not None and a == b) else "different")
+
+    elif args.cmd == "hrefs-in-bucket":
+        want = s3_bucket_name(args.bucket_url)
+        if want is None:
+            print(f"not an S3 bucket URL: {args.bucket_url}", file=sys.stderr)
+            return 1
+        print(sum(1 for _, href in collection_item_links(args.collection_file)
+                  if s3_bucket_name(href) == want))
 
     elif args.cmd == "verify-serving":
         wanted = [l.rstrip("\n") for l in open(args.ids_file) if l.strip()]

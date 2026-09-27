@@ -23,13 +23,19 @@
 #   STAC_HOST        ssh target (default: root@geopro)
 #   STAC_DB          pgstac database (default: stac)
 #   STAC_COLLECTION  collection id (default: collection_patch.COLLECTION_ID)
-#   STAC_BUCKET_URL  bucket serving collection.json (default: the stac-dem-bc
-#                    bucket). These were once two knobs over ONE fact, because
-#                    the collection and the bucket shared a name. Since #34 they
-#                    are genuinely two -- the collection is stac-elevation-bc and
+#   STAC_BUCKET_URL  bucket serving collection.json (default:
+#                    stac_utils.PATH_S3_STAC, the stac-dem-bc bucket). These
+#                    were once two knobs over ONE fact, because the collection
+#                    and the bucket shared a name. Since #34 they are genuinely two -- the collection is stac-elevation-bc and
 #                    the bucket is still stac-dem-bc -- so neither can be derived
 #                    from the other, and the script reconciles them at runtime
 #                    against the id inside the fetched collection.json instead.
+#   STAC_REQUIRE_ASSET  ONE asset key every item must carry. Other collections
+#                    only -- refused when the collection or the bucket is this
+#                    repo's, whose rules come from stac_utils / item_migrate
+#                    (#42). Unset: no requirement.
+#   STAC_FORBID_ASSET   asset key(s), comma-separated, no item may carry. Same
+#                    scope as STAC_REQUIRE_ASSET.
 #   STAC_API         API base (default: https://images.a11s.one)
 #   FETCH_JOBS       parallel S3 fetches (default: 20)
 #
@@ -54,19 +60,109 @@ DB="${STAC_DB:-stac}"
 # leaves an empty string, and an empty collection id reads as "no collection"
 # rather than as "the lookup broke". Failing loudly beats falling back to a
 # literal that is stale by construction.
-if [ -n "${STAC_COLLECTION:-}" ]; then
-  COLLECTION_ID="$STAC_COLLECTION"
-else
-  COLLECTION_ID=$("$PY" -c 'import sys; sys.path.insert(0, "scripts"); import collection_patch; print(collection_patch.COLLECTION_ID)' 2>/dev/null) || COLLECTION_ID=""
-  if [ -z "$COLLECTION_ID" ]; then
-    echo "ERROR: could not read COLLECTION_ID from scripts/collection_patch.py." >&2
-    echo "       Run from the repo root, or set STAC_COLLECTION explicitly." >&2
-    exit 1
-  fi
+#
+# Read even when STAC_COLLECTION is set: the audit below needs to know whether
+# the collection being registered is this repo's (#42).
+OWN_COLLECTION_ID=$("$PY" -c 'import sys; sys.path.insert(0, "scripts"); import collection_patch; print(collection_patch.COLLECTION_ID)' 2>/dev/null) || OWN_COLLECTION_ID=""
+if [ -z "$OWN_COLLECTION_ID" ]; then
+  echo "ERROR: could not read COLLECTION_ID from scripts/collection_patch.py." >&2
+  echo "       Run from the repo root." >&2
+  exit 1
 fi
+COLLECTION_ID="${STAC_COLLECTION:-$OWN_COLLECTION_ID}"
 API="${STAC_API:-https://images.a11s.one}"
 JOBS="${FETCH_JOBS:-20}"
-BUCKET_URL="${STAC_BUCKET_URL:-https://stac-dem-bc.s3.amazonaws.com}"
+# From stac_utils for the same reason as the collection id: the audit policy
+# below compares against it, and a second literal would be a second definition.
+OWN_BUCKET_URL=$("$PY" -c 'import sys; sys.path.insert(0, "scripts"); import stac_utils; print(stac_utils.PATH_S3_STAC)') || OWN_BUCKET_URL=""
+if [ -z "$OWN_BUCKET_URL" ]; then
+  echo "ERROR: could not read PATH_S3_STAC from scripts/stac_utils.py." >&2
+  exit 1
+fi
+BUCKET_URL="${STAC_BUCKET_URL:-$OWN_BUCKET_URL}"
+
+# --- what the pre-load audit asserts about assets (#42) ----------------------
+#
+# The audit always checks that every item names COLLECTION_ID and that the count
+# matches. The asset half depends on whose catalogue this is:
+#
+#   this repo's             require stac_utils.ASSET_DEM, forbid
+#                           item_migrate.ASSET_RENAMES -- the #34 guard, read
+#                           from the modules and never spelled here
+#   anyone else's           STAC_REQUIRE_ASSET / STAC_FORBID_ASSET if set,
+#                           otherwise no asset check (and it says so)
+#
+# "This repo's" is decided from three facts, any one of which is enough:
+#
+#   1. the collection id is collection_patch.COLLECTION_ID
+#   2. STAC_BUCKET_URL names stac_utils.PATH_S3_STAC's bucket -- by bucket NAME,
+#      not URL string: regional and global endpoints, http and https,
+#      path-style and any-case hosts all serve the same collection.json
+#   3. any item link in the fetched collection.json points into that bucket
+#
+# The id alone has a hole in exactly the case #34 was about: between merging a
+# rename and running the cutover, the bucket still publishes the OLD id, and an
+# operator who sets STAC_COLLECTION to it (which the mismatch error below says
+# not to do) passes the id reconciliation -- and would load old-shape items with
+# no asset check. (2) catches that before anything is fetched. (3) is the one
+# that cannot be spelled around: a URL can reach the bucket through a spelling
+# no parser knows (a file:// copy of collection.json, a CNAME, a CDN), but the
+# item hrefs are what the fetch actually reads.
+#
+# The env knobs are refused for this repo's catalogue rather than honoured as
+# overrides. They exist to give another collection a check, not to loosen the
+# one that caught a half-done rename here.
+use_own_asset_rules() {
+  local var
+  for var in STAC_REQUIRE_ASSET STAC_FORBID_ASSET; do
+    if [ -n "${!var:-}" ]; then
+      echo "ERROR: $var is set, but this is this repo's catalogue ($1)." >&2
+      echo "       Its asset rules come from stac_utils / item_migrate and cannot" >&2
+      echo "       be overridden. $var applies to other collections only." >&2
+      exit 1
+    fi
+  done
+  AUDIT_REQUIRE=$("$PY" -c 'import sys; sys.path.insert(0, "scripts"); import stac_utils; print(stac_utils.ASSET_DEM)') || AUDIT_REQUIRE=""
+  AUDIT_FORBID=$("$PY" -c 'import sys; sys.path.insert(0, "scripts"); import item_migrate; print(",".join(item_migrate.ASSET_RENAMES))') || AUDIT_FORBID=""
+  # Both, not just one: an empty forbid list would quietly stop checking for
+  # the retired key while every run still printed OK.
+  if [ -z "$AUDIT_REQUIRE" ] || [ -z "$AUDIT_FORBID" ]; then
+    echo "ERROR: could not read the asset key constants" >&2
+    exit 1
+  fi
+  AUDIT_OWN=1
+}
+
+describe_asset_rules() {
+  AUDIT_ASSET_ARGS=()
+  if [ -n "$AUDIT_REQUIRE" ]; then AUDIT_ASSET_ARGS+=(--require-asset "$AUDIT_REQUIRE"); fi
+  if [ -n "$AUDIT_FORBID" ]; then AUDIT_ASSET_ARGS+=(--forbid-asset "$AUDIT_FORBID"); fi
+  if [ -n "$AUDIT_REQUIRE$AUDIT_FORBID" ]; then
+    AUDIT_DESC="require=${AUDIT_REQUIRE:--} forbid=${AUDIT_FORBID:--}"
+  else
+    AUDIT_DESC="none (not this repo's catalogue; set STAC_REQUIRE_ASSET / STAC_FORBID_ASSET to enable)"
+  fi
+}
+
+SAME_BUCKET=$("$PY" scripts/register_manifest.py same-bucket "$BUCKET_URL" "$OWN_BUCKET_URL") || SAME_BUCKET=""
+case "$SAME_BUCKET" in
+  same|different) ;;
+  *) echo "ERROR: could not compare $BUCKET_URL with this repo's bucket" >&2; exit 1 ;;
+esac
+AUDIT_OWN=0
+if [ "$COLLECTION_ID" = "$OWN_COLLECTION_ID" ]; then
+  use_own_asset_rules "collection '$COLLECTION_ID'"
+elif [ "$SAME_BUCKET" = "same" ]; then
+  use_own_asset_rules "bucket $BUCKET_URL"
+else
+  # One key for REQUIRE (audit-items takes a single --require-asset), a
+  # comma-separated list for FORBID. What audit-items actually applies is
+  # printed by audit-items itself, so a value that parses to nothing (",")
+  # shows up as "no asset checks" there rather than as a check here.
+  AUDIT_REQUIRE="${STAC_REQUIRE_ASSET:-}"
+  AUDIT_FORBID="${STAC_FORBID_ASSET:-}"
+fi
+describe_asset_rules
 
 MODE=""
 IDS_FILE=""
@@ -103,6 +199,7 @@ count_lines() {
 
 echo "collection : $COLLECTION_ID"
 echo "mode       : $MODE"
+echo "asset audit: $AUDIT_DESC"
 
 # --- the published set -------------------------------------------------------
 
@@ -149,6 +246,22 @@ echo "published  : $N_PUBLISHED"
 if [ "$N_PUBLISHED" -eq 0 ]; then
   echo "ERROR: no item links in the published collection.json — refusing to proceed" >&2
   exit 1
+fi
+
+# Fact (3) of "this repo's catalogue" -- see the asset-rules block at the top.
+# Before any mode can write, and before --dryrun exits, so a dryrun shows the
+# rules a real run would apply.
+if [ "$AUDIT_OWN" -eq 0 ]; then
+  N_OWN_LINKS=$("$PY" scripts/register_manifest.py hrefs-in-bucket \
+    --collection-file "$WORK/collection.json" --bucket-url "$OWN_BUCKET_URL") || N_OWN_LINKS=""
+  case "$N_OWN_LINKS" in
+    ''|*[!0-9]*) echo "ERROR: could not check item links against this repo's bucket" >&2; exit 1 ;;
+  esac
+  if [ "$N_OWN_LINKS" -gt 0 ]; then
+    use_own_asset_rules "$N_OWN_LINKS item link(s) point into $OWN_BUCKET_URL"
+    describe_asset_rules
+    echo "asset audit: $AUDIT_DESC  ($N_OWN_LINKS item link(s) are in this repo's bucket)"
+  fi
 fi
 
 # --- what to register --------------------------------------------------------
@@ -339,15 +452,13 @@ if [ "$N_FETCHED" -ne "$N_URLS" ]; then
   exit 1
 fi
 
-# --- register: collection first, then items ---------------------------------
+# --- audit, then register: collection first, then items ---------------------
 
-# The FK ordering. pgstac.items.collection REFERENCES collections(id), so items
-# with no collection row fail outright.
-./scripts/collection_register.sh "$WORK/collection.json"
-
-# Audit every fetched body BEFORE any of it reaches pgstac. The bodies are
-# already on disk here, so the full-population check costs nothing -- and this
-# is the only place one is possible. The id reconciliation above compares
+# Audit every fetched body BEFORE anything reaches pgstac -- the collection row
+# included. Until #42 this ran after collection_register.sh, so a refused run
+# had already upserted the collection. The bodies are already on disk here, so
+# the full-population check costs nothing -- and this is the only place one is
+# possible. The id reconciliation above compares
 # STAC_COLLECTION against collection.json's `id`: one field, in one file, out of
 # 102,461. item_register.sh then routes each item by its OWN `collection` field,
 # so a body naming the previous collection upserts into the previous collection
@@ -355,17 +466,19 @@ fi
 #
 # --expect ties the count to the same set the fetch guard above used, rather
 # than to a separately-derived number that could disagree on a healthy run.
-# The asset key as well as the collection id. A body can name the right
-# collection and still carry the retired key -- half of the rename, which
-# nothing downstream can see. Both values are read from the modules, never
-# spelled here.
-AUDIT_DEM=$("$PY" -c 'import sys; sys.path.insert(0, "scripts"); import stac_utils; print(stac_utils.ASSET_DEM)')
-AUDIT_OLD=$("$PY" -c 'import sys; sys.path.insert(0, "scripts"); import item_migrate; print(",".join(item_migrate.ASSET_RENAMES))')
-[ -n "$AUDIT_DEM" ] || { echo "ERROR: could not read the asset key constants" >&2; exit 1; }
-
+# The asset keys as well as the collection id: for this repo's collection a body
+# can name the right collection and still carry the retired key -- half of the
+# rename, which nothing downstream can see. Which keys, per collection, is
+# resolved at the top of this script (AUDIT_ASSET_ARGS).
+# The `+` form: an empty array under `set -u` is an unbound-variable error on
+# bash 3.2, which is what macOS ships.
 "$PY" scripts/register_manifest.py audit-items \
   --dir "$FETCH_DIR" --collection-id "$COLLECTION_ID" --expect "$N_TODO" \
-  --require-asset "$AUDIT_DEM" --forbid-asset "$AUDIT_OLD"
+  ${AUDIT_ASSET_ARGS[@]+"${AUDIT_ASSET_ARGS[@]}"}
+
+# The FK ordering. pgstac.items.collection REFERENCES collections(id), so items
+# with no collection row fail outright.
+./scripts/collection_register.sh "$WORK/collection.json"
 
 # find, never a glob: 102k filenames is ~6 MB of argv against a ~2 MB ARG_MAX,
 # and it would fail after the fetch had already succeeded.
