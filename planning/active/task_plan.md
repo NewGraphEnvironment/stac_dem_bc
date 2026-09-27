@@ -56,22 +56,22 @@ Policy resolved in the shell, keyed on whether the collection is this repo's
 
 ## Phase 1: Tests first (failing)
 
-- [ ] `tests/test_catalogue_register.py` — first end-to-end test of the shell
+- [x] `tests/test_catalogue_register.py` — first end-to-end test of the shell
   script, no network: fixture `collection.json` whose item links are `file://`
   hrefs into `tmp_path`; `STAC_BUCKET_URL=file://…`; a PATH-prepended `ssh` stub
   that answers the `true` probe, logs every other invocation to a file and exits
   1; `STAC_HOST=nobody@stub.invalid` so a stub that failed to shadow still
   reaches nothing; run under `timeout`
-- [ ] Case: foreign collection, items without `dem` (airphoto shape:
+- [x] Case: foreign collection, items without `dem` (airphoto shape:
   `thumbnail`, `flight_log`), `--all` → audit prints OK, proceeds to the
   collection upsert (stub log shows one write attempt). Fails today with `lack asset 'dem'`
-- [ ] Case: foreign collection with `STAC_REQUIRE_ASSET=thumbnail` and one item
+- [x] Case: foreign collection with `STAC_REQUIRE_ASSET=thumbnail` and one item
   lacking it → audit FAIL, **stub log shows zero write attempts** (pins the reorder)
-- [ ] Case: this repo's collection, item lacking `dem` / carrying `image` → FAIL,
+- [x] Case: this repo's collection, item lacking `dem` / carrying `image` → FAIL,
   zero writes (the #34 guard still fires — restore-the-bug check)
-- [ ] Case: this repo's collection with `STAC_REQUIRE_ASSET` set → refuses with a
+- [x] Case: this repo's collection with `STAC_REQUIRE_ASSET` set → refuses with a
   message naming the variable, before fetching
-- [ ] Case: foreign collection, one item naming a different `collection` → FAIL
+- [x] Case: foreign collection, one item naming a different `collection` → FAIL
   (homogeneity still enforced when asset checks are off)
 
 ## Phase 2: Implementation
