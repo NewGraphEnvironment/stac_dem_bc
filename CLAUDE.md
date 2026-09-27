@@ -228,6 +228,14 @@ Hazards in the registration path:
   deliberate inverse of `s3_sync-ci.sh`, which uploads items first so a failure
   leaves unreferenced items rather than dangling links. Both are correct for their
   transport; do not "fix" one to match the other.
+- **`catalogue_register.sh` registers any collection** (#42), and the `dem`/`image`
+  asset audit applies only to *this repo's* catalogue — the collection id, OR the
+  bucket by name, OR any item href in the bucket. Each narrower test was found to
+  fail toward "foreign", which is the branch with no asset audit: the id alone
+  reopens #34's rename window, a URL string misses bucket aliases, and a bucket
+  URL misses `file://` copies. The item hrefs are the fact that cannot be spelled
+  around. It is coarser than a catalogue, so a second collection published into
+  `stac-dem-bc` (#35 option 2) would be refused until the test keys on the catalogue.
 - **Never verify a registration by a count.** The API has no aggregation extension
   (`/aggregate` 404s) and returns `numberMatched: null`, and a `/search` on a list
   of ids silently omits the ones that do not exist — so "asked for N, got N" can be
