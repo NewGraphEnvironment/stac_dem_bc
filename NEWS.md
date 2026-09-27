@@ -9,6 +9,24 @@ convention as [`stac_uav_bc`](https://github.com/NewGraphEnvironment/stac_uav_bc
 (`Type: Project`, pinned at `0.0.0.9000`) and is deliberately **not** versioned —
 matching `water-temp-bc`. Releases live here and in git tags.
 
+## Unreleased
+
+Tooling only — the published catalogue is unchanged.
+
+- `scripts/catalogue_register.sh` registers any collection on the endpoint, not
+  only this one (#42). The pre-load audit's asset rules (`dem` required, `image`
+  forbidden) now apply only when the collection id, the bucket (by name, across
+  URL spellings) or any published item link is this repo's;
+  another collection gets the collection-id and count checks, plus
+  `STAC_REQUIRE_ASSET` / `STAC_FORBID_ASSET` if set. Measured on
+  stac-airphoto-bc's 10,100 items: all refused before, all pass now.
+- The audit now runs **before** the collection upsert. v2.0.0 said it ran
+  "before anything reaches the database"; that held for items, but a refused run
+  had already upserted the collection row.
+- `register_manifest.py audit-items` prints the asset rules it actually applied,
+  so `--forbid-asset ,` (a non-empty argument naming no key) reports
+  `no asset checks` instead of a plain OK.
+
 ## v2.0.0 (2026-09-01)
 
 **Breaking, in two ways at once.** The collection is renamed and the bare-earth

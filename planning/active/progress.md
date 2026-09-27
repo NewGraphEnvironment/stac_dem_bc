@@ -22,3 +22,9 @@
 - Live read-only: audit-items over stac_airphoto_bc/data/stac — new rules OK 10,100,
   old rules FAIL 10,100 `lack asset 'dem'`.
 - Tests: 265 passed under /bin/bash 3.2.
+- Phase 3: scripts/README.md (landed in the Phase 2 commit via `git add scripts/`),
+  NEWS.md Unreleased entry. The "before anything reaches the database" claims in
+  scripts/README.md, CLAUDE.md and NEWS v2.0.0 are now true after the reorder; the
+  v2.0.0 overstatement is corrected in the new entry rather than rewritten.
+- #35 body: registration constraint under option 2 (round 3's latent finding).
+- Filed stac_airphoto_bc#33 to switch its registration to `--drift` after merge.

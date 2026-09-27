@@ -94,12 +94,12 @@ Policy resolved in the shell, keyed on whether the collection is this repo's
 
 ## Phase 3: Docs and cross-repo
 
-- [ ] `scripts/README.md`: registration section — any collection works; what the
+- [x] `scripts/README.md`: registration section — any collection works; what the
   audit enforces per collection; fix the line-240 ordering claim
-- [ ] `NEWS.md` entry (unreleased section; version bump left to `/gh-pr-merge`)
-- [ ] Grep for other "before any write / before anything reaches" claims about
+- [x] `NEWS.md` entry (unreleased section; version bump left to `/gh-pr-merge`)
+- [x] Grep for other "before any write / before anything reaches" claims about
   this path (README.md, CLAUDE.md) and correct them
-- [ ] File an issue in stac_airphoto_bc to replace its hand-assembled
+- [x] File an issue in stac_airphoto_bc to replace its hand-assembled
   registration block with `catalogue_register.sh --drift` once this merges
   (its CLAUDE.md cites stac_dem_bc#42 as the reason it cannot)
 
@@ -114,7 +114,7 @@ Policy resolved in the shell, keyed on whether the collection is this repo's
 
 ## Validation
 
-- [ ] Tests pass
-- [ ] `/code-check` clean on each commit
-- [ ] PWF checkboxes match landed work
+- [x] Tests pass
+- [x] `/code-check` clean on each commit
+- [x] PWF checkboxes match landed work
 - [ ] `/planning-archive` on completion
