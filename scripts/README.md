@@ -239,6 +239,17 @@ Verification is by **set equality in both directions** — missing and orphaned 
 
 Set equality has one blind spot, and #34 is exactly it. **Item ids do not change during a collection rename**, so a catalogue where half the items name the old collection and half the new is reported `IN SYNC` — and `item_register.sh` routes each item by its *own* `collection` field, so a stale body upserts into the old collection successfully, with no error anywhere. The property that breaks is *homogeneity*, not size, and `register_manifest.py audit-items` is what checks it. `catalogue_register.sh` runs it over every fetched body before anything reaches the database: the files are already on disk at that point, so the full-population check is free.
 
+What `audit-items` asserts about **assets** depends on whose catalogue it is (#42). For this repo's — the collection id is ours, *or* the bucket is, *or* any published item link points into it — every item must carry `stac_utils.ASSET_DEM` and none may carry a key retired by `item_migrate.ASSET_RENAMES`: half of #34's rename, which set equality cannot see. For any other collection there is no asset check unless one is asked for, and the run prints `asset audit: none` rather than letting a skipped check read as a pass. The collection-id and count checks run either way. So the same command registers another collection on the endpoint:
+
+```bash
+STAC_COLLECTION=stac-airphoto-bc \
+STAC_BUCKET_URL=https://stac-airphoto-bc.s3.us-west-2.amazonaws.com \
+  scripts/catalogue_register.sh --drift
+# optional: STAC_REQUIRE_ASSET=thumbnail (one key), STAC_FORBID_ASSET=a,b
+```
+
+`STAC_REQUIRE_ASSET` / `STAC_FORBID_ASSET` are refused for this repo's catalogue: its rules come from the modules and are not overridable. Keying "ours" on more than the id closes the rename window — between merging a rename and the cutover the bucket still publishes the old id, and `STAC_COLLECTION` set to it would otherwise read as a foreign collection and load old-shape items unchecked. The bucket is compared by *name* (`register_manifest.py same-bucket`), because regional, global, `http`, path-style and upper-case URLs all reach it; and the item hrefs are checked after the fetch because they are the one thing no URL spelling can route around — every one of the 102,460 published hrefs names this bucket.
+
 Registration still runs from a laptop rather than from CI, because no GitHub Actions runner can reach the host today — there is no Tailscale action and no SSH deploy key in any of these repos. That decision belongs in the infrastructure repo and unblocks every catalogue repo at once.
 
 Once registered, the collection is browsable in QGIS (STAC Data Source Manager), through the API directly, or any STAC-compatible client.
