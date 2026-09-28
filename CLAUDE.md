@@ -879,6 +879,9 @@ Sum a range directly (segment tree, per-range `sum()`, or grouped sums) rather t
 ### A `pkg::` call in a test passes `devtools::test()` and fails `R CMD check` if `pkg` is undeclared
 `R CMD check` warns "'::' or ':::' import not declared from" for any package a test reaches with `::` that `DESCRIPTION` does not list, and under `error-on: "warning"` that reddens every runner.
 
+### Inside a dplyr verb, a column named like a local variable wins
+Inject a local value into a data-masked verb with `!!x` or `.env$x`, never a bare `x`: `transmute(d, aoi_id = id)` inside `for (id in ids)` reads the frame's own `id` column whenever one exists, with no warning, and the result is well-typed and plausible.
+
 # Code Check — Shell
 Tool-level traps in bash, sed, git and `gh`, and in the host toolchain those commands depend on.
 
@@ -1179,6 +1182,9 @@ Pass a SpatRaster through as is (`if (inherits(x, "SpatRaster")) x else terra::r
 
 ### `terra::rasterize(filename = , datatype = <integer>)` writes the background as 0, not NA
 Rasterise in memory and then `writeRaster(datatype = …)`: written directly through `filename` with an integer `datatype` (INT1U, INT2S), cells no polygon covers come out as 0, while the file's NoData is 255, so they read back as data (terra 1.9.46 and 1.9.50; rspatial/terra#2195).
+
+### GDAL's `average` warp across a rotated CRS weights the wrong pixels; average in the target CRS instead
+To take class fractions or means from a fine grid in one CRS onto a coarse grid in another, resample nearest onto a grid aligned with the target and `fact` times finer (`terra::disagg(terra::rast(target), fact)`), then `terra::aggregate(fact, mean)`.
 
 # Code Check Conventions
 Structured checklist for reviewing diffs before commit.
