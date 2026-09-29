@@ -344,3 +344,256 @@ def test_encoder_is_lossy_for_a_literal_percent_20():
 def test_href_to_id_does_not_decode_a_literal_percent_escape():
     """`%41` in a filename is the two characters, not 'A'."""
     assert _href_to_id("https://x/report%41.json") == "report%41"
+
+
+# =============================================================================
+# Content comparison (#45) -- the ids match and the bodies do not
+# =============================================================================
+#
+# Set equality over ids reports IN SYNC for a catalogue whose every body was
+# rewritten, because a rebuild keeps the ids. The comparison is by body digest,
+# and every way it can fail -- a body that cannot be fetched, cannot be parsed,
+# or belongs to a different id -- has to fail loudly rather than compare equal.
+
+import hashlib  # noqa: E402
+
+import register_manifest as rm  # noqa: E402
+
+
+def _body(item_id="x", **props):
+    return {"type": "Feature", "stac_version": "1.0.0", "id": item_id,
+            "collection": "c", "bbox": [0.0, 0.0, 1.0, 1.0],
+            "geometry": {"type": "Point", "coordinates": [0.5, 0.5]},
+            "properties": {"datetime": "2020-01-01T00:00:00Z", **props},
+            "assets": {"dem": {"href": "https://x/a.tif"}},
+            "links": [{"rel": "collection", "href": "https://x/collection.json"}]}
+
+
+def test_body_digest_ignores_links():
+    """The API rewrites links (self/root/parent, its own host); nothing else.
+    Measured on 2,000 live items: equal once links are dropped, 0 differ."""
+    a = _body()
+    b = _body()
+    b["links"] = [{"rel": "self", "href": "https://api/items/x"},
+                  {"rel": "root", "href": "https://api/"}]
+    assert rm.body_digest(a) == rm.body_digest(b)
+
+
+def test_body_digest_ignores_key_order():
+    a = _body()
+    b = dict(reversed(list(_body().items())))
+    b["properties"] = dict(reversed(list(b["properties"].items())))
+    assert list(a) != list(b)
+    assert rm.body_digest(a) == rm.body_digest(b)
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda d: d["properties"].update({"datetime": "2021-01-01T00:00:00Z"}),
+    lambda d: d["properties"].update({"file:checksum": "1220abc"}),
+    lambda d: d["assets"].update({"dsm": {"href": "https://x/b.tif"}}),
+    lambda d: d["assets"]["dem"].update({"href": "https://x/other.tif"}),
+    lambda d: d["geometry"].update({"coordinates": [0.5, 0.5000001]}),
+    lambda d: d.update({"collection": "d"}),
+    lambda d: d["properties"].pop("datetime"),
+])
+def test_body_digest_changes_on_any_content_change(mutate):
+    a = _body()
+    b = _body()
+    mutate(b)
+    assert rm.body_digest(a) != rm.body_digest(b)
+
+
+@pytest.mark.parametrize("bad", [None, [], "x", 0])
+def test_body_digest_refuses_a_non_object(bad):
+    """None must not hash to something that equals another None."""
+    with pytest.raises(TypeError):
+        rm.body_digest(bad)
+
+
+def test_content_diff_reports_changed_ids():
+    published = {"a": "1", "b": "2", "c": "3"}
+    registered = {"a": "1", "b": "X", "z": "9"}
+    missing, orphaned, changed = rm.content_diff(published, registered)
+    assert missing == ["c"]
+    assert orphaned == ["z"]
+    assert changed == ["b"]
+
+
+def test_content_diff_is_empty_when_in_sync():
+    d = {"a": "1", "b": "2"}
+    assert rm.content_diff(d, dict(d)) == ([], [], [])
+
+
+@pytest.mark.parametrize("side", ["published", "registered"])
+@pytest.mark.parametrize("bad", [None, ""])
+def test_content_diff_refuses_an_absent_digest(side, bad):
+    """The issue's spot-check passed on `null == null`. Two absent digests
+    must not compare equal -- they must not compare at all."""
+    good = {"a": "1"}
+    broken = {"a": bad}
+    pub, reg = (broken, good) if side == "published" else (good, broken)
+    with pytest.raises(ValueError):
+        rm.content_diff(pub, reg)
+    with pytest.raises(ValueError):
+        rm.content_diff(broken, dict(broken))
+
+
+def _publish(tmp_path, docs):
+    """Write docs as a file:// bucket; return [(id, href)]."""
+    bucket = tmp_path / "bucket"
+    bucket.mkdir(exist_ok=True)
+    links = []
+    for d in docs:
+        p = bucket / f"{d['id']}.json"
+        p.write_text(json.dumps(d))
+        links.append((d["id"], p.as_uri()))
+    return links
+
+
+def test_fetch_key_matches_the_md5_of_the_url():
+    """Same naming the shell fetcher used, so a fetch dir means one thing."""
+    url = "https://x/a b.json"
+    assert rm.fetch_key(url) == hashlib.md5(url.encode()).hexdigest()
+
+
+def test_fetch_bodies_writes_one_file_per_url(tmp_path):
+    links = _publish(tmp_path, [_body("a"), _body("b c")])
+    out = tmp_path / "items"
+    out.mkdir()
+    failed = rm.fetch_bodies([h for _, h in links], out, workers=2, backoff=0)
+    assert failed == []
+    for item_id, href in links:
+        doc = json.loads((out / f"{rm.fetch_key(href)}.json").read_text())
+        assert doc["id"] == item_id
+    assert not list(out.glob("*.part"))
+
+
+def test_fetch_bodies_reports_what_it_could_not_fetch(tmp_path):
+    links = _publish(tmp_path, [_body("a")])
+    gone = (tmp_path / "bucket" / "gone.json").as_uri()
+    out = tmp_path / "items"
+    out.mkdir()
+    failed = rm.fetch_bodies([links[0][1], gone], out, workers=2, backoff=0)
+    assert failed == [gone]
+    assert len(list(out.glob("*.json"))) == 1
+    assert not list(out.glob("*.part"))
+
+
+def test_fetch_bodies_refuses_a_body_that_is_not_json(tmp_path):
+    """A truncated body is a failed fetch, not a file that counts as present."""
+    bad = tmp_path / "bad.json"
+    bad.write_text('{"id": "a", "trunc')
+    out = tmp_path / "items"
+    out.mkdir()
+    failed = rm.fetch_bodies([bad.as_uri()], out, workers=1, backoff=0)
+    assert failed == [bad.as_uri()]
+    assert not list(out.glob("*.json"))
+
+
+def test_published_digests_reads_the_fetched_bodies(tmp_path):
+    docs = [_body("a"), _body("b")]
+    links = _publish(tmp_path, docs)
+    out = tmp_path / "items"
+    out.mkdir()
+    assert rm.fetch_bodies([h for _, h in links], out, backoff=0) == []
+    got = rm.published_digests(links, out)
+    assert got == {d["id"]: rm.body_digest(d) for d in docs}
+
+
+def test_published_digests_raises_on_a_body_that_was_not_fetched(tmp_path):
+    """Absent is an error, never 'unchanged'."""
+    links = _publish(tmp_path, [_body("a")])
+    out = tmp_path / "items"
+    out.mkdir()
+    with pytest.raises(FileNotFoundError, match="a"):
+        rm.published_digests(links, out)
+
+
+def test_published_digests_raises_on_an_unreadable_body(tmp_path):
+    links = _publish(tmp_path, [_body("a")])
+    out = tmp_path / "items"
+    out.mkdir()
+    (out / f"{rm.fetch_key(links[0][1])}.json").write_text("{not json")
+    with pytest.raises(ValueError, match="a"):
+        rm.published_digests(links, out)
+
+
+def test_published_digests_raises_when_a_body_names_another_id(tmp_path):
+    """A link whose body is a different item would compare the wrong pair."""
+    links = _publish(tmp_path, [_body("a")])
+    out = tmp_path / "items"
+    out.mkdir()
+    (out / f"{rm.fetch_key(links[0][1])}.json").write_text(json.dumps(_body("b")))
+    with pytest.raises(ValueError, match="names id 'b'"):
+        rm.published_digests(links, out)
+
+
+def test_published_digests_raises_on_a_duplicated_id(tmp_path):
+    """Two links for one id: a dict keyed by id would keep one silently."""
+    links = _publish(tmp_path, [_body("a")])
+    out = tmp_path / "items"
+    out.mkdir()
+    rm.fetch_bodies([links[0][1]], out, backoff=0)
+    with pytest.raises(ValueError, match="more than one item link"):
+        rm.published_digests(links + links, out)
+
+
+class _FakeResponse:
+    def __init__(self, payload, status=200):
+        self._payload = payload
+        self.status_code = status
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise rm.requests.HTTPError(f"{self.status_code}")
+
+    def json(self):
+        return self._payload
+
+
+class _PagingSession:
+    """Serves `docs` over keyset paging the way stac-fastapi does."""
+
+    def __init__(self, docs, page=2):
+        self.docs, self.page, self.bodies = docs, page, []
+
+    def post(self, url, json=None, timeout=None):
+        self.bodies.append(json)
+        start = int(json.get("token") or 0)
+        chunk = self.docs[start:start + self.page]
+        links = []
+        if start + self.page < len(self.docs):
+            links.append({"rel": "next", "body": {"token": str(start + self.page)}})
+        return _FakeResponse({"features": chunk, "links": links})
+
+
+def test_bodies_registered_pages_full_bodies():
+    docs = [_body(i) for i in "abcde"]
+    s = _PagingSession(docs, page=2)
+    got = rm.bodies_registered("c", api="http://api", session=s)
+    assert got == {d["id"]: rm.body_digest(d) for d in docs}
+    assert len(s.bodies) == 3
+    # Full bodies: a `fields` include of ["id"] would hash an id-only stub.
+    assert all("fields" not in b for b in s.bodies)
+    assert all(b["collections"] == ["c"] for b in s.bodies)
+
+
+def test_bodies_registered_raises_on_a_repeated_id():
+    """A page overlap would otherwise collapse silently into one dict entry."""
+    docs = [_body("a"), _body("b"), _body("b")]
+    with pytest.raises(RuntimeError, match="'b'"):
+        rm.bodies_registered("c", api="http://api",
+                             session=_PagingSession(docs, page=2))
+
+
+def test_ids_registered_still_asks_for_ids_only():
+    docs = [{"id": i} for i in "abc"]
+    s = _PagingSession(docs, page=2)
+    assert rm.ids_registered("c", api="http://api", session=s) == ["a", "b", "c"]
+    assert all(b["fields"] == {"include": ["id"]} for b in s.bodies)
+
+
+def test_search_body_for_content_omits_fields():
+    b = rm.search_body(["a", "b"], "c", ids_only=False)
+    assert "fields" not in b
+    assert b["limit"] == 2 and b["collections"] == ["c"]

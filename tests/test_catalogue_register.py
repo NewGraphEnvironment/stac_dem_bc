@@ -25,6 +25,8 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
@@ -76,14 +78,23 @@ def _item(item_id, collection, keys):
             "links": [], "assets": assets}
 
 
+def _collection(collection_id, links=()):
+    return {"type": "Collection", "id": collection_id, "stac_version": "1.0.0",
+            "description": "fixture", "license": "proprietary",
+            "extent": {}, "links": list(links)}
+
+
 def _run(tmp_path, collection_id, items, env_extra=None, args=("--all",),
-         stac_collection=None, href_base=None):
+         stac_collection=None, href_base=None, api=None, before=None):
     """Publish `items` under `collection_id` as file:// and run the script.
+
+    `api` is a stub API's base URL (see `stub_api`); by default the API is an
+    unreachable port. `before(bucket)` runs after publishing, to break it.
 
     Returns (CompletedProcess, number of attempted writes).
     """
     bucket = tmp_path / "bucket"
-    bucket.mkdir()
+    bucket.mkdir(exist_ok=True)
     links = []
     for doc in items:
         p = bucket / f"{doc['id']}.json"
@@ -92,9 +103,9 @@ def _run(tmp_path, collection_id, items, env_extra=None, args=("--all",),
         links.append({"rel": "item", "href": href,
                       "type": "application/json"})
     (bucket / "collection.json").write_text(json.dumps(
-        {"type": "Collection", "id": collection_id, "stac_version": "1.0.0",
-         "description": "fixture", "license": "proprietary",
-         "extent": {}, "links": links}))
+        _collection(collection_id, links)))
+    if before is not None:
+        before(bucket)
 
     bindir = tmp_path / "bin"
     bindir.mkdir()
@@ -110,7 +121,9 @@ def _run(tmp_path, collection_id, items, env_extra=None, args=("--all",),
     # values -- the other order deletes the fixture bucket and the script falls
     # back to the real one.
     for k in ("STAC_COLLECTION", "STAC_REQUIRE_ASSET", "STAC_FORBID_ASSET",
-              "STAC_BUCKET_URL", "STAC_API", "STAC_HOST", "STAC_DB"):
+              "STAC_BUCKET_URL", "STAC_API", "STAC_HOST", "STAC_DB",
+              "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+              "no_proxy", "NO_PROXY", "all_proxy", "ALL_PROXY"):
         env.pop(k, None)
     env.update({
         "PATH": f"{bindir}{os.pathsep}{env['PATH']}",
@@ -119,7 +132,19 @@ def _run(tmp_path, collection_id, items, env_extra=None, args=("--all",),
         "STAC_BUCKET_URL": bucket.as_uri(),
         # Unreachable, so the post-registration verify can never touch the
         # real API. Nothing here should get that far anyway.
-        "STAC_API": "http://127.0.0.1:9",
+        "STAC_API": api or "http://127.0.0.1:9",
+        # Network-proof for the Python side, as CURL_STUB is for curl: requests
+        # and urllib both honour the proxy variables, so any http(s) request the
+        # fetcher or the API client makes goes to a dead port -- except to
+        # localhost, where the stub API lives. A harness bug that pointed a run
+        # at the real bucket fails at the first request instead of fetching
+        # 102k items.
+        "http_proxy": "http://127.0.0.1:9",
+        "https_proxy": "http://127.0.0.1:9",
+        "HTTP_PROXY": "http://127.0.0.1:9",
+        "HTTPS_PROXY": "http://127.0.0.1:9",
+        "no_proxy": "127.0.0.1,localhost",
+        "NO_PROXY": "127.0.0.1,localhost",
         "FETCH_JOBS": "4",
         # Pinned rather than inherited: the script falls back to a cwd-relative
         # .venv and then to python3, which may lack rasterio -- and the startup
@@ -399,3 +424,207 @@ def test_same_bucket_cli_answers_on_stdout():
     assert (same.returncode, same.stdout.strip()) == (0, "same")
     # Two non-S3 URLs are not "the same bucket", however equal the strings.
     assert (diff.returncode, diff.stdout.strip()) == (0, "different")
+
+
+# =============================================================================
+# Content drift (#45): the ids match, the bodies do not
+# =============================================================================
+#
+# A stub STAC API on localhost, speaking just enough of stac-fastapi for the
+# script: POST /search (collections, ids, limit, fields, keyset token) and
+# GET /collections/<id>. What it serves is what the test says is "registered".
+
+class _StubAPI:
+    def __init__(self):
+        self.items = {}          # id -> registered body
+        self.collection = None   # registered collection body, or None (404)
+        self.searches = []
+
+
+def _handler(api):
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _send(self, code, payload):
+            data = json.dumps(payload).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            prefix = "/collections/"
+            if self.path.startswith(prefix) and "/" not in self.path[len(prefix):]:
+                c = api.collection
+                if c is not None and c["id"] == self.path[len(prefix):]:
+                    self._send(200, {**c, "links": [{"rel": "self", "href": "x"}]})
+                    return
+            self._send(404, {"code": "NotFoundError"})
+
+        def do_POST(self):
+            if self.path != "/search":
+                self._send(404, {})
+                return
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            api.searches.append(body)
+            docs = [d for d in api.items.values()
+                    if d.get("collection") in body.get("collections", [])]
+            if "ids" in body:
+                docs = [d for d in docs if d["id"] in set(body["ids"])]
+            docs.sort(key=lambda d: d["id"])
+            limit = body.get("limit", 10)
+            start = int(body.get("token") or 0)
+            page = docs[start:start + limit]
+            if body.get("fields", {}).get("include") == ["id"]:
+                page = [{"id": d["id"]} for d in page]
+            else:
+                # The API adds its own links; the comparison must ignore them.
+                page = [{**d, "links": [{"rel": "self", "href": "x"}]} for d in page]
+            links = []
+            if start + limit < len(docs):
+                links.append({"rel": "next", "body": {"token": str(start + limit)}})
+            self._send(200, {"type": "FeatureCollection", "features": page,
+                             "links": links})
+    return H
+
+
+@pytest.fixture
+def stub_api():
+    api = _StubAPI()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(api))
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    api.url = f"http://127.0.0.1:{server.server_address[1]}"
+    yield api
+    server.shutdown()
+    server.server_close()
+
+
+def _in_sync(api, collection_id, items):
+    api.collection = _collection(collection_id)
+    api.items = {d["id"]: json.loads(json.dumps(d)) for d in items}
+
+
+def _foreign_items(n=3):
+    return [_item(f"a{i}", FOREIGN_ID, FOREIGN_ASSETS) for i in range(n)]
+
+
+def test_verify_reports_in_sync_when_bodies_match(tmp_path, stub_api):
+    """Control: without it, every "changed" assertion below could pass on a
+    comparison that never matches anything."""
+    items = _foreign_items()
+    _in_sync(stub_api, FOREIGN_ID, items)
+    proc, writes = _run(tmp_path, FOREIGN_ID, items, stac_collection=FOREIGN_ID,
+                        api=stub_api.url, args=("--verify",))
+    out = _out(proc)
+    assert proc.returncode == 0, out
+    assert "IN SYNC" in out, out
+    assert writes == 0
+
+
+def test_verify_reports_an_item_whose_body_changed(tmp_path, stub_api):
+    """The #45 case: same ids on both sides, one body rewritten since it was
+    registered. Id-set equality said IN SYNC here."""
+    items = _foreign_items()
+    _in_sync(stub_api, FOREIGN_ID, items)
+    stub_api.items["a1"]["properties"] = {"file:checksum": "stale"}
+    proc, writes = _run(tmp_path, FOREIGN_ID, items, stac_collection=FOREIGN_ID,
+                        api=stub_api.url, args=("--verify",))
+    out = _out(proc)
+    assert proc.returncode == 1, out
+    assert "IN SYNC" not in out
+    assert "1 registered item(s) differ from the published body" in out, out
+    assert "changed:  a1" in out, out
+    assert writes == 0
+
+
+def test_verify_reports_a_collection_whose_body_changed(tmp_path, stub_api):
+    """A version bump with no item change is the same defect, one object up."""
+    items = _foreign_items()
+    _in_sync(stub_api, FOREIGN_ID, items)
+    stub_api.collection["description"] = "the old description"
+    proc, _ = _run(tmp_path, FOREIGN_ID, items, stac_collection=FOREIGN_ID,
+                   api=stub_api.url, args=("--verify",))
+    out = _out(proc)
+    assert proc.returncode == 1, out
+    assert "collection body differs" in out, out
+    assert "IN SYNC" not in out
+
+
+def test_verify_reports_a_collection_that_is_not_registered(tmp_path, stub_api):
+    items = _foreign_items()
+    _in_sync(stub_api, FOREIGN_ID, items)
+    stub_api.collection = None
+    proc, _ = _run(tmp_path, FOREIGN_ID, items, stac_collection=FOREIGN_ID,
+                   api=stub_api.url, args=("--verify",))
+    out = _out(proc)
+    assert proc.returncode == 1, out
+    assert "collection is not registered" in out, out
+
+
+def test_verify_fails_when_a_published_body_cannot_be_fetched(tmp_path, stub_api):
+    """The failure the issue names: a body that cannot be read must fail the
+    run, not compare as unchanged. The removed spot-check passed on null == null."""
+    items = _foreign_items()
+    _in_sync(stub_api, FOREIGN_ID, items)
+    proc, writes = _run(tmp_path, FOREIGN_ID, items, stac_collection=FOREIGN_ID,
+                        api=stub_api.url, args=("--verify",),
+                        before=lambda bucket: (bucket / "a2.json").unlink())
+    out = _out(proc)
+    assert proc.returncode != 0, out
+    assert "IN SYNC" not in out
+    assert "fetched 2 of 3" in out, out
+    assert writes == 0
+
+
+def test_drift_dryrun_lists_a_changed_item(tmp_path, stub_api):
+    items = _foreign_items()
+    _in_sync(stub_api, FOREIGN_ID, items)
+    stub_api.items["a0"]["assets"] = {}
+    proc, writes = _run(tmp_path, FOREIGN_ID, items, stac_collection=FOREIGN_ID,
+                        api=stub_api.url, args=("--drift", "--dryrun"))
+    out = _out(proc)
+    assert proc.returncode == 0, out
+    assert "to register: 1" in proc.stdout, out
+    assert "a0" in proc.stdout, out
+    assert writes == 0
+
+
+def test_drift_registers_missing_and_changed_together(tmp_path, stub_api):
+    """One missing, one changed: both go in the todo set, and the run proceeds
+    to the write (which the ssh stub fails -- one attempted write)."""
+    items = _foreign_items()
+    _in_sync(stub_api, FOREIGN_ID, items)
+    del stub_api.items["a2"]
+    stub_api.items["a0"]["properties"] = {"x": 1}
+    proc, writes = _run(tmp_path, FOREIGN_ID, items, stac_collection=FOREIGN_ID,
+                        api=stub_api.url, args=("--drift",))
+    out = _out(proc)
+    assert "to register: 2" in proc.stdout, out
+    assert "checked 2 item(s)" in proc.stderr, out
+    assert writes == 1, out
+
+
+def test_drift_in_sync_does_nothing(tmp_path, stub_api):
+    items = _foreign_items()
+    _in_sync(stub_api, FOREIGN_ID, items)
+    proc, writes = _run(tmp_path, FOREIGN_ID, items, stac_collection=FOREIGN_ID,
+                        api=stub_api.url, args=("--drift",))
+    out = _out(proc)
+    assert proc.returncode == 0, out
+    assert "already in sync" in proc.stdout, out
+    assert writes == 0
+
+
+def test_drift_upserts_a_changed_collection_with_no_item_changes(tmp_path, stub_api):
+    items = _foreign_items()
+    _in_sync(stub_api, FOREIGN_ID, items)
+    stub_api.collection["license"] = "CC-BY-4.0"
+    proc, writes = _run(tmp_path, FOREIGN_ID, items, stac_collection=FOREIGN_ID,
+                        api=stub_api.url, args=("--drift",))
+    out = _out(proc)
+    assert "to register: 0" in proc.stdout, out
+    assert "already in sync" not in proc.stdout, out
+    assert writes == 1, out    # the collection upsert, failed by the stub

@@ -39,17 +39,17 @@ A one-item spot-check in the docs was tried and removed in review. It sampled a 
   `--verify` goes from about 3m40s to about 10 min; the docs say so.
 
 ## Phase 1: Tests first (red)
-- [ ] Unit tests, `test_register_manifest.py`: `body_digest` ignores `links` and key order;
+- [x] Unit tests, `test_register_manifest.py`: `body_digest` ignores `links` and key order;
   it changes on any property, asset or geometry change
-- [ ] Unit test: the content diff returns `changed` for an id in both sets with different
+- [x] Unit test: the content diff returns `changed` for an id in both sets with different
   bodies, and treats a missing or unreadable published body as an error, not as unchanged
-- [ ] Unit test: `fetch-bodies` writes `<md5(url)>.json` for `file://` hrefs and records
+- [x] Unit test: `fetch-bodies` writes `<md5(url)>.json` for `file://` hrefs and records
   failures (retries exhausted) in `failed.txt`
-- [ ] Offline e2e, `test_catalogue_register.py`: a tiny stub API (a local `http.server` on an
+- [x] Offline e2e, `test_catalogue_register.py`: a tiny stub API (a local `http.server` on an
   ephemeral port, answering `/search` and `/collections/<id>`) serving one stale body.
   `--verify` exits 1 naming it as changed; `--drift --dryrun` lists it in the todo list;
   an in-sync fixture prints IN SYNC
-- [ ] Run the new tests with the fix temporarily reverted to confirm they fail (red)
+- [x] Run the new tests with the fix temporarily reverted to confirm they fail (red)
 
 ## Phase 2: Python core (`scripts/register_manifest.py`)
 - [ ] `body_digest()`
