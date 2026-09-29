@@ -39,3 +39,33 @@ GET of the same ids, compared by `sha256(json.dumps(doc - links, sort_keys=True)
 
 | Error | Resolution |
 |-------|------------|
+
+## Live measurements (2026-09-29, read-only)
+
+All logs are under `logs/20260929_*_verify_content_45*.log`. They are gitignored, so
+the numbers are recorded here.
+
+| run | result | wall time |
+|---|---|---|
+| `--verify`, digest = minus `links` only | 160 changed | 12m19s |
+| `--verify`, + null members stripped | 29 changed | 23m52s |
+| stac-airphoto-bc `--verify` | IN SYNC, 10,100 | 2m26s |
+| positive control: 3 links, 1 body edited locally | exactly that id `changed`; the space + parentheses id equal | 5m32s |
+| `--verify`, + integral float → int | **IN SYNC, 102,460, 0 changed** | 25m30s |
+| `--drift --dryrun` | would upsert 0, collection same | 18m23s |
+
+- **The 160:** every one was `"proj:epsg": null` in the published body, with the key
+  absent from the API body. pgstac stores jsonb with nulls stripped.
+- **The 29:** `albers10k2m-*` items where PostGIS serves `-126.0` as `-126`. The plan
+  review predicted exactly this (A1). The 2,000-item sample had shown neither case,
+  which is why the full-population run was the acceptance test and not the sample.
+- **Paging all registered bodies from the API is steady at about 5.5 min.** The S3
+  fetch varies between about 6 and 20 min from run to run on the same code. That
+  variance is the spread in `--verify` time.
+
+## Errors Encountered
+
+| Error | Resolution |
+|-------|------------|
+| First full `--verify`: 160 items `changed` that nobody had touched | pgstac strips null members. `_canonical` drops null object fields and keeps nulls in arrays, the same as `jsonb_strip_nulls` |
+| Second full `--verify`: 29 more `changed` | PostGIS serves integral floats as ints. `_canonical` writes an integral float as an int and leaves `bool` alone |

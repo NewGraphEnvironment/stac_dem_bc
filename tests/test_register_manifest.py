@@ -403,6 +403,64 @@ def test_body_digest_changes_on_any_content_change(mutate):
     assert rm.body_digest(a) != rm.body_digest(b)
 
 
+def test_body_digest_treats_a_null_member_as_absent():
+    """pgstac strips null members, so the API cannot say `"proj:epsg": null`.
+    The first full live --verify reported 160 items changed on exactly this."""
+    a = _body()
+    b = _body()
+    a["properties"]["proj:epsg"] = None
+    a["assets"]["dem"]["title"] = None
+    assert rm.body_digest(a) == rm.body_digest(b)
+
+
+def test_body_digest_keeps_a_null_array_element():
+    """jsonb_strip_nulls leaves arrays alone: a null there is positional."""
+    a = _body()
+    b = _body()
+    a["properties"]["proj:shape"] = [None, 5]
+    b["properties"]["proj:shape"] = [5]
+    assert rm.body_digest(a) != rm.body_digest(b)
+
+
+def test_body_digest_still_sees_null_become_a_value():
+    a = _body()
+    b = _body()
+    a["properties"]["proj:epsg"] = None
+    b["properties"]["proj:epsg"] = 26911
+    assert rm.body_digest(a) != rm.body_digest(b)
+
+
+@pytest.mark.parametrize("published, served", [
+    (-126.0, -126),          # PostGIS rebuilds geometry: 29 live items, 2026-09-29
+    (-0.0, 0),               # numeric has no negative zero
+    (1e16, 10000000000000000),   # numeric emits a large integral float as an int
+])
+def test_body_digest_treats_an_integral_float_as_the_integer(published, served):
+    """JSON has one number type. pgstac's round trip does not keep the
+    spelling, so neither can the comparison, or those items never converge."""
+    a = _body()
+    b = _body()
+    a["geometry"]["coordinates"] = [published, 0.5]
+    b["geometry"]["coordinates"] = [served, 0.5]
+    assert rm.body_digest(a) == rm.body_digest(b)
+
+
+def test_body_digest_still_sees_a_fractional_change():
+    a = _body()
+    b = _body()
+    a["geometry"]["coordinates"] = [-126.0, 0.5]
+    b["geometry"]["coordinates"] = [-126.5, 0.5]
+    assert rm.body_digest(a) != rm.body_digest(b)
+
+
+def test_body_digest_does_not_read_a_bool_as_a_number():
+    a = _body()
+    b = _body()
+    a["properties"]["flag"] = True
+    b["properties"]["flag"] = 1
+    assert rm.body_digest(a) != rm.body_digest(b)
+
+
 @pytest.mark.parametrize("bad", [None, [], "x", 0])
 def test_body_digest_refuses_a_non_object(bad):
     """None must not hash to something that equals another None."""

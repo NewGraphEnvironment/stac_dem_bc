@@ -9,10 +9,16 @@
 # difference. Stateless — it needs no record of what previous runs did.
 #
 # Modes:
-#   --drift       register only what the API is missing (the routine case)
+#   --drift       register what the API is missing or serves with a different
+#                 body (the routine case)
 #   --all         register every published item (~102k; recovery, or after #34)
 #   --ids-file F  register exactly these ids
-#   --verify      report drift in both directions and exit; register nothing
+#   --verify      report missing, changed and orphaned items and the collection's
+#                 state, and exit; register nothing
+#
+# --drift and --verify fetch EVERY published body, because whether an item needs
+# registering is a question about its content, not only its id (#45): a rebuild
+# keeps every id. So --drift --dryrun fetches the whole catalogue too.
 #
 # Usage:
 #   scripts/catalogue_register.sh --verify
@@ -44,6 +50,11 @@
 # numberMatched: null, and a /search on a list of ids silently omits the ones
 # that do not exist — so "I asked for N and got N back" can be true while the
 # sets differ. Measured: 2 ids requested with 1 bogus returns 1 feature, no error.
+#
+# And by CONTENT (#45): equal id sets say nothing about bodies. Each side is
+# reduced to a digest by register_manifest.body_digest -- links removed, and the
+# two things pgstac's round trip does not preserve (null members, integral
+# floats) canonicalised -- and an unread body is an error, never "unchanged".
 
 set -euo pipefail
 
@@ -264,13 +275,20 @@ if [ "$AUDIT_OWN" -eq 0 ]; then
   fi
 fi
 
-# --- what to register --------------------------------------------------------
+# --- what to fetch -----------------------------------------------------------
+#
+# --all and --ids-file know what they will register before fetching anything,
+# so they fetch exactly that. --drift and --verify cannot: whether an item needs
+# registering is a question about its BODY, not just its id (#45). A rebuild
+# keeps every id, so an id comparison reported IN SYNC over a catalogue whose
+# every body had changed. They fetch every published body and decide after.
 
 case "$MODE" in
   all)
     # Deduped for the same reason as --ids-file below: the count and the fetch
     # must be over the same set, or the guard fires on a healthy run.
     sort -u "$WORK/published.txt" > "$WORK/todo.txt"
+    cp "$WORK/todo.txt" "$WORK/fetch_ids.txt"
     ;;
   ids-file)
     [ -s "$IDS_FILE" ] || { echo "ERROR: ids file missing or empty: $IDS_FILE" >&2; exit 1; }
@@ -285,65 +303,22 @@ case "$MODE" in
     # with zero failures and no explanation. Dedupe before anything counts.
     grep -v '^[[:space:]]*$' "$IDS_FILE" | sort -u > "$WORK/todo.txt" || true
     [ -s "$WORK/todo.txt" ] || { echo "ERROR: no ids in $IDS_FILE" >&2; exit 1; }
+    cp "$WORK/todo.txt" "$WORK/fetch_ids.txt"
     ;;
   drift|verify)
-    echo "enumerating registered ids (keyset paging; ~200s at full scale) ..."
-    "$PY" scripts/register_manifest.py diff \
-      --collection-file "$WORK/collection.json" \
-      --collection-id "$COLLECTION_ID" \
-      --api "$API" \
-      --missing-out "$WORK/todo.txt" \
-      --orphaned-out "$WORK/orphaned.txt"
+    # LC_ALL=C: `sort -u` dedupes by COLLATION, and in a UTF-8 locale two
+    # distinct ids can collate equal and be merged into one. Bytes cannot.
+    LC_ALL=C sort -u "$WORK/published.txt" > "$WORK/fetch_ids.txt"
     ;;
 esac
-
-N_TODO=$(count_lines "$WORK/todo.txt")
-echo "to register: $N_TODO"
-
-if [ "$MODE" = "verify" ]; then
-  # Both directions, because the header and the docs promise both. `missing`
-  # alone would have reported IN SYNC over any number of orphans -- registered
-  # items with no published link -- which is the drift direction #28 is open
-  # about and the one --all would silently preserve.
-  # count_lines returns 0 for a MISSING file, which would make an unwritten
-  # orphan list read as "no orphans" -- the gate silently disarmed. Require it.
-  if [ ! -f "$WORK/orphaned.txt" ]; then
-    echo "ERROR: orphan list was not written; cannot verify both directions" >&2
-    exit 1
-  fi
-  N_ORPHANED=$(count_lines "$WORK/orphaned.txt")
-  RC=0
-  if [ "$N_TODO" -gt 0 ]; then
-    echo "DRIFT: $N_TODO published item(s) are not registered" >&2
-    head -5 "$WORK/todo.txt" | sed 's/^/  missing:  /' >&2
-    RC=1
-  fi
-  if [ "$N_ORPHANED" -gt 0 ]; then
-    echo "DRIFT: $N_ORPHANED registered item(s) are no longer published (#28)" >&2
-    head -5 "$WORK/orphaned.txt" | sed 's/^/  orphaned: /' >&2
-    RC=1
-  fi
-  # Absence of drift is an affirmative result and gets said out loud; a check
-  # that prints nothing is indistinguishable from one that never ran.
-  if [ "$RC" -eq 0 ]; then
-    echo "IN SYNC: $N_PUBLISHED published, all registered, no orphans"
-  fi
-  exit "$RC"
-fi
-
-if [ "$N_TODO" -eq 0 ]; then
-  echo "nothing to register — already in sync"
-  exit 0
-fi
-
-# --- resolve fetch hrefs -----------------------------------------------------
+N_FETCH_IDS=$(count_lines "$WORK/fetch_ids.txt")
 
 # Always fetch by the PUBLISHED href, never by a URL rebuilt from an id. 90 ids
 # carry literal spaces and parentheses; the published href is already correctly
 # percent-encoded and a reconstructed one is not (#25).
 "$PY" scripts/register_manifest.py hrefs-published \
   --collection-file "$WORK/collection.json" \
-  --ids-file "$WORK/todo.txt" > "$WORK/hrefs.tsv"
+  --ids-file "$WORK/fetch_ids.txt" > "$WORK/hrefs.tsv"
 
 # THE EXPECTATION IS DERIVED FROM THE ARTIFACT THE FETCHER CONSUMES.
 #
@@ -351,90 +326,78 @@ fi
 # place (`todo.txt`) and files produced from another (`urls.txt`), with a guard
 # comparing them. Deduping the inputs -- which is what the first two fixes did --
 # leaves that pair free to disagree for the next reason. `urls.txt` is what the
-# fetch loop actually iterates, so counting it is the only count that cannot
-# drift from what the fetch produces.
+# fetch actually iterates, so counting it is the only count that cannot drift
+# from what the fetch produces.
 cut -f2 "$WORK/hrefs.tsv" | sort -u > "$WORK/urls.txt"
 N_URLS=$(count_lines "$WORK/urls.txt")
 
 # One id must resolve to exactly one URL. It does today, but nothing in the
 # published collection enforces it -- a duplicated item link would give one id
-# two hrefs, which no amount of deduping `todo.txt` can reach because the
+# two hrefs, which no amount of deduping the ids can reach because the
 # duplication is on the href side. Reconciled explicitly rather than assumed,
 # and reported as what it is rather than surfacing later as a phantom fetch
 # shortfall.
-if [ "$N_URLS" -ne "$N_TODO" ]; then
-  echo "ERROR: $N_TODO id(s) resolved to $N_URLS distinct URL(s)." >&2
+if [ "$N_URLS" -ne "$N_FETCH_IDS" ]; then
+  echo "ERROR: $N_FETCH_IDS id(s) resolved to $N_URLS distinct URL(s)." >&2
   echo "       The published collection.json has duplicate or missing item links." >&2
   exit 1
 fi
+# And the rows, not only the distinct URLs: an item link duplicated with an
+# IDENTICAL href collapses under `sort -u` above and passes. --drift/--verify
+# would refuse it anyway (published_digests), but --all and --ids-file would
+# register everything first and only then trip over it in verify-serving -- a
+# successful write reported as a crash, on every rerun. Refused here, before
+# anything is fetched or written, in every mode alike.
+N_HREF_ROWS=$(count_lines "$WORK/hrefs.tsv")
+if [ "$N_HREF_ROWS" -ne "$N_FETCH_IDS" ]; then
+  echo "ERROR: $N_FETCH_IDS id(s) have $N_HREF_ROWS item link(s) between them." >&2
+  echo "       The published collection.json links an item more than once." >&2
+  exit 1
+fi
 
-if [ "$DRYRUN" -eq 1 ]; then
-  echo "[dryrun] would fetch $N_TODO item(s) and upsert them to $DB on $HOST"
-  echo "[dryrun] first 3:"
-  head -3 "$WORK/hrefs.tsv" | sed 's/^/  /'
-  exit 0
+if [ "$MODE" = "all" ] || [ "$MODE" = "ids-file" ]; then
+  N_TODO=$(count_lines "$WORK/todo.txt")
+  echo "to register: $N_TODO"
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "[dryrun] would fetch $N_TODO item(s) and upsert them to $DB on $HOST"
+    echo "[dryrun] first 3:"
+    head -3 "$WORK/hrefs.tsv" | sed 's/^/  /'
+    exit 0
+  fi
 fi
 
 # Probe before the expensive stage — a dead host otherwise surfaces only after
 # a multi-minute fetch, which is the same silent-after-success shape as ARG_MAX.
-if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" true 2>/dev/null; then
-  echo "ERROR: cannot reach $HOST. If the tailnet is down, try the reserved IP:" >&2
-  echo "       STAC_HOST=root@146.190.12.8 $0 --$MODE" >&2
-  exit 1
+# Every mode that can write, --drift included: its fetch is the whole catalogue.
+if [ "$MODE" != "verify" ] && [ "$DRYRUN" -eq 0 ]; then
+  if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" true 2>/dev/null; then
+    echo "ERROR: cannot reach $HOST. If the tailnet is down, try the reserved IP:" >&2
+    echo "       STAC_HOST=root@146.190.12.8 $0 --$MODE" >&2
+    exit 1
+  fi
 fi
 
 # --- fetch -------------------------------------------------------------------
 
 FETCH_DIR="$WORK/items"
 mkdir -p "$FETCH_DIR"
-FETCH_SCRIPT="$WORK/fetch_one.sh"
 
-# Each worker writes its OWN file. Parallel appends to one shared descriptor
-# interleave mid-record once a record exceeds a single write(), which corrupts
-# the NDJSON. The filename is a hash of the URL so ids containing spaces and
-# parentheses need no quoting anywhere downstream.
-cat > "$FETCH_SCRIPT" <<'FETCHEOF'
-#!/bin/bash
-url="$1"; dir="$2"
-if command -v md5sum >/dev/null 2>&1; then
-  key=$(printf '%s' "$url" | md5sum | cut -d' ' -f1)
-else
-  key=$(printf '%s' "$url" | md5 -q)
-fi
-out="$dir/$key.json"
-# --max-time so one hung connection cannot pin a worker slot indefinitely: a
-# wedged pool and a slow pool look identical from outside.
-# Retry in-process, so a transient failure never reaches the exit code. A
-# backfill in this repo once completed 98,040 items and threw the run away over
-# 2 transient errors (0.002%).
-for attempt in 1 2 3; do
-  if curl -sfL --max-time 60 "$url" -o "$out.part" && [ -s "$out.part" ]; then
-    # Write then rename: `curl > file` truncates before curl runs, so a failed
-    # fetch would otherwise leave a zero-byte file that counts as present.
-    # Checked: an unchecked mv (ENOSPC mid-run) would exit 0 having produced no
-    # file and logged no failure -- a shortfall with no diagnostic at all.
-    if mv "$out.part" "$out"; then
-      exit 0
-    fi
-    break
-  fi
-  sleep $((attempt * 2))
-done
-rm -f "$out.part"
-printf '%s\n' "$url" >> "$dir/../failed.txt"
-exit 1
-FETCHEOF
-chmod +x "$FETCH_SCRIPT"
-
+# In one Python process with a thread pool, not one curl per item: the shell
+# loop this replaced took ~45 min for the whole catalogue, and since #45
+# --verify reads every published body. Each worker writes its OWN file, named
+# by a hash of the URL, so ids with spaces and parentheses need no quoting
+# anywhere downstream; a body counts only once it parses and is renamed into
+# place, so a failed fetch never leaves a file that counts as present.
 echo "fetching $N_URLS item JSON(s) with $JOBS workers ..."
 : > "$WORK/failed.txt"
-# Failures are collected, not aborted on: xargs' exit status conflates "one
-# transient 500" with "the bucket is gone", and the count guard below is the
-# real gate.
+# Failures are collected, not aborted on: the fetcher's exit status would
+# conflate "one transient 500" with "the bucket is gone", and the count guard
+# below is the real gate. stderr goes to a file, never /dev/null: it carries
+# the only diagnostic for each URL that failed.
 set +e
-# stderr goes to a file, never /dev/null: a curl that dies in a way the retry
-# loop does not catch leaves its only diagnostic there.
-xargs -P "$JOBS" -I {} "$FETCH_SCRIPT" {} "$FETCH_DIR" < "$WORK/urls.txt" 2>"$WORK/fetch_stderr.txt"
+"$PY" scripts/register_manifest.py fetch-bodies \
+  --urls-file "$WORK/urls.txt" --out-dir "$FETCH_DIR" \
+  --failed-out "$WORK/failed.txt" --workers "$JOBS" 2>"$WORK/fetch_stderr.txt"
 set -e
 
 N_FETCHED=$(find "$FETCH_DIR" -maxdepth 1 -type f -name '*.json' | wc -l | tr -d ' ')
@@ -452,45 +415,143 @@ if [ "$N_FETCHED" -ne "$N_URLS" ]; then
   exit 1
 fi
 
+# --- what differs (--drift / --verify) ----------------------------------------
+
+COLL_STATE=""
+if [ "$MODE" = "drift" ] || [ "$MODE" = "verify" ]; then
+  echo "comparing every body with the API (full-body keyset paging; ~6 min at full scale) ..."
+  "$PY" scripts/register_manifest.py diff \
+    --collection-file "$WORK/collection.json" \
+    --collection-id "$COLLECTION_ID" \
+    --api "$API" \
+    --fetch-dir "$FETCH_DIR" \
+    --missing-out "$WORK/missing.txt" \
+    --orphaned-out "$WORK/orphaned.txt" \
+    --changed-out "$WORK/changed.txt"
+  # count_lines returns 0 for a MISSING file, which would make an unwritten list
+  # read as "nothing to report" -- the gate silently disarmed. Require all three.
+  for f in missing orphaned changed; do
+    if [ ! -f "$WORK/$f.txt" ]; then
+      echo "ERROR: $f list was not written; cannot compare" >&2
+      exit 1
+    fi
+  done
+  LC_ALL=C sort -u "$WORK/missing.txt" "$WORK/changed.txt" > "$WORK/todo.txt"
+
+  # The collection's own body: a version bump with no item change is the same
+  # defect one object up. An answer on stdout, and anything else is an error --
+  # never read as "same".
+  COLL_STATE=$("$PY" scripts/register_manifest.py collection-state \
+    --collection-file "$WORK/collection.json" \
+    --collection-id "$COLLECTION_ID" --api "$API") || COLL_STATE=""
+  case "$COLL_STATE" in
+    same|changed|missing) ;;
+    *) echo "ERROR: could not compare the registered collection with collection.json" >&2; exit 1 ;;
+  esac
+
+  N_TODO=$(count_lines "$WORK/todo.txt")
+  echo "to register: $N_TODO"
+fi
+
+if [ "$MODE" = "verify" ]; then
+  # All directions, because the header and the docs promise all of them.
+  # `missing` alone would have reported IN SYNC over any number of orphans --
+  # registered items with no published link, the drift direction #28 is open
+  # about -- and ids alone over any number of stale bodies (#45).
+  N_MISSING=$(count_lines "$WORK/missing.txt")
+  N_ORPHANED=$(count_lines "$WORK/orphaned.txt")
+  N_CHANGED=$(count_lines "$WORK/changed.txt")
+  RC=0
+  if [ "$N_MISSING" -gt 0 ]; then
+    echo "DRIFT: $N_MISSING published item(s) are not registered" >&2
+    head -5 "$WORK/missing.txt" | sed 's/^/  missing:  /' >&2
+    RC=1
+  fi
+  if [ "$N_CHANGED" -gt 0 ]; then
+    echo "DRIFT: $N_CHANGED registered item(s) differ from the published body (#45)" >&2
+    head -5 "$WORK/changed.txt" | sed 's/^/  changed:  /' >&2
+    RC=1
+  fi
+  if [ "$N_ORPHANED" -gt 0 ]; then
+    echo "DRIFT: $N_ORPHANED registered item(s) are no longer published (#28)" >&2
+    head -5 "$WORK/orphaned.txt" | sed 's/^/  orphaned: /' >&2
+    RC=1
+  fi
+  case "$COLL_STATE" in
+    changed) echo "DRIFT: the registered collection body differs from collection.json" >&2; RC=1 ;;
+    missing) echo "DRIFT: the collection is not registered" >&2; RC=1 ;;
+  esac
+  # Absence of drift is an affirmative result and gets said out loud; a check
+  # that prints nothing is indistinguishable from one that never ran.
+  if [ "$RC" -eq 0 ]; then
+    echo "IN SYNC: $N_PUBLISHED published, all registered with the published body, no orphans"
+  fi
+  exit "$RC"
+fi
+
+if [ "$MODE" = "drift" ]; then
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "[dryrun] would upsert $N_TODO item(s) to $DB on $HOST (collection: $COLL_STATE)"
+    if [ "$N_TODO" -gt 0 ]; then
+      echo "[dryrun] first 5:"
+      head -5 "$WORK/todo.txt" | sed 's/^/  /'
+    fi
+    exit 0
+  fi
+  if [ "$N_TODO" -eq 0 ] && [ "$COLL_STATE" = "same" ]; then
+    echo "nothing to register — already in sync"
+    exit 0
+  fi
+fi
+
 # --- audit, then register: collection first, then items ---------------------
 
-# Audit every fetched body BEFORE anything reaches pgstac -- the collection row
-# included. Until #42 this ran after collection_register.sh, so a refused run
-# had already upserted the collection. The bodies are already on disk here, so
-# the full-population check costs nothing -- and this is the only place one is
-# possible. The id reconciliation above compares
-# STAC_COLLECTION against collection.json's `id`: one field, in one file, out of
-# 102,461. item_register.sh then routes each item by its OWN `collection` field,
-# so a body naming the previous collection upserts into the previous collection
-# successfully, with no error anywhere.
-#
-# --expect ties the count to the same set the fetch guard above used, rather
-# than to a separately-derived number that could disagree on a healthy run.
-# The asset keys as well as the collection id: for this repo's collection a body
-# can name the right collection and still carry the retired key -- half of the
-# rename, which nothing downstream can see. Which keys, per collection, is
-# resolved at the top of this script (AUDIT_ASSET_ARGS).
-# The `+` form: an empty array under `set -u` is an unbound-variable error on
-# bash 3.2, which is what macOS ships.
-"$PY" scripts/register_manifest.py audit-items \
-  --dir "$FETCH_DIR" --collection-id "$COLLECTION_ID" --expect "$N_TODO" \
-  ${AUDIT_ASSET_ARGS[@]+"${AUDIT_ASSET_ARGS[@]}"}
+# Only the bodies being registered, by explicit path. --drift fetched the whole
+# catalogue to compare it; handing all of that to the audit and the loader would
+# register 102k items to change one. Resolved from the same hrefs the fetch
+# used, and an id with no fetched body is an error here, not a skipped line.
+: > "$WORK/todo_paths.txt"
+if [ "$N_TODO" -gt 0 ]; then
+  "$PY" scripts/register_manifest.py fetched-paths \
+    --hrefs-file "$WORK/hrefs.tsv" --ids-file "$WORK/todo.txt" \
+    --fetch-dir "$FETCH_DIR" > "$WORK/todo_paths.txt"
+
+  # Audit every body about to be registered BEFORE anything reaches pgstac --
+  # the collection row included. Until #42 this ran after collection_register.sh,
+  # so a refused run had already upserted the collection. The id reconciliation
+  # above compares STAC_COLLECTION against collection.json's `id`: one field, in
+  # one file, out of 102,461. item_register.sh then routes each item by its OWN
+  # `collection` field, so a body naming the previous collection upserts into
+  # the previous collection successfully, with no error anywhere.
+  #
+  # --expect ties the count to the todo set rather than to a separately-derived
+  # number that could disagree on a healthy run.
+  # The asset keys as well as the collection id: for this repo's collection a
+  # body can name the right collection and still carry the retired key -- half
+  # of the rename, which nothing downstream can see. Which keys, per collection,
+  # is resolved at the top of this script (AUDIT_ASSET_ARGS).
+  # The `+` form: an empty array under `set -u` is an unbound-variable error on
+  # bash 3.2, which is what macOS ships.
+  "$PY" scripts/register_manifest.py audit-items \
+    --collection-id "$COLLECTION_ID" --expect "$N_TODO" \
+    ${AUDIT_ASSET_ARGS[@]+"${AUDIT_ASSET_ARGS[@]}"} < "$WORK/todo_paths.txt"
+fi
 
 # The FK ordering. pgstac.items.collection REFERENCES collections(id), so items
 # with no collection row fail outright.
 ./scripts/collection_register.sh "$WORK/collection.json"
 
-# find, never a glob: 102k filenames is ~6 MB of argv against a ~2 MB ARG_MAX,
-# and it would fail after the fetch had already succeeded.
-# STAC_COLLECTION makes the same assertion once more inside item_register.sh,
-# on the file it is about to hand pypgstac. Cheap, and the two are not
-# redundant: this one runs even when the audit above is bypassed.
-find "$FETCH_DIR" -maxdepth 1 -type f -name '*.json' | \
-  STAC_COLLECTION="$COLLECTION_ID" ./scripts/item_register.sh
+if [ "$N_TODO" -gt 0 ]; then
+  # Paths on stdin, never argv: 102k filenames is ~6 MB against a ~2 MB ARG_MAX.
+  # STAC_COLLECTION makes the same assertion once more inside item_register.sh,
+  # on the file it is about to hand pypgstac. Cheap, and the two are not
+  # redundant: this one runs even when the audit above is bypassed.
+  STAC_COLLECTION="$COLLECTION_ID" ./scripts/item_register.sh < "$WORK/todo_paths.txt"
+fi
 
 # --- verify ------------------------------------------------------------------
 
-echo "verifying by set equality ..."
+echo "verifying by set equality and content ..."
 # Delegated to register_manifest.py rather than inlined, because the request
 # body needs two details an inline heredoc would lose, each of which fails
 # silently when omitted. The API's default limit is 10: a body without one
@@ -500,7 +561,65 @@ echo "verifying by set equality ..."
 # the endpoint -- so during #34, when two collections share all 102,460 ids,
 # verifying the new one would pass on the old one's rows. Both measured, and
 # pinned by tests/test_register_manifest.py.
-"$PY" scripts/register_manifest.py verify-serving \
-  --ids-file "$WORK/todo.txt" --collection-id "$COLLECTION_ID" --api "$API"
+#
+# Content as well as ids (#45): if pgstac ever normalised a field on the way
+# in, --drift would re-register the same items every month without converging.
+# Comparing what is served with what was sent makes that fail the first time.
+COLL_AFTER=$("$PY" scripts/register_manifest.py collection-state \
+  --collection-file "$WORK/collection.json" \
+  --collection-id "$COLLECTION_ID" --api "$API") || COLL_AFTER=""
+if [ "$COLL_AFTER" != "same" ]; then
+  echo "FAIL: after registering, the collection reads '${COLL_AFTER:-unreadable}', not 'same'" >&2
+  exit 1
+fi
+echo "OK: the collection is served with the published body"
+
+# Which items to re-read. Normally only the ones just sent. But pgstac serves
+# every item HYDRATED against its collection (the collection's item_assets and
+# stac_version form a base the stored item was dehydrated against), so a
+# collection whose body changed can change how every UNTOUCHED item reads back.
+# Checking only the todo set would print DONE over that; the next --verify
+# would be the first to see it. So when the collection may have changed and
+# every published body is on disk, re-compare the whole catalogue (~6 min):
+#   --drift with the collection not 'same' before the write
+#   --all, which fetched everything and upserts the collection unconditionally
+# --ids-file holds only its own bodies and checks only those: run --verify
+# after it if collection.json changed.
+FULL_RECHECK=0
+if [ "$MODE" = "all" ]; then FULL_RECHECK=1; fi
+if [ "$MODE" = "drift" ] && [ "$COLL_STATE" != "same" ]; then FULL_RECHECK=1; fi
+
+if [ "$FULL_RECHECK" -eq 1 ]; then
+  echo "re-comparing every published body with the API (the collection was upserted) ..."
+  "$PY" scripts/register_manifest.py diff \
+    --collection-file "$WORK/collection.json" \
+    --collection-id "$COLLECTION_ID" \
+    --api "$API" \
+    --fetch-dir "$FETCH_DIR" \
+    --missing-out "$WORK/after_missing.txt" \
+    --orphaned-out "$WORK/after_orphaned.txt" \
+    --changed-out "$WORK/after_changed.txt"
+  for f in after_missing after_changed; do
+    if [ ! -f "$WORK/$f.txt" ]; then
+      echo "ERROR: $f list was not written; cannot confirm the registration" >&2
+      exit 1
+    fi
+  done
+  N_AFTER_MISSING=$(count_lines "$WORK/after_missing.txt")
+  N_AFTER_CHANGED=$(count_lines "$WORK/after_changed.txt")
+  if [ "$N_AFTER_MISSING" -gt 0 ] || [ "$N_AFTER_CHANGED" -gt 0 ]; then
+    echo "FAIL: after registering, $N_AFTER_MISSING published item(s) are not served and" >&2
+    echo "      $N_AFTER_CHANGED are served with a body that differs from the published one" >&2
+    head -5 "$WORK/after_missing.txt" | sed 's/^/  missing:  /' >&2
+    head -5 "$WORK/after_changed.txt" | sed 's/^/  changed:  /' >&2
+    exit 1
+  fi
+  # Orphans are not this run's failure: nothing here deletes (#28).
+  echo "OK: every published item is served with the published body"
+elif [ "$N_TODO" -gt 0 ]; then
+  "$PY" scripts/register_manifest.py verify-serving \
+    --ids-file "$WORK/todo.txt" --collection-id "$COLLECTION_ID" --api "$API" \
+    --hrefs-file "$WORK/hrefs.tsv" --fetch-dir "$FETCH_DIR"
+fi
 
 echo "DONE: $N_TODO item(s) registered to $COLLECTION_ID"

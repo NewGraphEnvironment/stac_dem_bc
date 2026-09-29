@@ -26,6 +26,33 @@ Tooling only — the published catalogue is unchanged.
 - `register_manifest.py audit-items` prints the asset rules it actually applied,
   so `--forbid-asset ,` (a non-empty argument naming no key) reports
   `no asset checks` instead of a plain OK.
+- `catalogue_register.sh --verify` and `--drift` compare **content**, not just
+  ids (#45). A rebuild keeps every id, so a catalogue whose bodies had all been
+  rewritten used to verify `IN SYNC`, and `--drift` never refreshed it. Both now
+  fetch every published body and compare it with the API's by digest (sha256 of
+  the canonical JSON minus `links`, the one member the API rewrites). Two things
+  pgstac's round trip does not preserve are canonicalised on both sides, each
+  found by the first full run: null members (160 items carry `"proj:epsg": null`
+  and are served without the key) and integral floats (PostGIS serves `-126.0`
+  as `-126`, 29 items). Measured after that: all 102,460 items and all 10,100
+  stac-airphoto-bc items compare equal. `--verify`
+  reports `changed` beside `missing` and `orphaned`; `--drift` registers
+  missing ∪ changed. The collection's own body is compared too, so a version bump
+  with no item change is no longer invisible. A body that cannot be fetched or
+  read fails the run; it is never counted as unchanged.
+- After any registration, the served bodies are checked against the ones sent,
+  and the collection against `collection.json`. If pgstac ever normalised a field,
+  `--drift` would otherwise re-register the same items every month without
+  converging. After `--all`, or a `--drift` whose collection body changed, the
+  whole catalogue is re-compared (~6 min): pgstac serves items hydrated against
+  their collection, so a collection upsert can change how untouched items read.
+- An item linked more than once in `collection.json` is refused before anything
+  is fetched, in every mode. Previously `--all` deduped it.
+- Item JSONs are fetched in one Python process with a thread pool instead of one
+  `curl` per item, in every mode.
+- Behaviour changes: `--drift` now probes ssh **before** its fetch, so it needs the
+  tailnet even in a month with nothing to register. `--drift --dryrun` fetches the
+  whole catalogue, because what changed is a question about the bodies.
 
 ## v2.0.0 (2026-09-01)
 

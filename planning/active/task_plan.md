@@ -52,26 +52,27 @@ A one-item spot-check in the docs was tried and removed in review. It sampled a 
 - [x] Run the new tests with the fix temporarily reverted to confirm they fail (red)
 
 ## Phase 2: Python core (`scripts/register_manifest.py`)
-- [ ] `body_digest()`
-- [ ] Generalise the paging in `ids_registered` into `bodies_registered()` → `{id: digest}`;
-  `ids_registered` stays as a thin wrapper, or is removed if nothing else calls it
-- [ ] `fetch-bodies` subcommand (Python fetcher, `file://` + `https://`, retries, atomic write)
-- [ ] `diff` gains `--fetch-dir` + `--changed-out`; `ids_diff` is extended to
-  `(missing, orphaned, changed)`
-- [ ] Collection digest compare (`collection-changed` subcommand, prints `same`/`changed` on
-  stdout, the same pattern as `same-bucket`)
-- [ ] `verify-serving` checks content against `--fetch-dir`
+- [x] `body_digest()`
+- [x] Share the keyset paging (`_search_pages`) between `ids_registered` (ids only,
+  still used by the `ids-registered` CLI) and the new `bodies_registered()` →
+  `{id: digest}`
+- [x] `fetch-bodies` subcommand (Python fetcher, `file://` + `https://`, retries, atomic write)
+- [x] `diff` gains `--fetch-dir` (required) + `--changed-out`. `ids_diff` is kept as it
+  is; the new `content_diff` returns `(missing, orphaned, changed)`
+- [x] Collection digest compare (`collection-state` subcommand, prints `same`/`changed`/`missing`
+  on stdout; 404 is `missing` and anything else raises; the same pattern as `same-bucket`)
+- [x] `verify-serving` checks content against `--fetch-dir`
 
 ## Phase 3: Orchestrator (`scripts/catalogue_register.sh`)
-- [ ] Replace the `fetch_one.sh`/`xargs` loop with `fetch-bodies`; keep the count guard and
+- [x] Replace the `fetch_one.sh`/`xargs` loop with `fetch-bodies`; keep the count guard and
   the failure report
-- [ ] `--verify`/`--drift`: fetch all published bodies → content diff → report / todo =
+- [x] `--verify`/`--drift`: fetch all published bodies → content diff → report / todo =
   missing ∪ changed
-- [ ] Register from an explicit list of todo paths (audit + `item_register.sh`), not `find`
+- [x] Register from an explicit list of todo paths (audit + `item_register.sh`), not `find`
   over the whole directory
-- [ ] Move the ssh probe before the fetch for `--drift` (non-dryrun)
-- [ ] Re-upsert the collection when its body changed
-- [ ] Update the header comment (modes, "set equality AND content")
+- [x] Move the ssh probe before the fetch for `--drift` (non-dryrun)
+- [x] Re-upsert the collection when its body changed
+- [x] Update the header comment (modes, "set equality AND content")
 
 ## Phase 4: Docs and full-scale acceptance
 - [ ] `scripts/README.md` (verify section, timing, fetch speed), NEWS.md entry,
