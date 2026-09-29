@@ -75,15 +75,15 @@ A one-item spot-check in the docs was tried and removed in review. It sampled a 
 - [x] Update the header comment (modes, "set equality AND content")
 
 ## Phase 4: Docs and full-scale acceptance
-- [ ] `scripts/README.md` (verify section, timing, fetch speed), NEWS.md entry,
+- [x] `scripts/README.md` (verify section, timing, fetch speed), NEWS.md entry,
   CLAUDE.md "Never verify a registration by a count" paragraph: ids AND content
-- [ ] Run `--verify` against the live catalogue: expect 102,460 published, 0 missing,
+- [x] Run `--verify` against the live catalogue: expect 102,460 published, 0 missing,
   0 orphaned, **0 changed**. Record the wall time. This is the full-population check that the
   2,000-item sample stands in for.
-- [ ] Run `--drift --dryrun` live: expect nothing to register
+- [x] Run `--drift --dryrun` live: expect nothing to register
 
 ## Phase 5: Close out
-- [ ] `/code-check` on every commit, with three review rounds
+- [x] `/code-check` on every commit, with three review rounds
 - [ ] File a stac_airphoto_bc issue: `--drift` now detects rewritten items, so its docs can
   stop prescribing `--all` every time
 - [ ] `/planning-archive`, `/gh-pr-push`
