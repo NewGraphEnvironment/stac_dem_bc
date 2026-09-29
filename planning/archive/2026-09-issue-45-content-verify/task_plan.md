@@ -84,13 +84,13 @@ A one-item spot-check in the docs was tried and removed in review. It sampled a 
 
 ## Phase 5: Close out
 - [x] `/code-check` on every commit, with three review rounds
-- [ ] File a stac_airphoto_bc issue: `--drift` now detects rewritten items, so its docs can
+- [x] File a stac_airphoto_bc issue: `--drift` now detects rewritten items, so its docs can
   stop prescribing `--all` every time
-- [ ] `/planning-archive`, `/gh-pr-push`
+- [x] `/planning-archive`, `/gh-pr-push`
 
 ## Validation
 
-- [ ] Tests pass
-- [ ] `/code-check` clean on each commit
-- [ ] PWF checkboxes match landed work
-- [ ] `/planning-archive` on completion
+- [x] Tests pass
+- [x] `/code-check` clean on each commit
+- [x] PWF checkboxes match landed work
+- [x] `/planning-archive` on completion
