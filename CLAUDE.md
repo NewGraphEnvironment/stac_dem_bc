@@ -247,6 +247,20 @@ Hazards in the registration path:
   shipped that failed every run over 10 items because its only test used 3. Items
   carry no `updated`/`created`, so the only true write timestamp is
   `max(updated_at)` on `pgstac.items`, queried on the host.
+- **Id sets are not enough either: compare bodies (#45).** A rebuild keeps every
+  id, so id-set equality reported IN SYNC over a catalogue whose bodies had all
+  changed. `--verify`/`--drift` digest every published body against the API's —
+  sha256 of the canonical JSON minus `links`, which is the only member the API
+  rewrites. Two things pgstac does not preserve are canonicalised
+  (`register_manifest._canonical`), each found by the first full run and not by
+  the 2,000-item sample: null members are stripped (160 items, `proj:epsg`), and
+  PostGIS serves an integral float as an integer (`-126.0` → `-126`, 29 items).
+  A third normalisation, if one appears, surfaces as items reported `changed`
+  that nobody touched, and the post-register content check fails the first
+  `--drift` rather than letting it loop monthly. Items are served *hydrated*
+  against the collection (its `item_assets` and `stac_version`), so a collection
+  upsert can change how untouched items read. That is why `--all` and a `--drift`
+  whose collection changed re-compare the whole catalogue after writing.
 - `data/dem_dsm_pairs.csv` and the item JSONs are large enough that concatenation
   must use `find -exec cat {} +`, never a glob — see the ARG_MAX entry in the
   code-check conventions below.
