@@ -666,6 +666,11 @@ want. This is cancellation **within one push**, which is never what you want.
 *4 lines of evidence for this rule are in `conventions/ci-monitoring.md`, which `/code-check` reads in full.*
 
 
+## A push `paths:` filter skips an empty commit, and dispatch and schedule run only from the default branch
+Before planning to re-run a workflow on a feature branch, check how it is triggered. An empty commit (`git commit --allow-empty`) changes no files, so a `push` trigger with a `paths:` filter skips it, and the skip is silent: no run is created, so nothing reports anything. `workflow_dispatch` only works for a workflow file already on the default branch, and `schedule` only fires from there. So a branch-only workflow is re-run in one of three ways: push trigger with no `paths:` (the branch filter scopes it), `gh run rerun <id>`, or a commit that touches a filtered path.
+
+*1 line of evidence for this rule is in `conventions/ci-monitoring.md`, which `/code-check` reads in full.*
+
 # Code Check — R
 Traps in R: the language and base/utils behaviour, package internals (`R CMD build`, `.Rbuildignore`, roxygen, lintr, `data-raw/`, testthat, pak), and the DBI/duckdb/arrow data layer.
 
@@ -913,6 +918,33 @@ Assign inside the call, `expect_message(h <- f(x), "msg")`, never `h <- expect_m
 
 ### `c()` dispatches on its first argument, so `c(NULL, <Date>)` is a plain number
 Put a Date first when `c()` combines an optional piece with Dates: `c(NULL, <Date>)` takes the default method and returns a bare day count.
+
+### `bind_rows()` of all-`NULL` is a 0 x 0 tibble, and a typed template must take its types from the rows' source
+Bind per-group results under a zero-row template so an all-dropped result keeps its columns, and build that template's key columns from the same object the rows are built from (`combos$variable[0]`, not `character()`).
+
+### `sample.int(prob =)` without replacement is not a probability-proportional draw, so weighting its result again double-counts
+Draw a subsample to be design-weighted **uniformly** (`sample.int(n, k)`), or keep every unit.
+
+### `system2(stdout = TRUE)` warns on a non-zero exit instead of raising, so a `tryCatch(error =)` around it never fires
+Read the exit status off the result: `st <- attr(out, "status")`, which is `NULL` on success.
+
+### Forked `parallel::mclapply()` workers segfault in `glm.fit` under macOS Accelerate BLAS
+Fit models in parallel on socket workers (`parallel::makeCluster()` with `parLapply()`), not forks: with R linked to Accelerate's vecLib, `mclapply` children segfault inside `glm.fit` (`address 0x110, cause 'invalid permissions'`), and `mclapply` returns try-errors with a warning rather than stopping.
+
+### `c(name = x)` keeps `x`'s own name, so a value from a named vector becomes `name.X`
+Strip the name before you label it: `c(axis = unname(v[1]))` or `c(axis = v[[1]])`.
+
+### `trace(exit =)` also fires when the function raises, and `returnValue()` then has no value
+Give `returnValue()` a default and check its length: `trace(f, exit = quote(rec(returnValue(NULL))))`, then treat anything not length 1 as "no value".
+
+### `Rscript -e` supplies `--args` itself, so adding your own shifts every argument by one
+Write `Rscript -e 'expr' a b`, not `Rscript -e 'expr' --args a b`.
+
+### `read.delim()` quotes by default, so a `"` in a field silently swallows rows
+Read a TSV you wrote unquoted with `quote = "", na.strings = character(), comment.char = ""`.
+
+### duckdb in R: the query that autoloads `icu` binds unreliably, so `LOAD icu` before it
+Run `LOAD icu` on the connection before any query that needs it (`epoch()`, `year()`, a cast to `DATE` on a `TIMESTAMPTZ`), or use a function that needs no extension (`epoch_ms()`).
 
 # Code Check — Shell
 Tool-level traps in bash, sed, git and `gh`, and in the host toolchain those commands depend on.
@@ -1238,6 +1270,27 @@ Read with `promote_to_multi = FALSE` whenever a layer will be written back.
 
 ### `sf::st_make_valid()` rewrites geometry that was already valid
 Run it on the invalid rows only (`!st_is_valid(x)`), or keep the original geometry and use the made-valid copy just for the computation.
+
+### terra: `unique()` and `freq()` on a factor return its labels, not its codes
+Read a factor raster's codes from a copy with its levels stripped (`levels(y) <- NULL`, or `set.cats(y, layer = 1, value = NULL)` on a copy you own), never from `terra::unique(x)[, 1]` or `terra::freq(x)$value`: on a factor both return the active category's labels, so matching …
+
+### A GDAL failure partway through `sf::st_read()` returns the rows read so far, with only a warning
+Treat any warning during a read whose completeness matters as a failed read: wrap it in `withCallingHandlers(st_read(...), warning = function(w) stop(...))`, retry, then stop.
+
+### `terra::project()` over a remote strip-organised TIFF issues a range request per strip, so download it first
+Check `gdalinfo` for `Block=<width>x1` before reading a remote raster through `/vsicurl/`, and where it is strip-organised (one row per block, no overviews) download the whole file to a tempfile and read that.
+
+### LidarBC tiles can carry an undeclared nodata of -3.4e38, which a mean takes as data
+Clamp a LidarBC DEM or DSM to plausible elevations before any aggregate: `terra::clamp(r, -100, 5000, values = FALSE)`.
+
+### bcdata returns a column whose values are all missing as character, not numeric
+Coerce every field you do arithmetic on (`as.numeric(v$PROJ_AGE_1)`) right after `bcdata::collect()`.
+
+### The BC WFS caps an un-paged `GetFeature` at 10,000 features and still answers HTTP 200
+Hold any raw WFS read to the server's own count.
+
+### bcdata's error text does not carry a WFS failure's cause, so read it from the response
+To tell a throttle from any other bcdata failure, record the status off the request itself (wrap `crul:::crul_fetch`), not from the message.
 
 # Code Check Conventions
 Structured checklist for reviewing diffs before commit.
@@ -1955,7 +2008,7 @@ Five habits:
   sits in three documents is not fixed by repairing the one that was quoted; the other two
   still read as authoritative.
 
-*31 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
+*39 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
 
 ### "It can only be answered by testing" is a claim with an author
 
@@ -1971,6 +2024,8 @@ The claim is usually made by someone who knows the domain, at a moment before th
 looked. Not wrong so much as **unexamined**, which is what lets it survive into the
 plan. Then **bound what the probe closed**: reading a desktop plugin says nothing
 about the mobile app. An over-claimed probe is worse than none.
+
+*6 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
 
 ### A real bug is not necessarily the reported bug
 
@@ -2097,7 +2152,7 @@ Sibling of *"An inventory is only complete relative to a boundary"* in `code-che
 step earlier: that one is about a search that was complete for the wrong scope, this is
 about never having searched the scope where the answer lived.
 
-*25 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
+*26 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
 
 #### The storage version: one store is not the world
 
