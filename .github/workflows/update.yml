@@ -83,8 +83,9 @@ jobs:
           uv pip install --python .venv/bin/python \
             "pystac[validation]>=1.12.0" "pystac-client>=0.8.0" \
             "rio-stac>=0.11.0" "rasterio>=1.4.0" rio-cogeo shapely \
-            pandas requests tqdm deepdiff pytest
-          .venv/bin/python -c "import rasterio, rio_stac, pystac, jsonschema; print('imports OK, rasterio', rasterio.__version__)"
+            pandas requests tqdm deepdiff pytest \
+            "stacs @ git+https://github.com/NewGraphEnvironment/stacs@v0.1.0"
+          .venv/bin/python -c "import rasterio, rio_stac, pystac, jsonschema, stacs; print('imports OK, rasterio', rasterio.__version__, 'stacs', stacs.__version__)"
 
       # The pairing decides whether a tile gets a dsm asset or is recorded as a
       # coverage gap, so its contract runs before the catalog is touched. Fast

@@ -15,11 +15,11 @@ the RFC 8785 digest agrees with the old one on every item's verdict, and both to
 exactly the one item edited in a positive-control copy.
 
 ## Phase 1: Pin stacs and declare the catalogue
-- [ ] `update.yml` install step: add `"stacs @ git+https://github.com/NewGraphEnvironment/stacs@v0.1.0"`; import check adds `stacs`
-- [ ] `environment.yml`: same pip line; `python>=3.11`
-- [ ] Install into local `.venv`; `stacs --version` reports 0.1.0
-- [ ] `stacs.toml` at repo root: `[catalogue]` api/collection_id/bucket_url, `[assets]` require = `dem`, forbid = `["image"]`, `[transport]` with the values above
-- [ ] `tests/test_stacs_config.py`: toml parses through `stacs.cli.read_config`; `collection_id == collection_patch.COLLECTION_ID`, `bucket_url == stac_utils.PATH_S3_STAC`, `require == ASSET_DEM`, `forbid == list(ASSET_RENAMES)`; installed `stacs.__version__ == "0.1.0"`; `stacs audit --config stacs.toml` fails an `image`-keyed fixture and a wrong-collection fixture, passes a good one (proves the config is wired, not just present)
+- [x] `update.yml` install step: add `"stacs @ git+https://github.com/NewGraphEnvironment/stacs@v0.1.0"`; import check adds `stacs`
+- [x] `environment.yml`: same pip line; `python>=3.11`
+- [x] Install into local `.venv`; `stacs --version` reports 0.1.0
+- [x] `stacs.toml` at repo root: `[catalogue]` api/collection_id/bucket_url, `[assets]` require = `dem`, forbid = `["image"]`, `[transport]` with the values above
+- [x] `tests/test_stacs_config.py`: toml parses through `stacs.cli.read_config`; `collection_id == collection_patch.COLLECTION_ID`, `bucket_url == stac_utils.PATH_S3_STAC`, `require == ASSET_DEM`, `forbid == list(ASSET_RENAMES)`; installed `stacs.__version__ == "0.1.0"`; `stacs audit --config stacs.toml` fails an `image`-keyed fixture and a wrong-collection fixture, passes a good one (proves the config is wired, not just present)
 
 ## Phase 2: Workflow audits → `stacs audit`
 - [ ] Both `audit-items` steps become `.venv/bin/stacs audit --config stacs.toml --dir "$STAC_OUTPUT_DIR" --collection-id "$COLLECTION"` (+ `--expect` on the monthly one); drop the `DEM`/`OLD` derivation and update the comments (rules now come from `stacs.toml`, pinned to the modules by the Phase 1 test)
