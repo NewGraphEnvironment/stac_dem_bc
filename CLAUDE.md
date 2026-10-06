@@ -115,6 +115,12 @@ why the README's worked example renders `dem`-only and says so rather than swapp
 - **stac_orthophoto_bc:** Reference implementation for parallel processing patterns
 - **stac_uav_bc:** VM deployment patterns and automation functions
 - **Issue #3:** Proper GeoTIFF validation and media type assignment
+- **stacs** (NewGraphEnvironment/stacs#1, formerly #37): registration and verification
+  (`catalogue_register.sh`, `register_manifest.py`) are being extracted into a public uv
+  package. Change them there once it lands, not here.
+- **Point clouds** go to a separate repo `stac_pointcloud_bc` and bucket
+  `stac-pointcloud-bc` (decided 2026-09-30, rtj#229 revised; bucket rtj#362), blocked on
+  stacs#1. #35 holds the spec and transfers there. CHM stays here as a third asset (#47).
 
 ### Data Tracking & Validation System
 
