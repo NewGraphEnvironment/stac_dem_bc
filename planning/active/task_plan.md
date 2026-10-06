@@ -22,8 +22,8 @@ exactly the one item edited in a positive-control copy.
 - [x] `tests/test_stacs_config.py`: toml parses through `stacs.cli.read_config`; `collection_id == collection_patch.COLLECTION_ID`, `bucket_url == stac_utils.PATH_S3_STAC`, `require == ASSET_DEM`, `forbid == list(ASSET_RENAMES)`; installed `stacs.__version__ == "0.1.0"`; `stacs audit --config stacs.toml` fails an `image`-keyed fixture and a wrong-collection fixture, passes a good one (proves the config is wired, not just present)
 
 ## Phase 2: Workflow audits → `stacs audit`
-- [ ] Both `audit-items` steps become `.venv/bin/stacs audit --config stacs.toml --dir "$STAC_OUTPUT_DIR" --collection-id "$COLLECTION"` (+ `--expect` on the monthly one); drop the `DEM`/`OLD` derivation and update the comments (rules now come from `stacs.toml`, pinned to the modules by the Phase 1 test)
-- [ ] `test_asset_key.py` workflow scanner still green (no literal key in the workflow)
+- [x] Both `audit-items` steps become `.venv/bin/stacs audit --config stacs.toml --dir "$STAC_OUTPUT_DIR"` (+ `--expect` on the monthly one); drop the `DEM`/`OLD` derivation and update the comments (rules now come from `stacs.toml`, pinned to the modules by the Phase 1 test). `--collection-id` dropped rather than passed (review-plan S2): items are checked against the declared id
+- [x] `test_asset_key.py` workflow scanner still green (no literal key in the workflow)
 
 ## Phase 3: Delete the old registration layer
 - [ ] Delete `catalogue_register.sh`, `item_register.sh`, `collection_register.sh`

@@ -15,8 +15,9 @@ name: Monthly incremental update
 # failed run discards its partial state and the next run re-detects cleanly.
 # pgstac registration is NOT done here: no runner can reach the STAC host (no
 # tailnet, no deploy key). It is a client-side upsert run from a machine that
-# can - `scripts/catalogue_register.sh --drift` - and it is stateless, so a
-# month nobody registers is picked up by the next run. See scripts/README.md.
+# can - `stacs register --config stacs.toml --mode drift` (#49) - and it is
+# stateless, so a month nobody registers is picked up by the next run. See
+# scripts/README.md.
 
 on:
   schedule:
@@ -309,9 +310,16 @@ jobs:
       # Every item staged for publish must agree with the collection it is about
       # to be published under. Nothing downstream can check this: item ids do not
       # change during a rename, so set equality reports IN SYNC over a fully
-      # mixed catalogue; item_register.sh routes by each body's own `collection`
-      # field, so a stale item registers successfully; and both asset keys are
-      # legal STAC.
+      # mixed catalogue; pgstac routes by each body's own `collection` field, so
+      # a stale item registers successfully; and both asset keys are legal STAC.
+      #
+      # `stacs audit --config stacs.toml` (#49). The collection id and the asset
+      # rules come from stacs.toml, which tests/test_stacs_config.py pins to
+      # collection_patch / stac_utils / item_migrate -- so nothing here spells
+      # them, and no flag can loosen them. --collection-id is deliberately NOT
+      # passed: items are checked against the DECLARED catalogue, so a fetched
+      # collection.json carrying some other id fails here instead of defining
+      # what "right" means.
       #
       # The standing guard, and the reason #34 cannot silently recur. item_create
       # reads the collection id from DATA (collection.id off the fetched file,
@@ -329,16 +337,7 @@ jobs:
           !inputs.backfill && !inputs.rename
           && steps.publish.outputs.count != '0' && steps.publish.outputs.count != ''
         run: |
-          COLLECTION=$(.venv/bin/python -c \
-            'import json,os; print(json.load(open(os.environ["STAC_OUTPUT_DIR"] + "/collection.json"))["id"])')
-          # Read from stac_utils, never spelled here. A literal in this file
-          # would be a second definition of the asset key, outside every guard
-          # this change added to prevent exactly that.
-          DEM=$(.venv/bin/python -c 'import sys; sys.path.insert(0,"scripts"); import stac_utils; print(stac_utils.ASSET_DEM)')
-          OLD=$(.venv/bin/python -c 'import sys; sys.path.insert(0,"scripts"); import item_migrate; print(",".join(item_migrate.ASSET_RENAMES))')
-          .venv/bin/python scripts/register_manifest.py audit-items \
-            --dir "$STAC_OUTPUT_DIR" --collection-id "$COLLECTION" \
-            --require-asset "$DEM" --forbid-asset "$OLD" \
+          .venv/bin/stacs audit --config stacs.toml --dir "$STAC_OUTPUT_DIR" \
             --expect "${{ steps.publish.outputs.count }}"
 
       # This step asserts HOMOGENEITY only. COMPLETENESS is item_migrate's own
@@ -347,21 +346,15 @@ jobs:
       # the published total HERE would be wrong on any resumed run, where the
       # staged set is legitimately only the remainder.
       #
-      # An empty directory is a failure inside audit-items, not a vacuous pass.
+      # The asset rules apply on EVERY rewrite run now, backfill included (#49);
+      # before, only a rename run asked for them. After #34 an item still keyed
+      # `image` would recreate the mixed catalogue, so a backfill that met one
+      # must fail here rather than publish it.
+      #
+      # An empty directory is a failure inside stacs audit, not a vacuous pass.
       - name: Audit staged items against the collection (rewrite runs)
         if: (inputs.backfill || inputs.rename) && steps.publish.outputs.count != '0'
-        run: |
-          COLLECTION=$(.venv/bin/python -c \
-            'import json,os; print(json.load(open(os.environ["STAC_OUTPUT_DIR"] + "/collection.json"))["id"])')
-          echo "auditing staged items against $COLLECTION"
-          ARGS=(--dir "$STAC_OUTPUT_DIR" --collection-id "$COLLECTION")
-          if [ "${{ inputs.rename }}" = "true" ]; then
-            # From the modules, never spelled here -- see the monthly audit.
-            DEM=$(.venv/bin/python -c 'import sys; sys.path.insert(0,"scripts"); import stac_utils; print(stac_utils.ASSET_DEM)')
-            OLD=$(.venv/bin/python -c 'import sys; sys.path.insert(0,"scripts"); import item_migrate; print(",".join(item_migrate.ASSET_RENAMES))')
-            ARGS+=(--require-asset "$DEM" --forbid-asset "$OLD")
-          fi
-          .venv/bin/python scripts/register_manifest.py audit-items "${ARGS[@]}"
+        run: .venv/bin/stacs audit --config stacs.toml --dir "$STAC_OUTPUT_DIR"
 
       # Runs when there are new items OR only rebuilt ones: a pairing-only month
       # produces item JSONs and no new URLs, and skipping the sync would leave
