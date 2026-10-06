@@ -48,4 +48,4 @@ Review loop:
 `logs/20261006_14*_stacs_*_49.log` (gitignored; on the machine that ran them). Reviews:
 `review-*.md` in this directory.
 
-Closed by: PR (see `gh pr list --search 49`)
+Closed by: PR #50
