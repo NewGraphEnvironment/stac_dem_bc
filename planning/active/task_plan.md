@@ -33,15 +33,15 @@ exactly the one item edited in a positive-control copy.
 - [x] Full `pytest tests/` green
 
 ## Phase 4: Docs
-- [ ] `scripts/README.md` registration section: `stacs verify` / `stacs register --mode drift|all|ids`, `ids-from-urls | stacs register --mode ids` recipe, the own-bucket paragraph replaced by "rules declared in `stacs.toml`, flags add, never loosen"
-- [ ] `README.Rmd` → re-knit `README.md`
-- [ ] `CLAUDE.md` project section: registration commands, the #42 own-bucket hazard rewritten, "Related work: stacs" now landed
-- [ ] `research/pgstac_round_trip.md` → short pointer to stacs' copy (path kept; it is cited); `research/README.md` row updated
-- [ ] `NEWS.md` entry (version bump left to `/gh-pr-merge`)
+- [x] `scripts/README.md` registration section: `stacs verify` / `stacs register --mode drift|all|ids`, `ids-from-urls | stacs register --mode ids` recipe, the own-bucket paragraph replaced by "rules declared in `stacs.toml`, flags add, never loosen"
+- [x] `README.Rmd` → `README.md`, `README.html`, `index.html` (the Pages landing page) hand-edited in step, as prior README commits do
+- [x] `CLAUDE.md` project section: registration commands, the #42 own-bucket hazard rewritten, "Related work: stacs" now landed
+- [x] `research/pgstac_round_trip.md` → continuation header pointing at stacs' copy, original body kept (stacs' research README cites it as the original measurement — review-plan S3); `research/README.md` row updated
+- [x] `NEWS.md` entry (version bump left to `/gh-pr-merge`)
 
 ## Phase 5: Live check (read-only)
 - [ ] `stacs verify --config stacs.toml --out-dir <scratch>` against the live API, logged to `logs/`; expect in sync (exit 0)
-- [ ] `stacs register --config stacs.toml --mode drift --dryrun` — exercises transport/config without writing
+- [ ] Only if verify is IN SYNC: `stacs register --config stacs.toml --mode drift` (no `--dryrun`: a drift dryrun skips the API/ssh probe entirely, though it still fetches and compares — review-plan A1). Probes API + ssh, then "nothing to register": no write
 - [ ] Record timings and result in `findings.md`
 
 ## Validation

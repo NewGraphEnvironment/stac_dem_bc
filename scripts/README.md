@@ -126,7 +126,7 @@ stac/prod/stac_dem_bc/collection.json  (collection summary)
 data/stac_item_validation.csv
   ↓ s3_sync.R — push to cloud
 s3://stac-dem-bc/
-  ↓ catalogue_register.sh --drift — upsert into pgstac
+  ↓ stacs register --mode drift — upsert into pgstac
 images.a11s.one (searchable API)
 ```
 
@@ -183,7 +183,7 @@ The bottleneck is network: each GeoTIFF must be partially read over HTTP to extr
 
 | Component | What's needed |
 |-----------|---------------|
-| Python | `pystac`, `rio_stac`, `rasterio`, `rio-cogeo`, `pandas`, `tqdm` |
+| Python | ≥ 3.11; `pystac`, `rio_stac`, `rasterio`, `rio-cogeo`, `pandas`, `tqdm`, and [`stacs`](https://github.com/NewGraphEnvironment/stacs) for registration (pinned tag; see `environment.yml`) |
 | R | `ngr` package (for objectstore listing) |
 | AWS CLI | Configured with write access to `s3://stac-dem-bc` |
 | System | `rio` CLI tools (installed with rasterio) |
@@ -201,7 +201,7 @@ The bottleneck is network: each GeoTIFF must be partially read over HTTP to extr
 
 - **Run history** — the [Actions tab](https://github.com/NewGraphEnvironment/stac_dem_bc/actions/workflows/update.yml) keeps every run's logs, and each run uploads a `run-logs` artifact (change-detection log + access-check CSV). Artifacts expire after ~90 days — they are the working record, not the archive.
 - **The durable ledger is git** — a successful run with changes ends in one bot commit on `main` ("Monthly incremental update: refresh caches (YYYY-MM)") touching only `data/`. `git log --oneline --author=github-actions -- data/` is the complete month-by-month history. Within those commits: `urls_list.txt` is the current source inventory, `urls_deleted.txt` the cumulative audit of sources removed upstream (their catalog items are retained), and the two CSVs the validation state for sources and outputs. A month absent from the ledger either had no changes or failed — and a failed month self-heals, because nothing was committed to mark its files as seen.
-- **The catalog itself** — `s3://stac-dem-bc/` is the only complete copy (`collection.json` plus one JSON per item, bucket versioned). The API at `images.a11s.one` serves whatever was last *registered*, so it can trail S3 between a sync and a registration run. `scripts/catalogue_register.sh --verify` answers "is it behind?" without changing anything.
+- **The catalog itself** — `s3://stac-dem-bc/` is the only complete copy (`collection.json` plus one JSON per item, bucket versioned). The API at `images.a11s.one` serves whatever was last *registered*, so it can trail S3 between a sync and a registration run. `stacs verify --config stacs.toml` answers "is it behind?" without changing anything.
 - **Design history and one-time events** — `planning/archive/2026-07-issue-23-monthly-automation/` records how this system was built, the pre-build review findings, and the July 2026 catch-up (58k → 98k items).
 
 **Failure triage:**
@@ -214,43 +214,45 @@ The bottleneck is network: each GeoTIFF must be partially read over HTTP to extr
 
 ## After the Pipeline
 
-Once the catalog is on S3, register it in pgstac to make it searchable. Registration is client-side and lives in this repo (#27) — one command from any machine with tailnet SSH to the STAC host:
+Once the catalog is on S3, register it in pgstac to make it searchable. Registration and verification are the [`stacs`](https://github.com/NewGraphEnvironment/stacs) package (#49), pinned by tag in `environment.yml` and the workflow, and this catalogue declares itself to it in [`stacs.toml`](../stacs.toml) at the repo root. One command from any machine with tailnet SSH to the STAC host:
 
 ```bash
-scripts/catalogue_register.sh --verify   # is the API behind S3, or serving stale bodies? changes nothing
-scripts/catalogue_register.sh --drift    # register whatever it is missing or serves stale
+.venv/bin/stacs verify   --config stacs.toml --out-dir verify_report/   # is the API behind S3, or serving stale bodies? changes nothing
+.venv/bin/stacs register --config stacs.toml --mode drift               # register whatever it is missing or serves stale
+.venv/bin/stacs register --config stacs.toml --mode all --dryrun        # the full re-register, previewed
 ```
 
-`--drift` fetches every body `collection.json` publishes, compares each with what the API actually serves, and registers the items it is missing or serves with a different body (#45). Comparing ids alone is not enough: a rebuild keeps every id, so a catalogue whose bodies had all been rewritten used to verify `IN SYNC` while the API served the old ones. It is stateless — it needs no record of what previous runs did — so a month that nobody registered simply gets picked up by the next run. That matters: registration was skipped once for a month and the API served 60,126 items against 98,040 published.
+`drift` fetches every body `collection.json` publishes, compares each with what the API actually serves, and registers the items it is missing or serves with a different body (#45). Comparing ids alone is not enough: a rebuild keeps every id, so a catalogue whose bodies had all been rewritten used to verify `IN SYNC` while the API served the old ones. It is stateless — it needs no record of what previous runs did — so a month that nobody registered simply gets picked up by the next run. That matters: registration was skipped once for a month and the API served 60,126 items against 98,040 published.
 
-**Everything here upserts and nothing deletes.** `pypgstac load --method upsert` updates rows in place, so there is no window in which the API serves less than it did before. The older path — rtj's `stac_register-pypgstac.sh` — DELETEs the collection and then reloads it, and on 2026-08-29 it failed in between and left `images.a11s.one` serving **zero items** until it was repaired by hand. `pgstac.items.collection` is `ON DELETE CASCADE`, so dropping the collection row takes every item with it. That same cascade is why the collection must be registered *before* its items, which is the inverse of the S3 sync order — both scripts say so in their headers.
+To register a known subset, turn source URLs into ids here, where the URL-to-id mapping lives, and hand them to stacs:
 
-| script | does |
+```bash
+.venv/bin/python scripts/register_manifest.py ids-from-urls --urls-file data/urls_new.txt > ids.txt
+.venv/bin/stacs register --config stacs.toml --mode ids --ids-file ids.txt
+```
+
+stacs refuses the whole run, before writing, if any id has no item link in the published `collection.json`. `urls_new.txt` also lists sources that `item_create` skipped as unreadable, so in a month with any shortfall use `--mode drift`, which needs no list.
+
+**Everything here upserts and nothing deletes.** `pypgstac load --method upsert` updates rows in place, so there is no window in which the API serves less than it did before. The older path — rtj's `stac_register-pypgstac.sh` — DELETEs the collection and then reloads it, and on 2026-08-29 it failed in between and left `images.a11s.one` serving **zero items** until it was repaired by hand. `pgstac.items.collection` is `ON DELETE CASCADE`, so dropping the collection row takes every item with it. That same cascade is why stacs registers the collection *before* its items, which is the inverse of the S3 sync order in `s3_sync-ci.sh` — both are right for their transport.
+
+| file | does |
 |---|---|
-| `catalogue_register.sh` | the orchestrator: `--verify`, `--drift`, `--all`, `--ids-file` |
-| `collection_register.sh` | upsert one `collection.json` (run first — the FK requires it) |
-| `item_register.sh` | upsert items; paths on **stdin**, never argv |
-| `collection_unregister.sh` | the only destructive script here; for #34's cutover |
-| `register_manifest.py` | id, digest, fetch and NDJSON logic, so the shell stays thin and the logic is testable. `audit-items` is the homogeneity check below; `body_digest` is the content comparison |
+| `stacs.toml` | this catalogue for stacs: API, collection id, bucket, the asset rules, and how to reach the host. No setting is a secret — the password is *named* (`password_env`) and stays on the host. Every value is pinned to its module by `tests/test_stacs_config.py` |
+| `register_manifest.py` | `ids-from-urls`: source GeoTIFF URLs → item ids, for `--mode ids`. The only registration helper that knows where items come from |
+| `collection_unregister.sh` | the only destructive script here; for #34's cutover. stacs is upsert-only, so this stays |
 
-Measured 2026-09-29 against the live catalogue of 102,460 items: `--verify` takes **12–26 min**, now that it reads every body. Paging all registered bodies from the API is a steady ~5.5 min (11 requests of 10,000, ~18 MB each). Fetching every published body from S3 is the variable part: one Python process with a thread pool (`FETCH_JOBS`, default 20) took between ~6 and ~20 min across four full runs the same day. The `curl`-per-item loop it replaced took roughly 45 minutes for a full `--all`. stac-airphoto-bc's 10,100 items verify in 2m26s. The database load itself is seconds even at full scale. Before #45 `--verify` took 3m40s, because it compared ids only.
+Measured 2026-09-29 against the live catalogue of 102,460 items, with the scripts stacs replaced (`stacs verify` reads the same way): a full verify takes **12–26 min**, because it reads every body. Paging all registered bodies from the API is a steady ~5.5 min (11 requests of 10,000, ~18 MB each). Fetching every published body from S3 is the variable part, between ~6 and ~20 min across four full runs the same day. stac-airphoto-bc's 10,100 items verify in 2m26s. The database load itself is seconds even at full scale.
 
-Verification is by **set equality in both directions** — missing and orphaned — and by **content**, never by a count. The API has no aggregation extension (`/aggregate` 404s) and returns `numberMatched: null`, and a `/search` on a list of ids silently omits the ones that do not exist. So "I asked for N and got N back" can be true while the sets differ. Every `/search` is scoped with `collections`: without it the question is "is this id served *anywhere*", which was harmless while one collection existed and became wrong the moment #34 put two on the endpoint sharing all 102,460 ids.
+Verification is by **set equality in both directions** — missing and orphaned — and by **content**, never by a count. The API has no aggregation extension (`/aggregate` 404s) and returns `numberMatched: null`, and a `/search` on a list of ids silently omits the ones that do not exist. So "I asked for N and got N back" can be true while the sets differ. Content is compared by digest over canonical JSON with `links` removed; what pgstac changes between load and serve, and why each rule exists, is stacs' [`research/pgstac_round_trip.md`](https://github.com/NewGraphEnvironment/stacs/blob/main/research/pgstac_round_trip.md).
 
-Content is compared by digest: sha256 of each body's canonical JSON, with `links` removed (the API rewrites them) and two things pgstac's round trip does not preserve canonicalised. pgstac strips null members, so 160 items published with `"proj:epsg": null` come back without the key. PostGIS serves an integral float as an integer, so `-126.0` comes back as `-126` (29 items). Both were found by the first full run; a 2,000-item sample had shown neither. A body that cannot be fetched or read fails the run and is never counted as unchanged. After a write, the served bodies are compared with the ones sent. After `--all`, or a `--drift` whose collection changed, the whole catalogue is re-compared, because pgstac serves each item hydrated against its collection.
+Set equality has one blind spot, and #34 is exactly it. **Item ids do not change during a collection rename**, so a catalogue where half the items name the old collection and half the new is reported `IN SYNC` — and pgstac routes each item by its *own* `collection` field, so a stale body upserts into the old collection successfully, with no error anywhere. The property that breaks is *homogeneity*, not size, and `stacs audit` is what checks it. The monthly workflow runs it over every item it is about to publish, and `register` runs it over every body it is about to send. Neither `verify` nor a drift with nothing to send audits what is already registered, so the publish-time audit is the one that keeps a mixed catalogue out.
 
-Set equality has one blind spot, and #34 is exactly it. **Item ids do not change during a collection rename**, so a catalogue where half the items name the old collection and half the new is reported `IN SYNC` — and `item_register.sh` routes each item by its *own* `collection` field, so a stale body upserts into the old collection successfully, with no error anywhere. The property that breaks is *homogeneity*, not size, and `register_manifest.py audit-items` is what checks it. `catalogue_register.sh` runs it over every fetched body before anything reaches the database: the files are already on disk at that point, so the full-population check is free.
-
-What `audit-items` asserts about **assets** depends on whose catalogue it is (#42). For this repo's — the collection id is ours, *or* the bucket is, *or* any published item link points into it — every item must carry `stac_utils.ASSET_DEM` and none may carry a key retired by `item_migrate.ASSET_RENAMES`: half of #34's rename, which set equality cannot see. For any other collection there is no asset check unless one is asked for, and the run prints `asset audit: none` rather than letting a skipped check read as a pass. The collection-id and count checks run either way. So the same command registers another collection on the endpoint:
+The asset rules are **declared** in `stacs.toml`: every item carries `dem` (`stac_utils.ASSET_DEM`) and none carries a key retired by `item_migrate.ASSET_RENAMES` — half of #34's rename, which set equality cannot see. A flag can add to those rules and never loosen them, whatever collection id it names. That replaces #42's own-bucket test, which inferred "is this our catalogue" from the id, the bucket and the item hrefs because the rules lived in code; a declaration needs no inference. Another collection on the endpoint is **registered** from its own repo's `stacs.toml` — the transport settings live only there, and this repo's asset rules would refuse its items (stac-airphoto-bc's is [stac_airphoto_bc#42](https://github.com/NewGraphEnvironment/stac_airphoto_bc/issues/42)). It can be **verified** from anywhere by flags alone, because verify needs no transport:
 
 ```bash
-STAC_COLLECTION=stac-airphoto-bc \
-STAC_BUCKET_URL=https://stac-airphoto-bc.s3.us-west-2.amazonaws.com \
-  scripts/catalogue_register.sh --drift
-# optional: STAC_REQUIRE_ASSET=thumbnail (one key), STAC_FORBID_ASSET=a,b
+.venv/bin/stacs verify --api https://images.a11s.one --collection-id stac-airphoto-bc \
+  --bucket-url https://stac-airphoto-bc.s3.us-west-2.amazonaws.com
 ```
-
-`STAC_REQUIRE_ASSET` / `STAC_FORBID_ASSET` are refused for this repo's catalogue: its rules come from the modules and are not overridable. Keying "ours" on more than the id closes the rename window — between merging a rename and the cutover the bucket still publishes the old id, and `STAC_COLLECTION` set to it would otherwise read as a foreign collection and load old-shape items unchecked. The bucket is compared by *name* (`register_manifest.py same-bucket`), because regional, global, `http`, path-style and upper-case URLs all reach it; and the item hrefs are checked after the fetch because they are the one thing no URL spelling can route around — every one of the 102,460 published hrefs names this bucket.
 
 Registration still runs from a laptop rather than from CI, because no GitHub Actions runner can reach the host today — there is no Tailscale action and no SSH deploy key in any of these repos. That decision belongs in the infrastructure repo and unblocks every catalogue repo at once.
 
@@ -277,7 +279,9 @@ A DEM and its DSM come from the same flight over the same footprint at the same
 time, so they belong on one STAC item as two assets — `dem` (bare earth) and
 `dsm` (digital surface model). The DEM asset was keyed `image` until #34, which
 renamed it in the same break as the collection; both keys come from
-`stac_utils.ASSET_DEM` / `ASSET_DSM` and appear as literals nowhere else.
+`stac_utils.ASSET_DEM` / `ASSET_DSM` and appear as literals in no other code.
+`stacs.toml` declares `dem` for stacs, and `tests/test_stacs_config.py` fails if
+the two disagree.
 
 There is no manifest, so the relationship is inferred from filenames, and the
 naming convention is not uniform across deliveries. **Matching is on parsed
