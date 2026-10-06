@@ -90,3 +90,23 @@ Found 2026-10-06 while smoke-testing the reduced `register_manifest.py`. Every l
 line, so `ids-from-urls --urls-file data/urls_*.txt` raised on line 1. `stac_utils.fix_url`
 already existed for exactly this and was never applied here. Now applied; all 102,416
 lines map. Test: `test_item_ids_from_urls_reads_the_lists_as_stored`.
+
+## Live check (Phase 5, 2026-10-06)
+
+Config: a frozen copy of `stacs.toml` (values identical to the committed file, checked by
+parsing both). Logs: `logs/20261006_14*_stacs_*_49.log` (gitignored).
+
+| run | result | wall time |
+|---|---|---|
+| `stacs verify --config stacs.toml --out-dir …` | IN SYNC — 102,460 published, 102,460 registered, missing 0, orphaned 0, changed 0, collection `same`; 0 fetch failures | 16m29s |
+| `stacs register --config stacs.toml --mode drift` (no `--dryrun`) | `to register: 0` / `nothing to register -- already in sync`, exit 0 | 16m37s |
+
+The drift ran `_api_probe` and the ssh `probe` (`writes = mode != "verify"`), both silent on
+success, so the API and `root@geopro` over BatchMode ssh are confirmed reachable with this
+config. **Not exercised:** the remote load script (`env_file`, `workdir`, `path_prepend`,
+PG* environment, `uv run pypgstac`, the `STACS_LOADED` confirmation). That runs only when
+there is something to write; the first month with changes is its first live use, and a
+`stacs load collection` of the identical published body would exercise it on demand (a
+write — the user's call).
+
+Within the 12–26 min range measured for the old scripts on 2026-09-29.

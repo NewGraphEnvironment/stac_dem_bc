@@ -20,3 +20,7 @@
 - Deleted catalogue_register.sh, item_register.sh, collection_register.sh, test_catalogue_register.py; register_manifest.py → ids-from-urls (+ fix_url, see findings)
 - Docs: scripts/README, CLAUDE.md (above marker), README.Rmd/.md/.html + index.html, NEWS (Unreleased rewritten: its #42/#45 bullets described never-shipped tooling), research continuation header
 - /code-check (combined diff, committed per phase): R1 5 stale-doc findings (landing page, audit scope overstated, NEWS, ids recipe caveat, plan text) → fixed. R2 2 wording errors, one inside a fix → ended by enumerating every added claim about URL form / dryrun (5 lines; 3 corrected)
+
+### Phase 5
+- Live verify IN SYNC (16m29s); no-op drift probed API + ssh, nothing to register (16m37s). Remote load path not exercised — see findings
+- Suite green at every commit on the branch (339 / 339 / 199 / 199)

@@ -40,13 +40,13 @@ exactly the one item edited in a positive-control copy.
 - [x] `NEWS.md` entry (version bump left to `/gh-pr-merge`)
 
 ## Phase 5: Live check (read-only)
-- [ ] `stacs verify --config stacs.toml --out-dir <scratch>` against the live API, logged to `logs/`; expect in sync (exit 0)
-- [ ] Only if verify is IN SYNC: `stacs register --config stacs.toml --mode drift` (no `--dryrun`: a drift dryrun skips the API/ssh probe entirely, though it still fetches and compares — review-plan A1). Probes API + ssh, then "nothing to register": no write
-- [ ] Record timings and result in `findings.md`
+- [x] `stacs verify --config stacs.toml --out-dir <scratch>` against the live API, logged to `logs/`; expect in sync (exit 0)
+- [x] Only if verify is IN SYNC: `stacs register --config stacs.toml --mode drift` (no `--dryrun`: a drift dryrun skips the API/ssh probe entirely, though it still fetches and compares — review-plan A1). Probes API + ssh, then "nothing to register": no write
+- [x] Record timings and result in `findings.md`
 
 ## Validation
 
-- [ ] Tests pass
-- [ ] `/code-check` clean on each commit
-- [ ] PWF checkboxes match landed work
+- [x] Tests pass
+- [x] `/code-check` clean on each commit
+- [x] PWF checkboxes match landed work
 - [ ] `/planning-archive` on completion
