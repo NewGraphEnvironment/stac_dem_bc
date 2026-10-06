@@ -81,3 +81,12 @@ issue and docs name it — say if you'd rather rename), `collection_unregister.s
 
 | Error | Resolution |
 |-------|------------|
+
+## `ids-from-urls` refused every stored URL (pre-existing, fixed in Phase 3)
+
+Found 2026-10-06 while smoke-testing the reduced `register_manifest.py`. Every line of
+`data/urls_list.txt` (102,416) and `data/urls_dsm.txt` (95,889) stores the scheme as
+`https:/` — one slash — and `item_ids_from_urls` checked `startswith(PATH_S3)` on the raw
+line, so `ids-from-urls --urls-file data/urls_*.txt` raised on line 1. `stac_utils.fix_url`
+already existed for exactly this and was never applied here. Now applied; all 102,416
+lines map. Test: `test_item_ids_from_urls_reads_the_lists_as_stored`.

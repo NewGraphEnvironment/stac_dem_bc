@@ -72,7 +72,7 @@ def test_there_are_source_files_to_check():
     """The premise. A listing that matched nothing would pass everything below."""
     files = _source_files()
     assert len(files) >= 15
-    assert any(f.endswith("catalogue_register.sh") for f in files)
+    assert any(f.endswith(".sh") for f in files), "shell scripts must be in scope"
     assert any(f.endswith("collection_patch.py") for f in files)
     assert any(f.endswith("update.yml") for f in files), \
         "the publishing workflow must be in scope"
@@ -189,7 +189,10 @@ def test_the_new_collection_id_is_defined_in_exactly_one_place():
     A second definition would disagree with the first exactly once — during a
     rename, which is when being wrong is most expensive. That is the failure
     this repo already had: the id was a literal in collection_create.py AND in
-    catalogue_register.sh.
+    the registration script stacs replaced.
+
+    stacs.toml is the one sanctioned second copy -- stacs reads a file, not a
+    module -- and tests/test_stacs_config.py fails if it disagrees.
     """
     defining = []
     for path in _source_files():

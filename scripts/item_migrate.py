@@ -26,12 +26,12 @@ WHAT IT DOES NOT TOUCH, and why each is load-bearing:
                    two-line one we intend.
 
 WHY A HALF-DONE RUN IS THE THING TO FEAR. Item ids are unchanged by design, so
-`catalogue_register.sh` set equality reports IN SYNC over a fully mixed
-catalogue; item_register.sh routes each item by its OWN `collection` field, so a
-stale body upserts back into the old collection successfully, with no error; and
+id-set equality reports IN SYNC over a fully mixed catalogue; pgstac routes
+each item by its OWN `collection` field, so a stale body upserts back into the
+old collection successfully, with no error; and
 both asset keys are legal STAC. Nothing that existed before #34 could see it.
 Hence the reconciliation at the end of main() -- over the full population, from
-one producer -- and `register_manifest.py audit-items`, which is the same
+one producer -- and `stacs audit --config stacs.toml` (#49), which is the same
 property checked against files on disk.
 
 Usage:

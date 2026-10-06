@@ -15,8 +15,8 @@
 # ON DELETE CASCADE, so removing the collection row removes every item with it.
 # That is the exact mechanism that took images.a11s.one to zero items on
 # 2026-08-29. There is no undo; the recovery path is a full re-register from S3,
-# which is scripts/catalogue_register.sh --all and takes the better part of an
-# hour.
+# which is `stacs register --config stacs.toml --mode all` and takes the better
+# part of an hour.
 #
 # Usage:
 #   scripts/collection_unregister.sh <collection-id>          # reports, deletes nothing
@@ -115,4 +115,4 @@ COMMIT;
 SQL
 
 echo "OK — deleted $COLLECTION_ID ($COUNT items)"
-echo "Recovery if this was a mistake: scripts/catalogue_register.sh --all"
+echo "Recovery if this was a mistake: stacs register --config stacs.toml --mode all"
