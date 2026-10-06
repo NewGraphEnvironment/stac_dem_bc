@@ -960,6 +960,9 @@ Read a TSV you wrote unquoted with `quote = "", na.strings = character(), commen
 ### duckdb in R: the query that autoloads `icu` binds unreliably, so `LOAD icu` before it
 Run `LOAD icu` on the connection before any query that needs it (`epoch()`, `year()`, a cast to `DATE` on a `TIMESTAMPTZ`), or use a function that needs no extension (`epoch_ms()`).
 
+### `fs::path()` collapses the `//` after a URL scheme, so it cannot build URLs
+Join a URL with `paste(base, key, sep = "/")` or `file.path()`, never `fs::path()`: `fs::path("https://x.ca/b", "k.tif")` is `"https:/x.ca/b/k.tif"`, because fs normalises the doubled separator, and the result is not a valid URL.
+
 # Code Check — Shell
 Tool-level traps in bash, sed, git and `gh`, and in the host toolchain those commands depend on.
 
@@ -1981,7 +1984,7 @@ would, X is not evidence.
 When the user pushes back on an inference, re-derive rather than defend. The
 conclusion often survives; the reasoning that reaches it is usually different.
 
-*5 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
+*9 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
 
 ### Documents that share an ancestor corroborate nothing
 
