@@ -1,5 +1,11 @@
 # What pgstac changes about a STAC body between load and serve
 
+> **Continued in [stacs](https://github.com/NewGraphEnvironment/stacs/blob/main/research/pgstac_round_trip.md)**
+> since #49, which moved the comparison there and re-verified these rules on
+> 2026-10-06 (RFC 8785 digest; both live collections). This file is the original
+> 2026-09-29 measurement and is kept as that record: the scripts and functions it
+> names were removed by #49.
+
 **Verified:** 2026-09-29 · **Issues:** #45 · **Produced by:** `scripts/catalogue_register.sh --verify`
 over the live catalogue (logs `logs/20260929_*_verify_content_45*.log`, gitignored; numbers
 in `planning/archive/2026-09-issue-45-content-verify/`)

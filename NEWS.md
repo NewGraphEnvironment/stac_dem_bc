@@ -13,46 +13,52 @@ matching `water-temp-bc`. Releases live here and in git tags.
 
 Tooling only — the published catalogue is unchanged.
 
-- `scripts/catalogue_register.sh` registers any collection on the endpoint, not
-  only this one (#42). The pre-load audit's asset rules (`dem` required, `image`
-  forbidden) now apply only when the collection id, the bucket (by name, across
-  URL spellings) or any published item link is this repo's;
-  another collection gets the collection-id and count checks, plus
-  `STAC_REQUIRE_ASSET` / `STAC_FORBID_ASSET` if set. Measured on
-  stac-airphoto-bc's 10,100 items: all refused before, all pass now.
-- The audit now runs **before** the collection upsert. v2.0.0 said it ran
-  "before anything reaches the database"; that held for items, but a refused run
-  had already upserted the collection row.
-- `register_manifest.py audit-items` prints the asset rules it actually applied,
-  so `--forbid-asset ,` (a non-empty argument naming no key) reports
-  `no asset checks` instead of a plain OK.
-- `catalogue_register.sh --verify` and `--drift` compare **content**, not just
-  ids (#45). A rebuild keeps every id, so a catalogue whose bodies had all been
-  rewritten used to verify `IN SYNC`, and `--drift` never refreshed it. Both now
-  fetch every published body and compare it with the API's by digest (sha256 of
-  the canonical JSON minus `links`, the one member the API rewrites). Two things
-  pgstac's round trip does not preserve are canonicalised on both sides, each
-  found by the first full run: null members (160 items carry `"proj:epsg": null`
-  and are served without the key) and integral floats (PostGIS serves `-126.0`
-  as `-126`, 29 items). Measured after that: all 102,460 items and all 10,100
-  stac-airphoto-bc items compare equal. `--verify`
-  reports `changed` beside `missing` and `orphaned`; `--drift` registers
-  missing ∪ changed. The collection's own body is compared too, so a version bump
-  with no item change is no longer invisible. A body that cannot be fetched or
-  read fails the run; it is never counted as unchanged.
-- After any registration, the served bodies are checked against the ones sent,
-  and the collection against `collection.json`. If pgstac ever normalised a field,
-  `--drift` would otherwise re-register the same items every month without
-  converging. After `--all`, or a `--drift` whose collection body changed, the
-  whole catalogue is re-compared (~6 min): pgstac serves items hydrated against
-  their collection, so a collection upsert can change how untouched items read.
-- An item linked more than once in `collection.json` is refused before anything
-  is fetched, in every mode. Previously `--all` deduped it.
-- Item JSONs are fetched in one Python process with a thread pool instead of one
-  `curl` per item, in every mode.
-- Behaviour changes: `--drift` now probes ssh **before** its fetch, so it needs the
-  tailnet even in a month with nothing to register. `--drift --dryrun` fetches the
-  whole catalogue, because what changed is a question about the bodies.
+- Registration and verification are now the
+  [`stacs`](https://github.com/NewGraphEnvironment/stacs) package, pinned at
+  `v0.1.0` (#49), in place of `scripts/catalogue_register.sh`. This catalogue
+  declares itself in `stacs.toml`: the API, the collection id, the bucket, the asset
+  rules (`dem` required, `image` forbidden), and the transport.
+  `tests/test_stacs_config.py` pins each value to the module that defines it.
+  `--verify|--drift|--all|--ids-file` became `stacs verify` and
+  `stacs register --mode drift|all|ids`. The three registration scripts were deleted,
+  along with everything in `register_manifest.py` except `ids-from-urls`. Before the
+  switch, parity was measured over both live collections: the same missing / changed /
+  orphaned sets, and the same verdict on every item.
+- Verification compares **content**, not just ids (#45, carried into stacs). A
+  rebuild keeps every id, so at v2.0.0 a catalogue whose bodies had all been rewritten
+  verified `IN SYNC`, and a drift run never refreshed it. Every published body is now
+  compared with the API's by digest over canonical JSON without `links`, the one
+  member the API rewrites. Two things pgstac's round trip does not preserve are
+  canonicalised on both sides, each found by the first full run: null members (160
+  items carry `"proj:epsg": null` and are served without the key) and integral floats
+  (PostGIS serves `-126.0` as `-126`, 29 items). After that, all 102,460 items and all
+  10,100 stac-airphoto-bc items compared equal. `verify` reports `changed` beside
+  `missing` and `orphaned`, and drift registers missing ∪ changed. The collection's
+  own body is compared too, so a version bump with no item change is no longer
+  invisible. A body that cannot be fetched or read fails the run; it is never counted
+  as unchanged.
+- After any registration, the served bodies are checked against the ones sent. After
+  `--mode all`, or a drift whose collection body changed, the whole catalogue is
+  re-compared, because pgstac serves items hydrated against their collection.
+- Refused before anything is written: an item linked twice in `collection.json`; a
+  body that names another id; a body about to be sent that fails the audit (wrong
+  collection, missing `dem`, or still keyed `image`).
+- The audit's asset rules are **declared** in `stacs.toml`. A flag can add to them and
+  never loosen them, whatever collection id it names. Another collection on the
+  endpoint registers from its own repo's `stacs.toml`.
+- The monthly workflow audits items with `stacs audit --config stacs.toml`, against
+  the declared collection id rather than the one read from the fetched
+  `collection.json`. The asset rules now apply on **every** run, backfill included;
+  before, they applied only on monthly and rename runs. An item still keyed `image`
+  would recreate #34's mixed catalogue, so it now fails before reaching S3.
+- `register_manifest.py ids-from-urls` refused every real line of the source lists,
+  because `urls_list.txt`, `urls_dsm.txt`, `urls_new.txt` and `urls_deleted.txt`
+  store the scheme as `https:/`. It now normalises with `stac_utils.fix_url`, as every
+  other reader does.
+- Behaviour changes: a drift probes the API and ssh **before** its fetch, so it needs
+  the tailnet even in a month with nothing to register. A drift with `--dryrun` probes
+  neither, and still fetches the whole catalogue, because what changed is a question
+  about the bodies.
 
 ## v2.0.0 (2026-09-01)
 

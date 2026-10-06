@@ -79,6 +79,9 @@ MIGRATION = "31-dsm-backfill"
 # the one that happened to exist when it was written -- reading only the current
 # key would silently fall through to the default media type and downgrade every
 # DSM it attached from COG to plain tiff. Order matters: current key first.
+# Reading `image` is fine; PUBLISHING it is not. Since #49 the workflow's audit
+# applies stacs.toml's rules on every run, backfill included, so an item still
+# keyed `image` fails before it reaches S3 -- by design, after #34.
 DEM_KEYS = (ASSET_DEM, "image")
 
 

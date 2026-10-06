@@ -66,8 +66,8 @@ KEYWORDS = ["lidar", "elevation", "dem", "dsm", "british columbia", "lidarbc"]
 VERSION_EXT = "https://stac-extensions.github.io/version/v1.2.0/schema.json"
 
 # THE collection id. Every other definition in this repo reads this one:
-# collection_create.py builds the file with it, catalogue_register.sh defaults
-# to it, and item_create.py takes it from whichever collection.json it loaded.
+# collection_create.py builds the file with it, stacs.toml declares it (pinned
+# here by tests/test_stacs_config.py), and item_create.py takes it from whichever collection.json it loaded.
 #
 # It was `stac-dem-bc` until #34. The collection stopped holding only DEMs at
 # v1.0.0, when every item gained a `dsm` asset, and the name described one of
@@ -76,8 +76,8 @@ VERSION_EXT = "https://stac-extensions.github.io/version/v1.2.0/schema.json"
 # NOT the bucket. `s3://stac-dem-bc` keeps its name: it is IaC-managed in rtj,
 # renaming it is a separate and larger decision, and it appears in every asset
 # href and item link. The two used to be one fact spelled twice; they are now
-# genuinely two, which is why catalogue_register.sh reconciles them at runtime
-# rather than deriving one from the other.
+# genuinely two, which is why stacs.toml declares them separately rather than
+# deriving one from the other.
 COLLECTION_ID = "stac-elevation-bc"
 COLLECTION_TITLE = f"Elevation models from British Columbia - {COLLECTION_ID}"
 

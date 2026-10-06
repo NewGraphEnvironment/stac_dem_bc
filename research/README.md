@@ -7,4 +7,4 @@ Naming: `<topic>.md`, revised in place, from 2026-09-29.
 
 | file | covers |
 |---|---|
-| [pgstac_round_trip.md](pgstac_round_trip.md) | how pgstac changes a STAC body between load and serve, and what a content comparison must canonicalise (#45) |
+| [pgstac_round_trip.md](pgstac_round_trip.md) | how pgstac changes a STAC body between load and serve (#45) — the original measurement; kept current in [stacs](https://github.com/NewGraphEnvironment/stacs/blob/main/research/pgstac_round_trip.md) since #49 |

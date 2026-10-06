@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python>=3.9
+  - python>=3.11  # stacs' floor
   - pip
   - pip:
       # Core STAC packages
@@ -20,3 +20,5 @@ dependencies:
       - requests  # HTTP checks (stac_utils, urls_check_access.py)
       - tqdm
       - deepdiff  # JSON/dict comparison for QA and debugging
+      # Registration and verification (#49); tag pinned, matched by update.yml
+      - stacs @ git+https://github.com/NewGraphEnvironment/stacs@v0.1.0

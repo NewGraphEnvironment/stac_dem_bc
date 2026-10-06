@@ -5,10 +5,12 @@ so it is tested offline.
 
 The property that matters most is the one nothing else in this repo can see:
 a MIXED population. Item ids do not change during this rename, so set equality
-reports IN SYNC over a half-migrated catalogue; item_register.sh routes each
-item by its own `collection` field, so a stale body registers successfully;
+reports IN SYNC over a half-migrated catalogue; pgstac routes each item by its
+own `collection` field, so a stale body registers successfully;
 item_validate.py sees legal STAC either way; and a count of assets cannot tell
 {image, dsm} from {dem, dsm}.
+The audit that does catch it is stacs' (#49), with this catalogue's rules in
+stacs.toml; tests/test_stacs_config.py runs it over items this module migrated.
 
 Two fixture premises are asserted inline rather than assumed, because without
 them these tests cannot reach the failure they exist to catch:
@@ -34,7 +36,6 @@ import collection_patch  # noqa: E402
 import item_backfill  # noqa: E402
 import item_migrate as migrate_mod  # noqa: E402
 from item_migrate import ASSET_RENAMES, item_migrate  # noqa: E402
-from register_manifest import audit_items, ndjson_write  # noqa: E402
 from stac_utils import ASSET_DEM, ASSET_DSM, PATH_S3_STAC  # noqa: E402
 
 NEW_ID = collection_patch.COLLECTION_ID
@@ -211,109 +212,6 @@ def test_the_migrate_manifest_is_not_the_backfill_manifest():
     assert item_backfill.MANIFEST != migrate_mod.MANIFEST
     assert item_backfill.MIGRATION != migrate_mod.MIGRATION
     assert item_backfill.ERRORS_LOG != migrate_mod.ERRORS_LOG
-
-
-# =============================================================================
-# audit_items — the homogeneity gate
-# =============================================================================
-
-def _write(tmp_path, name, doc):
-    p = tmp_path / f"{name}.json"
-    p.write_text(json.dumps(doc))
-    return str(p)
-
-
-def test_audit_passes_a_fully_migrated_population(tmp_path):
-    paths = []
-    for i in range(3):
-        it = published(with_dsm=bool(i % 2), item_id=f"x{i}")
-        item_migrate(it)
-        paths.append(_write(tmp_path, f"x{i}", it))
-    r = audit_items(paths, NEW_ID, require_asset=ASSET_DEM, forbid_assets=["image"])
-    assert r["checked"] == 3
-    assert not r["wrong_collection"] and not r["missing_asset"]
-    assert not r["forbidden_asset"] and not r["unreadable"]
-
-
-def test_audit_catches_a_mixed_population(tmp_path):
-    """THE failure. One stale item among many, which every other check misses.
-
-    Two migrated, one not — the shape a reused manifest or an interrupted run
-    produces, and the shape that silently splits the catalogue in two.
-    """
-    paths = []
-    for i in range(2):
-        it = published(item_id=f"good{i}")
-        item_migrate(it)
-        paths.append(_write(tmp_path, f"good{i}", it))
-    paths.append(_write(tmp_path, "stale", published(item_id="stale")))
-
-    r = audit_items(paths, NEW_ID, require_asset=ASSET_DEM, forbid_assets=["image"])
-    assert r["checked"] == 3
-    assert len(r["wrong_collection"]) == 1
-    assert len(r["forbidden_asset"]) == 1
-    assert len(r["missing_asset"]) == 1
-    assert "stale" in r["wrong_collection"][0]
-
-
-def test_audit_reports_paths_not_counts(tmp_path):
-    """A count of offenders is no more use than a count of items — you have to
-    be able to go and look at one."""
-    p = _write(tmp_path, "stale", published(item_id="stale"))
-    r = audit_items([p], NEW_ID, require_asset=ASSET_DEM, forbid_assets=["image"])
-    assert r["wrong_collection"] == [p]
-
-
-def test_audit_reports_an_unreadable_item_rather_than_skipping_it(tmp_path):
-    bad = tmp_path / "broken.json"
-    bad.write_text("{not json")
-    r = audit_items([str(bad)], NEW_ID)
-    assert r["checked"] == 0
-    assert len(r["unreadable"]) == 1
-
-
-def test_audit_over_nothing_reports_nothing_checked(tmp_path):
-    """A loop over an empty set exits without complaint, which reads as
-    'everything checked out'. The caller must be able to tell the difference,
-    so `checked` is reported rather than inferred from an empty offender list."""
-    r = audit_items([], NEW_ID, require_asset=ASSET_DEM)
-    assert r["checked"] == 0
-    assert not r["wrong_collection"]
-
-
-# =============================================================================
-# ndjson_write — the last checkpoint before pgstac
-# =============================================================================
-
-def test_ndjson_write_refuses_an_item_from_another_collection(tmp_path):
-    """Items are routed by their own `collection` field — item_register.sh
-    passes no collection id to pypgstac at all — so a stale body upserts into
-    the PREVIOUS collection successfully, with no error anywhere."""
-    good = published(item_id="good")
-    item_migrate(good)
-    paths = [_write(tmp_path, "good", good),
-             _write(tmp_path, "stale", published(item_id="stale"))]
-    out = str(tmp_path / "out.ndjson")
-    with pytest.raises(RuntimeError, match=OLD_ID):
-        ndjson_write(paths, out, expect_collection=NEW_ID)
-
-
-def test_ndjson_write_without_the_guard_is_unchanged(tmp_path):
-    """The guard is opt-in, so every existing caller keeps working."""
-    paths = [_write(tmp_path, "stale", published(item_id="stale"))]
-    out = str(tmp_path / "out.ndjson")
-    assert ndjson_write(paths, out) == 1
-
-
-def test_ndjson_write_passes_a_homogeneous_batch(tmp_path):
-    paths = []
-    for i in range(3):
-        it = published(item_id=f"x{i}")
-        item_migrate(it)
-        paths.append(_write(tmp_path, f"x{i}", it))
-    out = str(tmp_path / "out.ndjson")
-    assert ndjson_write(paths, out, expect_collection=NEW_ID) == 3
-    assert sum(1 for _ in open(out)) == 3
 
 
 # =============================================================================
@@ -526,41 +424,6 @@ def test_a_fully_complete_run_succeeds(tmp_path, monkeypatch):
     returns 1."""
     ids = [f"id-{i}" for i in range(10)]
     assert _run_migrate(tmp_path, monkeypatch, ids, written=ids, errored=[]) == 0
-
-
-def test_audit_forbids_every_retired_key_not_just_the_first(tmp_path):
-    """The workflow builds --forbid-asset from ASSET_RENAMES, which is a MAP.
-
-    While it holds one entry a single-string parameter worked. A second entry
-    would have produced "image,other" — matching no real asset key, so the
-    check would have silently stopped checking anything while still reporting
-    OK. A guard that fails toward "nothing to report" is worse than no guard.
-    """
-    it = published(item_id="legacy")
-    it["assets"] = {"other_old_key": {"href": DEM}}
-    it["collection"] = NEW_ID
-    p = _write(tmp_path, "legacy", it)
-    r = audit_items([p], NEW_ID, forbid_assets=["image", "other_old_key"])
-    assert r["forbidden_asset"] == [p]
-
-
-def test_audit_reports_an_item_once_even_when_it_carries_two_retired_keys(tmp_path):
-    it = published(item_id="both")
-    it["assets"] = {"image": {"href": DEM}, "other_old_key": {"href": DEM}}
-    it["collection"] = NEW_ID
-    p = _write(tmp_path, "both", it)
-    r = audit_items([p], NEW_ID, forbid_assets=["image", "other_old_key"])
-    assert r["forbidden_asset"] == [p], "one path, not one per matching key"
-
-
-def test_audit_with_no_forbidden_keys_forbids_nothing(tmp_path):
-    """The control: an empty list must not reject a legitimate item."""
-    it = published(item_id="ok")
-    item_migrate(it)
-    p = _write(tmp_path, "ok", it)
-    for empty in (None, [], ()):
-        r = audit_items([p], NEW_ID, require_asset=ASSET_DEM, forbid_assets=empty)
-        assert not r["forbidden_asset"]
 
 
 def test_a_deterministic_failure_is_not_called_transient(tmp_path, monkeypatch, caplog):

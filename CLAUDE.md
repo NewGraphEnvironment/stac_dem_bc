@@ -4,7 +4,7 @@
 
 This project maintains the STAC catalog for BC's LidarBC DEM collection with automated monthly updates: a GitHub Actions workflow (`update.yml` — cron + workflow_dispatch, OIDC to S3) runs change detection and an incremental build, then commits refreshed caches back to main. Performance patterns (parallel processing, pre-validation) were ported from stac_orthophoto_bc.
 
-**Architecture:** GitHub Actions cron → Change detection → Parallel validation/processing → S3 sync → pgstac registration (`scripts/catalogue_register.sh --drift`, client-side upsert, run from a tailnet machine — CI cannot reach the host)
+**Architecture:** GitHub Actions cron → Change detection → Parallel validation/processing → S3 sync → pgstac registration (`stacs register --config stacs.toml --mode drift`, client-side upsert, run from a tailnet machine — CI cannot reach the host)
 
 **Expected Performance:**
 - First run (full): ~1-1.5 hours (down from 5-6 hours)
@@ -51,11 +51,14 @@ This project maintains the STAC catalog for BC's LidarBC DEM collection with aut
   `item_backfill.py` are its two callers
 - **A half-done rename is invisible to every pre-existing check** — ids do not
   change, so set equality reports IN SYNC over a mixed catalogue. The property is
-  *homogeneity*: `register_manifest.py audit-items`, run over every fetched body
-  before anything reaches pgstac.
+  *homogeneity*: `stacs audit` (formerly `register_manifest.py audit-items`). The
+  workflow runs it over every item it is about to publish, and `stacs register` over
+  every body it is about to send. Neither `verify` nor a drift with nothing to send
+  audits what is already registered.
 
 **Phase 5: Client-side registration ✅ COMPLETE (2026-08-30, v1.1.0, #27)**
-- `scripts/catalogue_register.sh --drift` upserts whatever the API is missing;
+- `scripts/catalogue_register.sh --drift` (since #49, `stacs register --mode drift`)
+  upserts whatever the API is missing;
   stateless, so a month nobody registers is picked up by the next run
 - Nothing in the routine path deletes — the prior tool DELETEd the collection
   before reloading and took the public API to zero items on 2026-08-29
@@ -94,7 +97,7 @@ why the README's worked example renders `dem`-only and says so rather than swapp
   this state", following `stac_uav_bc`. `DESCRIPTION` is a `Type: Project`
   dependency manifest and is deliberately **not** versioned (matches water-temp-bc)
 - ✅ DSM paired and published as a second asset (#31)
-- ✅ Client-side pgstac registration, upsert-only (#27) — `scripts/catalogue_register.sh --drift`
+- ✅ Client-side pgstac registration, upsert-only (#27) — now the `stacs` package (#49): `stacs register --config stacs.toml --mode drift`
 - ✅ Collection carries a version via the STAC Version Extension (#27)
 - ✅ Incremental update capability (change detection working)
 - ✅ Validation caching (GeoTIFF validation)
@@ -116,11 +119,12 @@ why the README's worked example renders `dem`-only and says so rather than swapp
 - **stac_uav_bc:** VM deployment patterns and automation functions
 - **Issue #3:** Proper GeoTIFF validation and media type assignment
 - **stacs** (NewGraphEnvironment/stacs#1, formerly #37): registration and verification
-  (`catalogue_register.sh`, `register_manifest.py`) are being extracted into a public uv
-  package. Change them there once it lands, not here.
+  are the public `stacs` package, adopted at `v0.1.0` (#49) and configured by
+  `stacs.toml`. Change them there, not here; bump the tag in `environment.yml` and
+  `update.yml` together (`tests/test_stacs_config.py` checks both).
 - **Point clouds** go to a separate repo `stac_pointcloud_bc` and bucket
-  `stac-pointcloud-bc` (decided 2026-09-30, rtj#229 revised; bucket rtj#362), blocked on
-  stacs#1. #35 holds the spec and transfers there. CHM stays here as a third asset (#47).
+  `stac-pointcloud-bc` (decided 2026-09-30, rtj#229 revised; bucket rtj#362); it was
+  blocked on stacs#1, which landed as v0.1.0 (2026-10-06). #35 holds the spec and transfers there. CHM stays here as a third asset (#47).
 
 ### Data Tracking & Validation System
 
@@ -202,8 +206,9 @@ Source URLs → GeoTIFF Validation → DSM Pairing → Item Creation → JSON Va
 
 ### Registration is client-side here; rtj owns the host
 
-This repo registers the catalogue into pgstac itself, with
-`scripts/catalogue_register.sh` (#27). **rtj still owns the host** — its
+This repo registers the catalogue into pgstac itself (#27), with the `stacs`
+package and this repo's `stacs.toml` (#49) — `stacs verify`, then
+`stacs register --mode drift`. **rtj still owns the host** — its
 provisioning, credentials and runbook live in the private rtj repo
 (`rtj/scripts/geoserv/`, `rtj/RUNBOOK.md`) — but loading a collection is no
 longer something you go there to do.
@@ -218,7 +223,7 @@ the user that did not exist. The runbook was on disk the whole time.
 previous rule here.** What is secret is *access* — the SSH key — not the address.
 `images.a11s.one` resolves to the same machine in public DNS, and `stac_uav_bc`
 has shipped it publicly for months. So the scripts default to the MagicDNS name
-`root@geopro` and name the reserved IP as a documented fallback. Key material,
+`root@geopro` (in `stacs.toml`) and name the reserved IP as a documented fallback. Key material,
 fingerprints and passwords stay out, as before; `POSTGRES_PASSWORD` is sourced on
 the host and never leaves it, and is passed to pypgstac through the PG*
 environment rather than argv so it does not surface in `ps aux`.
@@ -234,14 +239,14 @@ Hazards in the registration path:
   deliberate inverse of `s3_sync-ci.sh`, which uploads items first so a failure
   leaves unreferenced items rather than dangling links. Both are correct for their
   transport; do not "fix" one to match the other.
-- **`catalogue_register.sh` registers any collection** (#42), and the `dem`/`image`
-  asset audit applies only to *this repo's* catalogue — the collection id, OR the
-  bucket by name, OR any item href in the bucket. Each narrower test was found to
-  fail toward "foreign", which is the branch with no asset audit: the id alone
-  reopens #34's rename window, a URL string misses bucket aliases, and a bucket
-  URL misses `file://` copies. The item hrefs are the fact that cannot be spelled
-  around. It is coarser than a catalogue, so a second collection published into
-  `stac-dem-bc` (#35 option 2) would be refused until the test keys on the catalogue.
+- **The asset rules are declared, not inferred** (#49). `stacs.toml` says every item
+  carries `dem` and none carries `image`; a flag can add to that and never loosen it,
+  whatever collection id it names. That replaced #42's own-bucket test, which had to
+  infer "is this our catalogue" from the id, the bucket and the item hrefs — each
+  narrower test had been found to fail toward "foreign", the branch with no asset
+  audit. The toml spells values the modules also define (`COLLECTION_ID`,
+  `PATH_S3_STAC`, `ASSET_DEM`, `ASSET_RENAMES`); `tests/test_stacs_config.py` pins
+  each to its module. Change the module, then the toml.
 - **Never verify a registration by a count.** The API has no aggregation extension
   (`/aggregate` 404s) and returns `numberMatched: null`, and a `/search` on a list
   of ids silently omits the ones that do not exist — so "asked for N, got N" can be
@@ -255,17 +260,17 @@ Hazards in the registration path:
   `max(updated_at)` on `pgstac.items`, queried on the host.
 - **Id sets are not enough either: compare bodies (#45).** A rebuild keeps every
   id, so id-set equality reported IN SYNC over a catalogue whose bodies had all
-  changed. `--verify`/`--drift` digest every published body against the API's —
+  changed. `stacs verify` / `--mode drift` digest every published body against the API's —
   sha256 of the canonical JSON minus `links`, which is the only member the API
-  rewrites. Two things pgstac does not preserve are canonicalised
-  (`register_manifest._canonical`), each found by the first full run and not by
+  rewrites. Two things pgstac does not preserve are canonicalised (stacs'
+  RFC 8785 digest; its `research/pgstac_round_trip.md`), each found by the first full run and not by
   the 2,000-item sample: null members are stripped (160 items, `proj:epsg`), and
   PostGIS serves an integral float as an integer (`-126.0` → `-126`, 29 items).
   A third normalisation, if one appears, surfaces as items reported `changed`
   that nobody touched, and the post-register content check fails the first
-  `--drift` rather than letting it loop monthly. Items are served *hydrated*
+  drift run rather than letting it loop monthly. Items are served *hydrated*
   against the collection (its `item_assets` and `stac_version`), so a collection
-  upsert can change how untouched items read. That is why `--all` and a `--drift`
+  upsert can change how untouched items read. That is why `--mode all` and a drift
   whose collection changed re-compare the whole catalogue after writing.
 - `data/dem_dsm_pairs.csv` and the item JSONs are large enough that concatenation
   must use `find -exec cat {} +`, never a glob — see the ARG_MAX entry in the
@@ -362,7 +367,7 @@ WHY: Reprocessing same URLs (e.g., after failures, testing) would create duplica
 - Features: versioning, lifecycle policies, CORS, public access controls
 - Reproducible, version-controlled server setups (future)
 
-**Note:** The monthly update runs on GitHub-hosted runners (no VM). S3 buckets and the OIDC role are IaC-managed in rtj; the pgstac host is rtj-provisioned. `geoserv` names the server stack (its containers and `/opt/geoserv`), not a host — the host is the one `scripts/catalogue_register.sh` defaults to.
+**Note:** The monthly update runs on GitHub-hosted runners (no VM). S3 buckets and the OIDC role are IaC-managed in rtj; the pgstac host is rtj-provisioned. `geoserv` names the server stack (its containers and `/opt/geoserv`), not a host — the host is the one `stacs.toml` names.
 
 ### File Locations
 - **Main repo:** `/Users/airvine/Projects/repo/stac_dem_bc`

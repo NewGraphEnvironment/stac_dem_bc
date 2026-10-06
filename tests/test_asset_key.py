@@ -207,7 +207,8 @@ def test_no_workflow_spells_an_asset_key(path):
     hits = _workflow_asset_literals(path)
     assert not hits, (
         f"{os.path.basename(path)} names an asset key literally at {hits}. "
-        f"Read it from stac_utils.ASSET_DEM / item_migrate.ASSET_RENAMES."
+        f"Read it from stac_utils.ASSET_DEM / item_migrate.ASSET_RENAMES, or "
+        f"let stacs read it from stacs.toml (pinned by test_stacs_config.py)."
     )
 
 

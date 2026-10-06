@@ -1,0 +1,40 @@
+# This catalogue, declared for stacs (#49): `stacs verify|register|audit --config stacs.toml`.
+#
+# Every value here also lives in a module -- the collection id in collection_patch.py, the
+# bucket and the asset key in stac_utils.py, the retired key in item_migrate.py -- and
+# tests/test_stacs_config.py fails if the two disagree. Change the module, then this.
+#
+# The asset rules are what stop a half-done rename from loading (#34): a flag can add to
+# them and never loosen them, whatever collection id it names.
+#
+# No setting is a secret. The password stays on the host, named by password_env.
+
+[catalogue]
+api = "https://images.a11s.one"
+collection_id = "stac-elevation-bc"
+# The bucket keeps the old name deliberately; see CLAUDE.md, "The rename".
+bucket_url = "https://stac-dem-bc.s3.amazonaws.com"
+
+[assets]
+require = "dem"
+forbid = ["image"]
+
+[transport]
+# MagicDNS name of the STAC host, over the tailnet. Root-only by design: cloud-init
+# provisions no user account, so <user>@geopro is "Permission denied (publickey)" and
+# that is not a fault (rtj#193). The node is untagged, so its tailnet key expires
+# after 180 days; it has dropped off once and come back on a different IP (rtj#208).
+# If the tailnet is the suspect, the DigitalOcean reserved IP is the same machine:
+#   stacs register --config stacs.toml --host root@146.190.12.8 --mode drift
+# None of this is secret -- images.a11s.one resolves to that address in public DNS.
+# What is not public is access, which is the ssh key.
+host = "root@geopro"
+db = "stac"
+env_file = "/opt/geoserv/.env"
+workdir = "/opt/geoserv/scripts"
+path_prepend = "/root/.local/bin"
+pg_host = "localhost"
+pg_port = 5432
+pg_user = "stac"
+password_env = "POSTGRES_PASSWORD"
+pypgstac = ["uv", "run", "pypgstac"]

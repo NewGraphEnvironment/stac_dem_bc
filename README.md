@@ -160,9 +160,9 @@ the **digital surface model** alongside the bare-earth DEM
 ([\#31](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/31)),
 paired on tile id and acquisition date. Still ahead:
 
-- **Registration from CI** — registration is now a client-side upsert in
-  this repo (`scripts/catalogue_register.sh`), but it still runs from a
-  laptop: no GitHub Actions runner can reach the STAC host today.
+- **Registration from CI** — registration is a client-side upsert from
+  this repo (the [`stacs`](https://github.com/NewGraphEnvironment/stacs)
+  package, configured by `stacs.toml`), but it still runs from a laptop: no GitHub Actions runner can reach the STAC host today.
   Closing that needs a tailnet or deploy-key decision in the
   infrastructure repo, and it unblocks every catalogue repo at once.
 - **Upstream-deletion handling**
