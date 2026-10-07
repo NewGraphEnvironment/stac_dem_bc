@@ -46,14 +46,47 @@ Found in #49.
   The 43 `albers10k2m_new/` deletions remain real evidence.
 - The 90 % plausibility guard in `detect_changes.R` cannot see the ngr-bump failure:
   fresh and cached counts are equal, only the spelling differs.
-- `url_to_item_id` slices at `len(PATH_S3)`, so a single-slash URL loses a character —
-  the mechanism behind #49's `ids-from-urls` refusing every line.
+- ~~`url_to_item_id` slices at `len(PATH_S3)`, so a single-slash URL loses a character.~~
+  Wrong (plan review A1, verified): the over-slice eats the `/` and `lstrip("/")` covers
+  the other form, so both spellings give the same id. #49's refusal was
+  `register_manifest.py`'s `startswith(PATH_S3)` check. Removing `fix_url` cannot change
+  an item id.
+- `fs::path()` also collapses an inner `//` and strips a trailing `/` from keys (plan
+  review A2), so the scheme may not be the only difference between an old-ngr and a
+  new-ngr walk. Validated by walking with both versions (Validation).
 - DESCRIPTION pinned ngr at bare SHA `519c03b` (ancestor of v0.0.2). Only other org
   caller outside this repo: `stac_orthophoto_bc/stac_create_collection.qmd`.
 - CI (`update.yml`) installs R before running pytest, so a pytest can drive Rscript.
 - User approved merging + tagging ngr v0.0.3 within this run.
 
+## Two-join walk (AC1), measured 2026-10-06
+
+One live walk with the fixed ngr (575,438 keys, 151 s); the old output was rebuilt as
+`fs::path(bucket, keys)` from the same raw keys, so there is no time gap between the
+two. Log: `logs/20261006_205751_51_walk_compare.log` (gitignored; the numbers above are the record).
+
+- Every new URL starts with `https://`.
+- 204 keys differ beyond the scheme. All are directory markers (`.../082/082e/2017/dem/`),
+  where `fs::path` stripped the trailing `/`. That is plan review A2, confirmed.
+- **No derived artifact moves.** After repairing the scheme, the DEM set (102,416), the
+  DSM set (95,889) and `dsm_groups` (157) are identical between the two joins. The
+  `.tif` filters exclude the markers, and a `.../dsm/` marker maps to a group that
+  already exists.
+- The old-form listing against the committed cache gives 0 new and 0 deleted for both
+  DEM and DSM, so the migration rewrites spelling only and carries no pending changes.
+
+## Cross-repo consumer (ngr code-check round 1, verified 2026-10-06)
+
+`stac_orthophoto_bc` does not pin ngr, and its `stac_create_item.qmd` breaks on
+`https://` URLs: lines 136 and 142 run `.replace("https:/", "https://")`, which is not
+idempotent and gives `https:///...`, and line 148 slices the id at `len(path_s3)`, which
+gives ids with a leading `-`. It is latent until that repo regenerates
+`data/urls_list.txt` with ngr >= 0.0.3. Filed as stac_orthophoto_bc#48. This repo's
+legacy `stac_create_item.qmd:231` has the same non-idempotent replace; it is folded into
+Phase 4.
+
 ## Errors Encountered
 
 | Error | Resolution |
 |-------|------------|
+| `cp` to `$TMPDIR/k.R` failed: TMPDIR unset, so the mutation check deleted ngr's empty-keys guard and never restored it | Caught by `git diff`. Restored the guard and re-ran the check with the session scratchpad path |

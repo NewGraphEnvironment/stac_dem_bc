@@ -40,18 +40,18 @@ spelled twice — a #51 artifact, not a rename. (The 43 `albers10k2m_new/` delet
 still real evidence.) The comment gets corrected.
 
 ## Phase 1: ngr fix (in `~/Projects/repo/ngr`, its own branch + PR)
-- [ ] Branch `38-...` off ngr main
-- [ ] `R/ngr_s3_keys_get.R:77`: `paste(sub("/+$", "", url_bucket), all_keys, sep = "/")`
-- [ ] testthat: output starts with `https://` (live walk on a small prefix, `skip_if_offline()`), and a trailing `/` on `url_bucket` does not double the separator
-- [ ] NEWS + version bump to 0.0.3; open PR closing ngr#38
-- [ ] Merge + tag `v0.0.3` via `/gh-pr-merge` once CI is green (approved)
+- [x] Branch `38-...` off ngr main
+- [x] `R/ngr_s3_keys_get.R:77`: `paste(sub("/+$", "", url_bucket), all_keys, sep = "/")`, plus an empty-keys guard (`paste(x, character(0), sep = "/")` is `"x/"`)
+- [x] testthat: output starts with `https://` (live walk on a small prefix, `skip_if_offline()`), and a trailing `/` on `url_bucket` does not double the separator
+- [x] Open PR closing ngr#38 (no NEWS/version edit — fledge-managed; `/gh-pr-merge` bumps to 0.0.3)
+- [x] Merge + tag `v0.0.3` via `/gh-pr-merge` once CI is green (approved)
 
 ## Phase 2: refusal guard (stac_dem_bc, branch `51-store-source-urls-as-https-...`)
-- [ ] `scripts/urls_listing.R`: `urls_scheme_assert(urls, what)` — stop() naming the count and first offender if any URL is not `^https://`
-- [ ] Call it in `urls_listing_fetch()` on all walked URLs (covers both callers: `detect_changes.R` and `urls_fetch.R`)
-- [ ] Call it in `detect_changes.R` on the cached `urls_list.txt` / `urls_dsm.txt` **before** any `setdiff`, inside the tryCatch → exit 2, never exit 1
-- [ ] pytest `tests/test_urls_scheme.py` driving Rscript (CI already installs R before pytest): guard raises on `https:/`, passes on `https://`; restore-the-bug check that it fires
-- [ ] Correct the `detect_changes.R` albers comment
+- [x] `scripts/urls_listing.R`: `urls_scheme_assert(urls, what)` — stop() naming the count and first offender if any URL is not `^https://`
+- [x] Call it in `urls_listing_fetch()` on all walked URLs (covers both callers: `detect_changes.R` and `urls_fetch.R`)
+- [x] Call it in `detect_changes.R` on the cached `urls_list.txt` / `urls_dsm.txt` / `urls_deleted.txt` **before** any `setdiff` or write, inside the tryCatch → exit 2, never exit 1
+- [x] pytest `tests/test_urls_scheme.py` driving Rscript (CI already installs R before pytest): guard raises on `https:/`, passes on `https://`; restore-the-bug check that it fires
+- [x] Correct the `detect_changes.R` albers comment
 
 ## Phase 3: pin + migrate — ONE commit
 - [ ] `DESCRIPTION`: `Remotes: NewGraphEnvironment/ngr@v0.0.3`, `Imports: ngr (>= 0.0.3)` (replaces the bare-SHA pin)
@@ -63,13 +63,15 @@ still real evidence.) The comment gets corrected.
 ## Phase 4: retire `fix_url` at the read sites
 - [ ] Replace the silent repair with a raising check where URLs enter from files a human can hand-write (`register_manifest.py` ids-from-urls, `urls_check_access.py`, `item_create.py --urls-file`), so a stray `https:/` fails loudly instead of being repaired
 - [ ] Drop the internal calls (`stac_utils.py` 192/275/381, `dsm_pair.py`, `dsm_verify.py`, `item_create.py` cache comparisons, `item_reprocess.py`) and the comments explaining the two forms
+- [ ] `stac_create_item.qmd:231` `.replace("https:/", "https://")` is not idempotent (turns `https://` into `https:///`) — drop it with the rest (found by ngr code-check round 1)
 - [ ] Delete `fix_url` and `test_cache_lookup_normalises_both_url_forms`; update `register_manifest.py` docstring
 - [ ] CLAUDE.md "Source URLs are stored as `https:/`" paragraph → one line saying they are `https://` and guarded
 
 ## Validation
 
 - [ ] `pytest tests/ -q` green; ngr `devtools::test()` green
-- [ ] Local `Rscript scripts/detect_changes.R` against the new ngr on the migrated cache reports ~0 new / ~0 deleted — run on a scratch copy so the tree is untouched
+- [ ] Two-version walk (plan review AC1): list the bucket with ngr 519c03b and with 0.0.3 (scratch R library); require `fix(old) == new` over all keys, and identical DEM/DSM/dsm_groups after normalising
+- [ ] Phase 4 href byte-identity: items built from cached URLs before and after Phase 4 are byte-identical
 - [ ] Tests pass
 - [ ] `/code-check` clean on each commit
 - [ ] PWF checkboxes match landed work
