@@ -54,11 +54,11 @@ still real evidence.) The comment gets corrected.
 - [x] Correct the `detect_changes.R` albers comment
 
 ## Phase 3: pin + migrate — ONE commit
-- [ ] `DESCRIPTION`: `Remotes: NewGraphEnvironment/ngr@v0.0.3`, `Imports: ngr (>= 0.0.3)` (replaces the bare-SHA pin)
-- [ ] `scripts/urls_scheme_migrate.py` (one-shot, kept for provenance): line-level `^https:/(?=[^/])` → `https://` on the four files; byte-preserving otherwise
-- [ ] Asserts before writing: per-file line count unchanged (txt); `{fix_url(old)} == {new}` per file; zero single-slash lines anywhere in `data/`; for geotiff checks, 102,460 rows out and every dropped row equal to the row it keeps
-- [ ] Run it, commit pin + four rewritten caches + script together
-- [ ] Data-invariant pytest: no tracked text file under `data/` contains `https:/[^/]`
+- [x] `DESCRIPTION`: `Remotes: NewGraphEnvironment/ngr@v0.0.3`, `Imports: ngr (>= 0.0.3)` (replaces the bare-SHA pin)
+- [x] `scripts/urls_scheme_migrate.py` (one-shot, kept for provenance): line-level `^https:/(?=[^/])` → `https://` on the four files; byte-preserving otherwise
+- [x] Asserts before writing: per-file line count unchanged (txt); `{fix_url(old)} == {new}` per file; zero single-slash lines anywhere in `data/`; for geotiff checks, 102,460 rows out and every dropped row equal to the row it keeps
+- [x] Run it, commit pin + four rewritten caches + script together
+- [x] Data-invariant pytest: no tracked text file under `data/` contains `https:/[^/]`
 
 ## Phase 4: retire `fix_url` at the read sites
 - [ ] Replace the silent repair with a raising check where URLs enter from files a human can hand-write (`register_manifest.py` ids-from-urls, `urls_check_access.py`, `item_create.py --urls-file`), so a stray `https:/` fails loudly instead of being repaired

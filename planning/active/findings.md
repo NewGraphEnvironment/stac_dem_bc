@@ -75,6 +75,17 @@ two. Log: `logs/20261006_205751_51_walk_compare.log` (gitignored; the numbers ab
 - The old-form listing against the committed cache gives 0 new and 0 deleted for both
   DEM and DSM, so the migration rewrites spelling only and carries no pending changes.
 
+## End-to-end: the real `detect_changes.R` on the migrated caches (2026-10-06)
+
+ngr v0.0.3 was installed into a scratch R library, and the run used a scratch copy of
+`scripts/` + `data/`:
+
+- 102,416 fresh, 102,416 cached, 0 new, 0 deleted; DSM listing unchanged; exit 0.
+- `urls_list.txt`, `urls_dsm.txt`, `urls_deleted.txt` and `dsm_groups.txt` were
+  rewritten byte-identical to the migrated versions.
+
+So the first scheduled run after merge should report no changes.
+
 ## Cross-repo consumer (ngr code-check round 1, verified 2026-10-06)
 
 `stac_orthophoto_bc` does not pin ngr, and its `stac_create_item.qmd` breaks on

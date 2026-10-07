@@ -12,3 +12,5 @@
 - stac_orthophoto_bc#48 filed (unpinned consumer breaks on `https://`)
 - Phase 2 code-check: round 1 found the walk guard was tested only through a copy in the fixture. Fixed with a `keys_get` injection parameter; round 2 clean
 - Phase 2 round 3: no bugs; guarded the unguarded writer in `stac_create_collection.qmd` (fragile). Loop ended: round 3 had no finding inside a fix
+- Phase 3: pinned ngr v0.0.3, migrated 4 caches (geotiff checks deduped to 102,460 rows); re-run is a no-op; real detect_changes.R on the result exits 0 with 0/0
+- Phase 3 code-check: round 1 clean; the reviewer reproduced all four migrated files byte-for-byte from HEAD (the full candidate set), so the loop ended on that enumeration

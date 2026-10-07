@@ -119,3 +119,29 @@ def test_single_slash_deleted_audit_trail_is_refused(tmp_path):
     r = _run(ws)
     assert r.returncode == 2, r.stdout + r.stderr
     assert "urls_deleted.txt" in r.stdout
+
+
+def test_no_tracked_data_file_holds_a_one_slash_url():
+    """The migration's invariant, held for good: one spelling across data/.
+
+    Searches every tracked file under data/ as bytes, anywhere in a line, so a
+    URL inside a CSV cell or JSON string counts. Binary files (NUL in the first
+    8 KiB) are skipped, and the test fails if that skips everything.
+    """
+    import re
+
+    files = subprocess.run(["git", "ls-files", "data/"], cwd=REPO, capture_output=True,
+                           text=True, check=True).stdout.split()
+    one_slash = re.compile(rb"https:/(?!/)")
+    scanned, offenders = 0, []
+    for rel in files:
+        with open(os.path.join(REPO, rel), "rb") as f:
+            raw = f.read()
+        if b"\0" in raw[:8192]:
+            continue
+        scanned += 1
+        n = len(one_slash.findall(raw))
+        if n:
+            offenders.append(f"{rel}: {n}")
+    assert scanned >= 4, f"only {scanned} text files scanned under data/"
+    assert not offenders, "one-slash URLs (#51): " + ", ".join(offenders)
