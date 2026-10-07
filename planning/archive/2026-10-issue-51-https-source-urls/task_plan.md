@@ -69,10 +69,10 @@ still real evidence.) The comment gets corrected.
 
 ## Validation
 
-- [ ] `pytest tests/ -q` green; ngr `devtools::test()` green
-- [ ] Two-version walk (plan review AC1): list the bucket with ngr 519c03b and with 0.0.3 (scratch R library); require `fix(old) == new` over all keys, and identical DEM/DSM/dsm_groups after normalising
+- [x] `pytest tests/ -q` green; ngr `devtools::test()` green
+- [x] Two-version walk (plan review AC1): list the bucket with ngr 519c03b and with 0.0.3 (scratch R library); require `fix(old) == new` over all keys, and identical DEM/DSM/dsm_groups after normalising
 - [x] Phase 4 href byte-identity: items built from cached URLs before and after Phase 4 are byte-identical
-- [ ] Tests pass
-- [ ] `/code-check` clean on each commit
-- [ ] PWF checkboxes match landed work
-- [ ] `/planning-archive` on completion
+- [x] Tests pass
+- [x] `/code-check` clean on each commit
+- [x] PWF checkboxes match landed work
+- [x] `/planning-archive` on completion
