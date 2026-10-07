@@ -38,6 +38,16 @@ result <- tryCatch({
   dsm_file <- "data/urls_dsm.txt"
   dsm_groups_file <- "data/dsm_groups.txt"
 
+  # Step 0: every URL file this run compares against or merges into must be
+  # spelled `https://`, like the listing. A cache in the other spelling would
+  # report every URL as new AND deleted at once, at an unchanged count the
+  # plausibility guards cannot see (#51). Checked before the walk, so a
+  # refusal costs no bucket listing; before any write, so it leaves every file
+  # as it was; inside the tryCatch, so it exits 2, never 1.
+  for (f in c(cache_file, dsm_file, deleted_file)) {
+    if (file.exists(f)) urls_scheme_assert(readr::read_lines(f), f)
+  }
+
   # Step 1: Fetch fresh listing from objectstore (one walk, DEM + DSM)
   cat("Fetching fresh URL list from BC objectstore...\n")
   cat(sprintf("  Bucket: %s\n\n", url_bucket))
@@ -109,9 +119,11 @@ result <- tryCatch({
   #
   # It used to be rewritten with the current month's set, and removed outright
   # when a month had none — which deleted 43 entries on 2026-08-28. Those 43
-  # were all under `albers10k2m_new/`, and stac_geotiff_checks.csv still holds
-  # 4,490 albers rows against 2,245 live URLs: a prefix rename, which is #28's
-  # hypothesis. Losing that would have lost the evidence for it.
+  # were all under `albers10k2m_new/` while 2,245 albers tiles stay live under
+  # `albers10k2m/`: a prefix rename, which is #28's hypothesis. Losing them
+  # would have lost the evidence for it. (stac_geotiff_checks.csv once held
+  # 4,490 albers rows; that was the 2,245 live URLs spelled two ways, #51, and
+  # is not evidence of anything.)
   prior_deleted <- if (file.exists(deleted_file)) readr::read_lines(deleted_file) else character(0)
   if (length(deleted_urls) > 0) {
     merged <- unique(c(prior_deleted, deleted_urls))

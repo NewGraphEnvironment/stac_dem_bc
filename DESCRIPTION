@@ -10,7 +10,7 @@ License: MIT
 Encoding: UTF-8
 Imports:
     fs,
-    ngr,
+    ngr (>= 0.0.3),
     readr
 Remotes:
-    NewGraphEnvironment/ngr@519c03baa8554b9a82ff995dbe510bfb923a624d
+    NewGraphEnvironment/ngr@v0.0.3

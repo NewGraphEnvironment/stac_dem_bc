@@ -228,7 +228,7 @@ else:
 
 # Create lookup dictionary for fast access during item creation
 results_lookup = {
-    row["url"].replace("https:/", "https://"): {"is_geotiff": row["is_geotiff"], "is_cog": row["is_cog"]}
+    row["url"]: {"is_geotiff": row["is_geotiff"], "is_cog": row["is_cog"]}
     for _, row in df_all.iterrows()
 }
 
@@ -242,11 +242,8 @@ def process_item(path_item: str) -> dict | None:
 
     Returns dict with item_id and item object, or None if processing fails.
     """
-    # Fix malformed URLs (single slash after https:) without breaking correct ones
-    if path_item.startswith("https:/") and not path_item.startswith("https://"):
-        href_item = path_item.replace("https:/", "https://", 1)
-    else:
-        href_item = path_item
+    # Source URLs are stored as https:// (#51), so no repair is needed here.
+    href_item = path_item
     check = results_lookup.get(href_item)
 
     # Skip unreadable GeoTIFFs

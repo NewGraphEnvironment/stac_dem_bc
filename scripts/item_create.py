@@ -37,8 +37,8 @@ from stac_utils import (
     date_extract_from_path,
     datetime_parse_item,
     encode_url_for_gdal,
-    fix_url,
     get_output_dir,
+    url_scheme_check,
     url_to_item_id,
     PATH_S3,
     PATH_S3_JSON,
@@ -102,7 +102,7 @@ def process_item(path_item: str, collection_id: str, path_local: str,
 
     Returns dict with item_id and item object, or None if processing fails.
     """
-    href_item = fix_url(path_item)
+    href_item = path_item
     check = results_lookup.get(href_item)
 
     if check is None or not check["is_geotiff"]:
@@ -208,15 +208,13 @@ def load_validation_cache(urls_to_check: list[str]) -> dict:
     """
     all_columns = ["url", "is_geotiff", "is_cog", "epsg", "height", "width", "transform", "bounds"]
 
-    # Normalise both sides before comparing. data/urls_list.txt carries the
-    # single-slash `https:/` form that fs::path() produces, and any other URL
-    # source (data/urls_pairing_changed.txt, a hand-written --urls-file) carries
-    # the real double-slash form. Comparing raw strings makes an already-cached
-    # tile look new, which re-reads it over the network AND appends a duplicate
-    # row to the cache on every run.
+    # Every URL source and the cache are spelled `https://` (#51); main()
+    # refuses a one-slash input. Compared raw, two spellings made an
+    # already-cached tile look new, which re-read it over the network AND
+    # appended a duplicate row to the cache on every run.
     if os.path.exists(PATH_RESULTS_CSV):
         df_existing = pd.read_csv(PATH_RESULTS_CSV)
-        existing_urls = {fix_url(u) for u in df_existing["url"]}
+        existing_urls = set(df_existing["url"])
         logger.info("Loaded %d existing validation results", len(df_existing))
     else:
         df_existing = pd.DataFrame(columns=all_columns)
@@ -230,20 +228,20 @@ def load_validation_cache(urls_to_check: list[str]) -> dict:
     if "transform" in df_existing.columns:
         for _, row in df_existing.iterrows():
             if row.get("is_geotiff") and pd.isna(row.get("transform")):
-                needs_upgrade.add(fix_url(row["url"]))
+                needs_upgrade.add(row["url"])
     else:
-        needs_upgrade = {fix_url(row["url"]) for _, row in df_existing.iterrows()
+        needs_upgrade = {row["url"] for _, row in df_existing.iterrows()
                          if row["is_geotiff"]}
 
     urls_to_validate = [url for url in urls_to_check
-                        if fix_url(url) not in existing_urls
-                        or fix_url(url) in needs_upgrade]
+                        if url not in existing_urls
+                        or url in needs_upgrade]
     if needs_upgrade:
         # Drop old rows that will be re-extracted with spatial metadata
-        urls_upgrading = needs_upgrade & {fix_url(u) for u in urls_to_validate}
+        urls_upgrading = needs_upgrade & set(urls_to_validate)
         if urls_upgrading:
             df_existing = df_existing[
-                ~df_existing["url"].map(fix_url).isin(urls_upgrading)
+                ~df_existing["url"].isin(urls_upgrading)
             ]
             logger.info("%d cached URLs need spatial metadata upgrade", len(urls_upgrading))
 
@@ -276,7 +274,7 @@ def load_validation_cache(urls_to_check: list[str]) -> dict:
                 entry[col] = int(row[col]) if col in ("epsg", "height", "width") else row[col]
             else:
                 entry[col] = None
-        result[fix_url(row["url"])] = entry
+        result[row["url"]] = entry
     return result
 
 
@@ -331,7 +329,7 @@ def main():
         return 1
 
     with open(urls_file) as f:
-        path_items = f.read().splitlines()
+        path_items = [url_scheme_check(u) for u in f.read().splitlines()]
 
     urls_to_check = path_items[:args.test_count] if args.test else path_items
     logger.info("Processing %d URLs (mode=%s, test=%s)", len(urls_to_check), mode_desc, args.test)

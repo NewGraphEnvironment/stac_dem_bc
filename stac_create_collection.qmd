@@ -52,6 +52,11 @@ if (test_only && file.exists("data/urls_list.txt")) {
   # Remove paths with ( in them
   keys_clean <- keys[!stringr::str_detect(keys, "\\(")]
 
+  # Refuse the one-slash form ngr < 0.0.3 produced (#51): written here, it
+  # would make the next change detection read every URL as new and deleted.
+  source("scripts/urls_listing.R")
+  urls_scheme_assert(keys_clean, "ngr_s3_keys_get")
+
   # Save to disk
   readr::write_lines(keys_clean, "data/urls_list.txt")
   cat(sprintf("Fetched and saved %d URLs\n", length(keys_clean)))

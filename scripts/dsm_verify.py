@@ -45,7 +45,6 @@ from stac_utils import (
     PATH_RESULTS_CSV,
     PATH_S3,
     date_extract_from_path,
-    fix_url,
     geotiff_extract_metadata,
 )
 
@@ -149,7 +148,7 @@ def main() -> int:
     logger.info("Loaded %d paired rows", len(pairs))
 
     dem_cache = pd.read_csv(PATH_RESULTS_CSV)
-    dem_lookup = {fix_url(r["url"]): r for r in dem_cache.to_dict("records")}
+    dem_lookup = {r["url"]: r for r in dem_cache.to_dict("records")}
     logger.info("Loaded %d cached DEM metadata rows", len(dem_lookup))
 
     # Only tiles whose DEM metadata is already cached can be compared; a tile

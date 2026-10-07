@@ -143,14 +143,16 @@ data/
 └── stac_item_validation.csv   # Output validation (item_id, json_valid, error)
 ```
 
-**Source URLs are stored as `https:/` (one slash).** `urls_list.txt`, `urls_dsm.txt`,
-`urls_new.txt` and `urls_deleted.txt` carry it on every line, while
-`urls_invalid_items.txt` and `urls_access_checks.csv` carry `https://`, and
-`stac_geotiff_checks.csv` holds both. The cause is `ngr::ngr_s3_keys_get()` joining with
-`fs::path()`, which collapses the scheme's `//` (ngr#38). Any reader of these files
-goes through `stac_utils.fix_url` first; `ids-from-urls` did not, and refused every line
-until #49. Fixing ngr without rewriting the caches in the same commit makes change
-detection read every URL as new and deleted (#51).
+**Source URLs are stored as `https://`, in every file under `data/` (#51).** Until
+ngr 0.0.3 they were `https:/` (one slash), because `ngr::ngr_s3_keys_get()` joined with
+`fs::path()` (ngr#38), and every reader repaired them through `stac_utils.fix_url`.
+The pin and the cache rewrite landed in one commit, because either alone makes change
+detection read every URL as new and deleted. Three guards keep the old form out:
+- `detect_changes.R` refuses a listing or cache not spelled `https://`, exiting 2
+- the Python URL-list loaders raise on a one-slash line (`stac_utils.url_scheme_check`); the readers of `stac_geotiff_checks.csv` do not, and rely on the test below
+- `tests/test_urls_scheme.py` fails if any tracked file under `data/` holds one
+
+Do not reintroduce a silent repair.
 
 **DEM/DSM pairing (#31):** matching is on parsed semantics — tile id, acquisition
 date, utm zone, mapsheet-year — and the naming convention is recorded *afterwards*

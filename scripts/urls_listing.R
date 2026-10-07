@@ -24,20 +24,46 @@ URL_BUCKET <- "https://nrs.objectstore.gov.bc.ca/gdwuts"
 # anything under half that is a truncated listing, not a real shrink.
 KEYS_MIN <- 280000
 
+#' Refuse URLs that are not `https://`
+#'
+#' The caches in data/ are compared against a fresh listing AS STRINGS, so one
+#' spelling of each URL is what keeps change detection honest. ngr before 0.0.3
+#' joined with fs::path() and wrote `https:/host/...` (ngr#38); a cache in one
+#' form against a listing in the other reads as every URL new AND every URL
+#' deleted, at an unchanged count the plausibility guards cannot see (#51).
+#'
+#' @param urls character vector of URLs
+#' @param what label for the error message (which listing or file)
+#' @return `urls`, invisibly, when every one starts with `https://`
+urls_scheme_assert <- function(urls, what) {
+  bad <- urls[!startsWith(urls, "https://")]
+  if (length(bad) > 0) {
+    stop(sprintf(
+      "%s: %d of %d URLs do not start with https:// (e.g. '%s') - refusing to compare spellings (#51)",
+      what, length(bad), length(urls), bad[1]
+    ))
+  }
+  invisible(urls)
+}
+
 #' Walk the objectstore once and derive the DEM/DSM listing artifacts
 #'
+#' @param keys_get the bucket lister; replaced only by tests, which supply a
+#'   fixed listing so everything after the network call runs for real
 #' @return list with `dem` (character URLs), `dsm` (character URLs),
 #'   `dsm_groups` (character mapsheet-year paths) and `n_keys` (total walked)
-urls_listing_fetch <- function(url_bucket = URL_BUCKET, keys_min = KEYS_MIN) {
+urls_listing_fetch <- function(url_bucket = URL_BUCKET, keys_min = KEYS_MIN,
+                               keys_get = ngr::ngr_s3_keys_get) {
 
   # No pattern: one full walk, filtered below. ngr aborts on a non-200, so a
   # failed call raises here rather than yielding character(0).
-  all_urls <- ngr::ngr_s3_keys_get(
+  all_urls <- keys_get(
     url_bucket = url_bucket,
     prefix = "",
     pattern = NULL
   )
   all_urls <- as.character(all_urls)
+  urls_scheme_assert(all_urls, "bucket walk")
 
   if (length(all_urls) < keys_min) {
     stop(sprintf(

@@ -18,7 +18,7 @@ urls_new.txt includes sources item_create skipped. In such a month use
 import argparse
 import sys
 
-from stac_utils import PATH_S3, fix_url, url_to_item_id
+from stac_utils import PATH_S3, url_scheme_check, url_to_item_id
 
 
 def item_ids_from_urls(urls) -> list[str]:
@@ -29,13 +29,12 @@ def item_ids_from_urls(urls) -> list[str]:
     host silently yields a mangled id rather than an error — the id would look
     plausible and register against nothing.
 
-    The source lists (urls_list, urls_dsm, urls_new, urls_deleted) store the
-    scheme as `https:/` (one slash), so each line goes through `fix_url` first;
-    it leaves a `https://` line alone. Without it this refused every real line.
+    The source lists store `https://`. A one-slash `https:/` line (ngr < 0.0.3)
+    raises in `url_scheme_check` instead of reading as a foreign host (#51).
     """
     ids = []
     for url in urls:
-        url = fix_url(url.strip())
+        url = url_scheme_check(url.strip())
         if not url:
             continue
         if not url.startswith(PATH_S3):
