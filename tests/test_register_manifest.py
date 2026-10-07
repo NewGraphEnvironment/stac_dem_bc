@@ -45,11 +45,18 @@ def test_item_ids_from_urls_skips_blank_lines():
 
 
 def test_item_ids_from_urls_reads_the_lists_as_stored():
-    """data/urls_list.txt carries `https:/` with ONE slash on every line (102,416
-    of them, 2026-10-06), and the check below once refused all of them."""
-    stored = f"{PATH_S3}/082/082f/2022/dem/x.tif".replace("https://", "https:/", 1)
-    assert stored.startswith("https:/n")
+    """data/urls_list.txt stores `https://` (#51; it was `https:/` until then)."""
+    stored = f"{PATH_S3}/082/082f/2022/dem/x.tif"
+    assert stored.startswith("https://")
     assert item_ids_from_urls([stored]) == ["082-082f-2022-dem-x"]
+
+
+def test_item_ids_from_urls_refuses_a_one_slash_line():
+    """A list written by ngr < 0.0.3 must raise as such, not as a foreign host
+    and not by being silently repaired (#51)."""
+    stale = f"{PATH_S3}/082/082f/2022/dem/x.tif".replace("https://", "https:/", 1)
+    with pytest.raises(ValueError, match="one-slash"):
+        item_ids_from_urls([stale])
 
 
 def test_item_ids_from_urls_raises_on_foreign_host():

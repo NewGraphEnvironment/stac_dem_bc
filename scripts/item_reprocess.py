@@ -27,7 +27,7 @@ from stac_utils import (
     date_extract_from_path,
     datetime_parse_item,
     encode_url_for_gdal,
-    fix_url,
+    url_scheme_check,
     url_to_item_id,
     get_output_dir,
     PATH_S3_STAC,
@@ -54,7 +54,7 @@ def process_item(path_item: str, collection, results_lookup,
 
     Returns dict with item_id and item object, or None if processing fails.
     """
-    href_item = fix_url(path_item)
+    href_item = path_item
     check = results_lookup.get(href_item)
 
     # Skip unreadable GeoTIFFs
@@ -168,7 +168,7 @@ def main():
                 entry[col] = int(row[col]) if col in ("epsg", "height", "width") else row[col]
             else:
                 entry[col] = None
-        results_lookup[fix_url(row["url"])] = entry
+        results_lookup[row["url"]] = entry
     print(f"✓ Loaded {len(results_lookup)} validation results")
     print()
 
@@ -180,7 +180,7 @@ def main():
         return 1
 
     with open(INVALID_URLS_FILE) as f:
-        urls_to_process = f.read().splitlines()
+        urls_to_process = [url_scheme_check(u) for u in f.read().splitlines()]
 
     print(f"✓ Loaded {len(urls_to_process)} URLs to re-process")
 

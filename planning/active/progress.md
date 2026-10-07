@@ -14,3 +14,5 @@
 - Phase 2 round 3: no bugs; guarded the unguarded writer in `stac_create_collection.qmd` (fragile). Loop ended: round 3 had no finding inside a fix
 - Phase 3: pinned ngr v0.0.3, migrated 4 caches (geotiff checks deduped to 102,460 rows); re-run is a no-op; real detect_changes.R on the result exits 0 with 0/0
 - Phase 3 code-check: round 1 clean; the reviewer reproduced all four migrated files byte-for-byte from HEAD (the full candidate set), so the loop ended on that enumeration
+- Phase 4: `fix_url` replaced by `url_scheme_check`, which raises at every file-read point and in key parsing; internal repairs dropped; legacy qmd fixed; CLAUDE.md updated. Sample of 19 items (6 albers, 10 with a space in the URL, 3 with dsm) is byte-identical before and after
+- Phase 4 code-check: rounds 1 (input boundary, enumerated every entry point) and 2 (semantics; HEAD and staged load_validation_cache gave identical output on the real cache) both clean. CLAUDE.md scope of the loader guard corrected

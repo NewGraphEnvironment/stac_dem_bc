@@ -39,9 +39,9 @@ from collections import Counter, defaultdict
 from stac_utils import (
     PATH_S3,
     convention_classify,
-    fix_url,
     pair_key,
     tile_key_parse,
+    url_scheme_check,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ def keys_load(path: str, label: str) -> list[str]:
     if not os.path.exists(path):
         raise ListingError(f"{label} listing not found: {path}")
     with open(path) as fh:
-        keys = [line.strip() for line in fh if line.strip()]
+        keys = [url_scheme_check(line.strip()) for line in fh if line.strip()]
     if not keys:
         raise ListingError(f"{label} listing is empty: {path}")
     return keys
@@ -107,7 +107,7 @@ def dsm_group_of(key: str) -> str | None:
 
 def key_relative(key: str) -> str:
     """Object key relative to the bucket root, for compact storage in the csv."""
-    key = fix_url(key)
+    key = url_scheme_check(key)
     if key.startswith(PATH_S3):
         key = key[len(PATH_S3):]
     return key.lstrip("/")

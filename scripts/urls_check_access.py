@@ -18,7 +18,7 @@ import sys
 import pandas as pd
 from tqdm import tqdm
 
-from stac_utils import check_url_accessible, fix_url
+from stac_utils import check_url_accessible, url_scheme_check
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ def main():
 
     # Load URLs
     with open(args.urls_file) as f:
-        all_urls = [fix_url(line.strip()) for line in f if line.strip()]
+        all_urls = [url_scheme_check(line.strip()) for line in f if line.strip()]
     logger.info("Loaded %d URLs from %s", len(all_urls), args.urls_file)
 
     # Load cache

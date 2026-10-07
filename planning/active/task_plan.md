@@ -61,17 +61,17 @@ still real evidence.) The comment gets corrected.
 - [x] Data-invariant pytest: no tracked text file under `data/` contains `https:/[^/]`
 
 ## Phase 4: retire `fix_url` at the read sites
-- [ ] Replace the silent repair with a raising check where URLs enter from files a human can hand-write (`register_manifest.py` ids-from-urls, `urls_check_access.py`, `item_create.py --urls-file`), so a stray `https:/` fails loudly instead of being repaired
-- [ ] Drop the internal calls (`stac_utils.py` 192/275/381, `dsm_pair.py`, `dsm_verify.py`, `item_create.py` cache comparisons, `item_reprocess.py`) and the comments explaining the two forms
-- [ ] `stac_create_item.qmd:231` `.replace("https:/", "https://")` is not idempotent (turns `https://` into `https:///`) — drop it with the rest (found by ngr code-check round 1)
-- [ ] Delete `fix_url` and `test_cache_lookup_normalises_both_url_forms`; update `register_manifest.py` docstring
-- [ ] CLAUDE.md "Source URLs are stored as `https:/`" paragraph → one line saying they are `https://` and guarded
+- [x] Replace the silent repair with a raising check where URLs enter from files a human can hand-write (`register_manifest.py` ids-from-urls, `urls_check_access.py`, `item_create.py --urls-file`), so a stray `https:/` fails loudly instead of being repaired
+- [x] Drop the internal calls (`stac_utils.py` 192/275/381, `dsm_pair.py`, `dsm_verify.py`, `item_create.py` cache comparisons, `item_reprocess.py`) and the comments explaining the two forms
+- [x] `stac_create_item.qmd:231` `.replace("https:/", "https://")` is not idempotent (turns `https://` into `https:///`) — drop it with the rest (found by ngr code-check round 1)
+- [x] Delete `fix_url` and `test_cache_lookup_normalises_both_url_forms`; update `register_manifest.py` docstring
+- [x] CLAUDE.md "Source URLs are stored as `https:/`" paragraph → one line saying they are `https://` and guarded
 
 ## Validation
 
 - [ ] `pytest tests/ -q` green; ngr `devtools::test()` green
 - [ ] Two-version walk (plan review AC1): list the bucket with ngr 519c03b and with 0.0.3 (scratch R library); require `fix(old) == new` over all keys, and identical DEM/DSM/dsm_groups after normalising
-- [ ] Phase 4 href byte-identity: items built from cached URLs before and after Phase 4 are byte-identical
+- [x] Phase 4 href byte-identity: items built from cached URLs before and after Phase 4 are byte-identical
 - [ ] Tests pass
 - [ ] `/code-check` clean on each commit
 - [ ] PWF checkboxes match landed work

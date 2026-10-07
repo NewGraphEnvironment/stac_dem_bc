@@ -32,6 +32,7 @@ from dsm_pair import (  # noqa: E402
     UNPAIRED,
     UNPARSEABLE,
     ListingError,
+    key_relative,
     keys_load,
     pairs_build,
     summarize,
@@ -229,18 +230,26 @@ def test_tile_key_parse_returns_none_rather_than_guessing():
 
 
 def test_url_forms_agree_on_the_group():
-    """urls_list.txt carries the single-slash `https:/` form from fs::path().
-
-    If the full-URL and bare-key forms parsed to different groups, DEM and DSM
+    """If the full-URL and bare-key forms parsed to different groups, DEM and DSM
     would never match and every tile would report as a coverage gap.
     """
     tail = "082/082f/2022/dem/bc_082f005_xli1m_utm11_2022.tif"
     groups = {
-        tile_key_parse(f"https:/nrs.objectstore.gov.bc.ca/gdwuts/{tail}")["group"],
         tile_key_parse(f"https://nrs.objectstore.gov.bc.ca/gdwuts/{tail}")["group"],
         tile_key_parse(tail)["group"],
     }
     assert groups == {"082/082f/2022"}
+
+
+def test_a_one_slash_url_is_refused_not_parsed():
+    """ngr < 0.0.3 wrote `https:/host/...` (#51). Parsed, it would not strip the
+    bucket prefix and would yield a group matching nothing -- every tile a
+    silent coverage gap. It must raise instead, at parse and at load."""
+    tail = "082/082f/2022/dem/bc_082f005_xli1m_utm11_2022.tif"
+    with pytest.raises(ValueError, match="one-slash"):
+        tile_key_parse(f"https:/nrs.objectstore.gov.bc.ca/gdwuts/{tail}")
+    with pytest.raises(ValueError, match="one-slash"):
+        key_relative(f"https:/nrs.objectstore.gov.bc.ca/gdwuts/{tail}")
 
 
 @pytest.mark.parametrize("dem,dsm,expected", [
@@ -400,18 +409,13 @@ def test_a_missing_pairs_file_yields_an_empty_lookup_not_a_crash(tmp_path):
     assert dsm_lookup_load(str(tmp_path / "absent.csv")) == {}
 
 
-def test_cache_lookup_normalises_both_url_forms():
-    """data/urls_list.txt uses `https:/`; every other URL source uses `https://`.
-
-    Comparing them raw made an already-cached tile look new, which re-read it
-    over the network AND appended a duplicate row to the cache on every run.
-    Observed: a 6-URL build grew stac_geotiff_checks.csv by 6 rows.
-    """
-    from stac_utils import fix_url
-    single = "https:/nrs.objectstore.gov.bc.ca/gdwuts/082/082f/2022/dem/x.tif"
-    double = "https://nrs.objectstore.gov.bc.ca/gdwuts/082/082f/2022/dem/x.tif"
-    assert fix_url(single) == fix_url(double) == double
-
+def test_keys_load_refuses_a_one_slash_listing(tmp_path):
+    """The listing a stale ngr (< 0.0.3) would write. Loaded, its DEM keys would
+    never match the bucket-relative DSM keys; it must fail at load (#51)."""
+    stale = tmp_path / "urls_list.txt"
+    stale.write_text("https:/nrs.objectstore.gov.bc.ca/gdwuts/082/082f/2022/dem/x.tif\n")
+    with pytest.raises(ValueError, match="one-slash"):
+        keys_load(str(stale), "DEM")
 
 def test_an_unparseable_dsm_keeps_its_group_marked_as_having_a_raster():
     """A DSM raster we cannot name must not turn its group into a coverage gap.

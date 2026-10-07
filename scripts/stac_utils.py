@@ -186,10 +186,10 @@ def tile_key_parse(key: str) -> dict | None:
     if not key or not key.lower().endswith(".tif"):
         return None
 
-    # Accept a bare object key, a full URL, or the single-slash "https:/" form
-    # that fs::path() produces in data/urls_list.txt - all three must yield the
-    # same group, or DEM and DSM would never match.
-    path = fix_url(key)
+    # Accept a bare object key or a full URL - both must yield the same group,
+    # or DEM and DSM would never match. A one-slash URL is refused rather than
+    # parsed into a group that matches nothing (#51).
+    path = url_scheme_check(key)
     if path.startswith(PATH_S3):
         path = path[len(PATH_S3):]
     path = path.lstrip("/")
@@ -272,7 +272,7 @@ def geotiff_extract_metadata(url: str) -> dict:
 
     Returns dict with url, is_geotiff, is_cog, epsg, height, width, transform, bounds.
     """
-    gdal_url = encode_url_for_gdal(fix_url(url))
+    gdal_url = encode_url_for_gdal(url)
     vsicurl_path = f"/vsicurl/{gdal_url}"
 
     try:
@@ -378,7 +378,7 @@ def item_create_from_cache(
     item.add_asset(
         ASSET_DEM,
         pystac.Asset(
-            href=fix_url(url),
+            href=url,
             media_type=media_type,
             roles=["data"],
         ),
@@ -415,10 +415,17 @@ def check_url_accessible(url: str, timeout: int = 10) -> dict:
         }
 
 
-def fix_url(url: str) -> str:
-    """Fix malformed URLs with single slash after https:."""
+def url_scheme_check(url: str) -> str:
+    """Return `url`, refusing the one-slash `https:/` form (#51).
+
+    ngr < 0.0.3 wrote source URLs as `https:/host/...`, and this module used to
+    repair them wherever they were read. The caches in data/ are now `https://`
+    and a test holds them there, so a one-slash URL means an old writer is back:
+    fail loudly instead of repairing it silently. Bare object keys pass through.
+    """
     if url.startswith("https:/") and not url.startswith("https://"):
-        return url.replace("https:/", "https://", 1)
+        raise ValueError(
+            f"one-slash URL (https:/) - regenerate it with ngr >= 0.0.3 (#51): {url}")
     return url
 
 
