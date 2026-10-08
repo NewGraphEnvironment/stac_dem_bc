@@ -124,7 +124,7 @@ why the README's worked example renders `dem`-only and says so rather than swapp
   `update.yml` together (`tests/test_stacs_config.py` checks both).
 - **Point clouds** go to a separate repo `stac_pointcloud_bc` and bucket
   `stac-pointcloud-bc` (decided 2026-09-30, rtj#229 revised; bucket rtj#362); it was
-  blocked on stacs#1, which landed as v0.1.0 (2026-10-06). #35 holds the spec and transfers there. CHM stays here as a third asset (#47).
+  blocked on stacs#1, which landed as v0.1.0 (2026-10-06). The repo exists (2026-10-07) and #35 moved there as NewGraphEnvironment/stac_pointcloud_bc#1. CHM stays here as a third asset (#47).
 
 ### Data Tracking & Validation System
 
