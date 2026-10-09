@@ -558,7 +558,7 @@ directly when it matters — the deploy commit, not the run status:
 
 ```bash
 git fetch -q origin gh-pages && git log -1 --format='%s' FETCH_HEAD
-# "Deploying to gh-pages from @ owner/repo@<sha> 🚀"  <- is <sha> your HEAD?
+# "Deploying to gh-pages from @ owner/repo@<sha> 🚀"  <- the last NON-BOT commit? A bot commit never deploys
 ```
 
 GitHub can create a workflow run minutes after the push that triggered it, and
@@ -583,6 +583,8 @@ exists. The remedy is detection: check the deploy provenance, and re-dispatch
 commit changed nothing the site publishes — confirm via `.Rbuildignore` / `_pkgdown.yml`
 rather than assuming.
 
+*2 lines of evidence for this rule are in `conventions/ci-monitoring.md`, which `/code-check` reads in full.*
+
 ## Don't push to the default branch between a merge and its CI settling
 
 The r-lib templates set `concurrency` with `cancel-in-progress: true`, so a second push
@@ -603,7 +605,7 @@ green on their own SHA. Holding it cost about three minutes.
 
 Where a push has already gone out and cancelled something, `/gh-pr-merge` step 10 has the
 reading: `cancelled`/`skipped` is `⊘ superseded`, not `✗ failed`, and the thing to confirm
-is that the **newer** SHA's run passed. Do not re-dispatch the cancelled one.
+is that the newest **non-bot** SHA's run passed. Do not re-dispatch the cancelled one.
 
 ## Don't use `gh run watch` to wait
 
@@ -639,6 +641,16 @@ gh run view <id> --log-failed | grep -iE 'error|fatal' | head
 If it died in dependency setup, rerun once. If it dies the same way again it is the
 upstream CDN, and the honest move is to say so and stop — not to keep spending runs on
 something no change in the repo can fix.
+
+## A citation run failing "fetch first" beside a green twin lost a push race
+Before reading a red `Update CITATION.cff` as a broken release, find a green run of it on the same or a later SHA (not earlier), then confirm `git show origin/main:CITATION.cff` carries the released version and date.
+
+*5 lines of evidence for this rule are in `conventions/ci-monitoring.md`, which `/code-check` reads in full.*
+
+## A hung setup step holds the concurrency group for six hours
+A run `in_progress` long past its usual duration, with a newer run of it `pending` behind, is a hang: confirm no step moved (`gh run view <id> --json jobs`), then `gh run cancel <id>`; the lasting fix is `timeout-minutes:`.
+
+*4 lines of evidence for this rule are in `conventions/ci-monitoring.md`, which `/code-check` reads in full.*
 
 ## A job-level `concurrency` group must vary with the matrix, or the jobs cancel each other
 
@@ -691,6 +703,11 @@ Before planning to re-run a workflow on a feature branch, check how it is trigge
 Key a CI waiter on the SHA you pushed, never on the default branch's tip: a bot commit made with `GITHUB_TOKEN` (an `update-citation-cff` auto-commit, a docs regen) lands on top of yours and, by GitHub's design, triggers no workflow run, so a loop waiting for runs on the tip waits forever.
 
 The tip moves seconds after a release push, which is exactly when a waiter is started. The bot commit also needs no check of its own when it only touches a file the site does not publish; confirm the deploy provenance instead (the `gh-pages` subject names the SHA that was built).
+
+*1 line of evidence for this rule is in `conventions/ci-monitoring.md`, which `/code-check` reads in full.*
+
+## A pending run cancelled by a `concurrency` group runs no steps, so its failure alarm never fires
+With `cancel-in-progress: false`, GitHub keeps one running and one pending run per group, and a newer run cancels the pending one before its job starts. An `if: failure() || cancelled()` alarm step is part of that job, so it never runs and the displaced run disappears silently. Count on the next scheduled run to pick the work up, or dispatch it by hand. Do not write that the alarm covers it.
 
 *1 line of evidence for this rule is in `conventions/ci-monitoring.md`, which `/code-check` reads in full.*
 
@@ -770,6 +787,9 @@ A package built from a `git worktree` ships `.git` (a file holding the developer
 
 ### A database driver's value is not a base R type — and it fails twice
 A column fetched through DBI does not arrive as the base type its SQL type suggests.
+
+### A value compared as `::text` in SQL has PostgreSQL's spelling, not R's
+Write native types from R and cast once in SQL.
 
 ### arrow dplyr backend: no grouped slice — bridge to duckdb
 - arrow's dplyr backend errors on grouped `slice_max`/`slice_min` (`arrow_not_supported("Slicing grouped data")`).
@@ -972,6 +992,33 @@ Run `LOAD icu` on the connection before any query that needs it (`epoch()`, `yea
 ### `fs::path()` collapses the `//` after a URL scheme, so it cannot build URLs
 Join a URL with `paste(base, key, sep = "/")` or `file.path()`, never `fs::path()`: `fs::path("https://x.ca/b", "k.tif")` is `"https:/x.ca/b/k.tif"`, because fs normalises the doubled separator, and the result is not a valid URL.
 
+### R's default curl user-agent fails on canada.ca, and the error names HTTP/2, not the agent
+Set a user-agent on every R fetch of a `canada.ca` page, because R's default fails there with an HTTP/2 error that never mentions the agent.
+
+### `climr::downscale()` returns its reference-period row even with `return_refperiod = FALSE`
+Keep only the observed series (`DATASET == "<obs_ts_dataset>"`, four-digit `PERIOD`) before averaging climr output over years.
+
+### A `function(...)` mock hides arguments the real callee no longer accepts
+Stubbing a callee with `function(...) invisible("mock")` accepts any argument name, so a wrapper still passing a parameter the callee dropped stays green while every real call errors with `unused argument`.
+
+### `expect_message(regexp = "...$")` never matches, because `message()` appends `"\n"`
+The condition message carries the trailing newline, so an end anchor fails and the test reports "did not throw a message" even though the message printed.
+
+### `load_all()` refuses an installed dependency below the `Imports:` floor, so measure old-against-new from a frozen worktree
+Run the old-dependency side of a before/after comparison from a `git worktree` of the pre-bump commit, and install the new version only after those runs finish.
+
+### `tryCatch()` nests its handlers, so a `stop()` in one is caught by a later one
+Record the condition in the handler (`hit <<- TRUE`) and raise after `tryCatch()` returns.
+
+### `fs::file_move()` onto an existing directory nests the source inside it
+Move a directory into place with `base::file.rename()` and check its return value, which is FALSE where the target is a non-empty directory, a symlink or a file.
+
+### Base `file.info()` has no inode column, so `file.info(x)$ino` is NULL and any comparison of it passes
+Read an inode with `fs::file_info(x)$inode`: base `file.info()` returns size, mode, times and owners only, so `identical(file.info(a)$ino, file.info(b)$ino)` is `identical(NULL, NULL)`, TRUE for any two files.
+
+### `cffr::cff_create()` writes a CRAN DOI for any package that shares a name with a CRAN package
+Drop the generated DOI (`x$doi <- NULL`) unless it is your own, and supply your own through `keys = list(doi = ...)`, because cffr assigns `10.32614/CRAN.package.<name>` whenever CRAN carries a package of that name, whatever your package is.
+
 # Code Check — Shell
 Tool-level traps in bash, sed, git and `gh`, and in the host toolchain those commands depend on.
 
@@ -1000,6 +1047,9 @@ Use three-dot `git diff a...b` for what a branch changed; two-dot compares the t
 
 ### Heredoc precedence in pipelines
 - `cmd1 | cmd2 <<EOF` — the heredoc binds to `cmd2` (the rightmost simple command).
+
+### A heredoc whose body contains its own delimiter ends early, and the rest runs as shell
+Give an outer heredoc a delimiter its body cannot contain, or run the script from a file.
 
 ### Paths
 - Hardcoded absolute paths (`/Users/airvine/...`) break for other users
@@ -1117,6 +1167,30 @@ Supply a default ssh command only when `GIT_SSH_COMMAND`, `core.sshCommand` and 
 
 ### `conda run` captures its child's output, so a pipe gets nothing
 `conda run -n env cmd` buffers the child's stdout and re-emits it, and that re-emission does not reach a pipe.
+
+### `exit` inside a loop condition ends the shell, not the test
+Count instead: `while :; do left=0; for i in $ids; do done_yet "$i" || left=$((left+1)); done; [ "$left" -eq 0 ] && break; sleep 90; done`.
+
+### A failed `cd` lets every later command run in the directory you were already in
+Write `cd "$D" || exit 1` (or `cd "$D" && …`), never `cd "$D"; …`: without the guard, a missing directory prints one error and the rest of the line runs wherever the shell stood, including its file writes.
+
+### macOS `/bin/bash` 3.2 quote-matches a heredoc inside `$( )`, so an apostrophe in the body is a syntax error
+Pass multi-line text through a file (`--body-file`, `-F`) rather than `"$(cat <<'EOF' … EOF)"`: bash 3.2 scans the command substitution for balanced quotes before it sees the heredoc, so `it's` in a quoted heredoc body fails with ``unexpected EOF while looking for matching `''``, while …`
+
+### A skill's bash blocks run as separate calls, so each block must check the state the last one left
+Open every block after the first with guards on what it inherits: re-set its variables, confirm the path is the expected tree, and refuse edits or commits the previous block did not check.
+
+### An apostrophe in a `${VAR:?message}` inside double quotes is an unterminated quote
+Keep apostrophes out of the message of a `"${VAR:?…}"` guard (`the REL: line of step 5`, not `step 5's REL: line`): bash 3.2 and 5 both read the `'` as opening a quote, and the whole script fails to parse before the guard can run.
+
+### A `git push` can land and still report failure, so confirm the ref rather than the exit code
+After a rejected push, read the remote ref before concluding anything: `git fetch -q origin && git merge-base --is-ancestor HEAD origin/<branch>`.
+
+### Over Tailscale SSH to a Mac, `ssh` exits 0 whatever the remote command returned
+Never branch on the exit status of `ssh <mac-host> cmd` when the host serves Tailscale SSH: test what the command prints (`ssh host 'test -e f && echo YES'` compared to `YES`), or move the loop to the remote side and gate on its output.
+
+### awk `==` compares version strings as numbers, so `1.1` matches `1.10`
+Compare a field to a version as strings, `($i "") == (v "")`: awk gives `split()` fields, `$i` and `-v` values string-or-number status, so when both sides look numeric `==` compares numbers, and `1.1 == 1.10` and `2.0 == 2` are true.
 
 # Code Check — Spatial
 terra, sf, bcdata, GDAL/OGR CLIs.
@@ -1268,7 +1342,7 @@ Do the hex swap in **one** helper and omit `<Icon><href>` entirely.
 It reports the verdict in text and returns success either way, so the exit status carries no information at all:
 
 ### `terra::rast()` on a SpatRaster returns an empty template, not a copy
-Pass a SpatRaster through as is (`if (inherits(x, "SpatRaster")) x else terra::rast(x)`): `rast(x)` on one builds a new raster with the same geometry and **no values**, so a function that normalises its input with `terra::rast()` silently receives an all-empty grid when handed an object rather …
+Pass a SpatRaster through as is (`if (inherits(x, "SpatRaster")) x else terra::rast(x)`): `rast(x)` on one returns a template with the same geometry and **no values**.
 
 ### `terra::rasterize(filename = , datatype = <integer>)` writes the background as 0, not NA
 Rasterise in memory and then `writeRaster(datatype = …)`: written directly through `filename` with an integer `datatype` (INT1U, INT2S), cells no polygon covers come out as 0, while the file's NoData is 255, so they read back as data (terra 1.9.46 and 1.9.50; rspatial/terra#2195).
@@ -1298,7 +1372,7 @@ Read with `promote_to_multi = FALSE` whenever a layer will be written back.
 Run it on the invalid rows only (`!st_is_valid(x)`), or keep the original geometry and use the made-valid copy just for the computation.
 
 ### terra: `unique()` and `freq()` on a factor return its labels, not its codes
-Read a factor raster's codes from a copy with its levels stripped (`levels(y) <- NULL`, or `set.cats(y, layer = 1, value = NULL)` on a copy you own), never from `terra::unique(x)[, 1]` or `terra::freq(x)$value`: on a factor both return the active category's labels, so matching …
+Read a factor raster's codes from a copy with its levels stripped (`levels(y) <- NULL`), never from `terra::unique(x)[, 1]` or `terra::freq(x)$value`, which on a factor return the active category's labels.
 
 ### A GDAL failure partway through `sf::st_read()` returns the rows read so far, with only a warning
 Treat any warning during a read whose completeness matters as a failed read: wrap it in `withCallingHandlers(st_read(...), warning = function(w) stop(...))`, retry, then stop.
@@ -1319,7 +1393,31 @@ Hold any raw WFS read to the server's own count.
 To tell a throttle from any other bcdata failure, record the status off the request itself (wrap `crul:::crul_fetch`), not from the message.
 
 ### sf and terra can link different GDALs, so a probe through one says nothing about the other
-Check `sf::sf_extSoftVersion()[["GDAL"]]` and `terra::gdal()` before concluding that "GDAL" cannot read something: one R session can hold two GDALs (a CRAN binary of sf bundles its own, terra built against Homebrew links another), and a driver or codec missing from one may be present in the …
+Check `sf::sf_extSoftVersion()[["GDAL"]]` and `terra::gdal()` before concluding that "GDAL" cannot read something: one R session can hold two GDALs, and a driver or codec missing from one may be present in the other.
+
+### `atan2(0, 0)` is 0, so two points at one place have a bearing of due north
+Treat a zero-length step as having no heading: test the step length before taking its azimuth, and return `NA` rather than a bearing when it is 0, because `atan2(0, 0)` returns 0 with no warning, and that reads as north.
+
+### gdalwarp writes INTO an existing destination and keeps its grid
+Delete the output before re-warping to the same path (`unlink(out)` before `sf::gdal_utils("warp", ...)`, or pass `-overwrite`).
+
+### GDAL caches a failed `/vsicurl/` open, so an in-process retry sends no request
+Before retrying a `/vsicurl/` read in the same process, set `CPL_VSIL_CURL_NON_CACHED` to the URL's prefix.
+
+### THREDDS NCSS returns one time step unless the request says `temporal=all`
+Add `&temporal=all` (or an explicit `time_start`/`time_end`) to every NetCDF Subset Service grid request: without it NCSS answers with a single time step (the one nearest "now"), a valid NetCDF that passes a signature check, so assert the layer count after reading.
+
+### BC's water rights licence view repeats a row per licensee, so deduplicate before summing quantities
+Keep one row per licence, purpose, point of diversion, `QUANTITY_FLAG` and units before summing `QUANTITY` from `WHSE_WATER_MANAGEMENT.WLS_WATER_RIGHTS_LICENCES_SV`: the view carries a row per licensee, identical but for `OBJECTID` and `WLS_WRL_SYSID`.
+
+### QGIS cannot draw Esri Wayback, and a Wayback release date is not a capture date
+Fetch Wayback imagery with GDAL or curl into a local raster, choosing the release by its **capture** date (from the release's `metadataLayerUrl`), never by its release date.
+
+### A VRT composites over a source's mask band, so overlapping chips must be clipped with nodata
+Clip overlapping rasters bound for one VRT with a nodata value, not a mask band: a VRT honours a source's nodata when it composites and ignores its mask, so the source listed last overwrites its neighbour.
+
+### Test HTTP range support by a 206, not by `Accept-Ranges`
+Trust a `Range` GET's `206`, not a HEAD's `Accept-Ranges`, and refuse a `200` (the whole object).
 
 # Code Check Conventions
 Structured checklist for reviewing diffs before commit.
@@ -1458,7 +1556,7 @@ For non-trivial issue-driven work, follow this checklist. Each step exists for a
 2. **Write robust tests first** — failing tests that reproduce the issue or document the new behavior. Tests are the contract; they fail until the work makes them pass.
 3. **Name with intent** — functions, parameters, internal helpers carry the naming style of the package they live in. Look at existing exports as the guide; consistency over cleverness. For files rather than functions — shell scripts and operational R scripts under `scripts/` or `data-raw/` — the standard is the `noun_verb-detail` pattern in `newgraph.md`, noun first.
 4. **Examples that run** — every exported function gets a runnable `@examples` block. Pkgdown renders them; CI executes them. An example that doesn't run is documentation rot.
-5. **Code-check before each commit** — `/code-check` on staged diff. Catches what tests miss: edge cases, hard-coded paths, unguarded variables, security issues.
+5. **Code-check before it merges** — `/code-check` on the staged diff before each commit, or `/code-check branch` once over the branch before the PR ("When to Skip" below). Catches what tests miss: edge cases, hard-coded paths, unguarded variables, security issues.
 6. **Atomic commits** — each commit bundles code change + checkbox flip in `task_plan.md`. The diff and the progress live in the same commit; `git log -- planning/` tells the full story.
 7. **`/planning-archive` when complete** — moves PWF to `archive/YYYY-MM-issue-N-slug/`, creates a fresh `active/`. Then `/gh-pr-push` opens the PR; `/gh-pr-merge` handles the release bookkeeping.
 
@@ -1548,13 +1646,42 @@ canonical files and updates the prose restatements it finds, reporting each.
 
 ## When to Skip
 
-For one-line typo fixes, version-bump-only PRs, or trivial documentation edits, the full workflow is overhead. Use judgment. The threshold is roughly: **multi-step issue, multi-file change, or anything that requires scoping** → use the workflow.
+The skip covers the **workflow**, never the **review**. Two questions, answered separately:
+
+- **PWF, branch, archive: decided by size.** For one-line fixes, version-bump-only PRs, or
+  small documentation edits, the scaffolding is overhead. Use judgment. The threshold is
+  roughly: **multi-step issue, multi-file change, or anything that requires scoping** →
+  use the workflow.
+- **`/code-check`: not decided by size.** Every change to something that runs or is
+  loaded as instructions (code, a script, a skill, a convention, config) is reviewed
+  before it merges, however short it is. For a lone commit that means before the commit.
+  On a PWF branch it means once over the branch's diff (`/code-check branch`), with the
+  same three-round floor. Size does not predict whether a review finds something; where
+  the change lands does, and a one-line edit to something every repo loads is still a
+  one-line edit to something every repo loads.
+
+Three things are exempt, each for a stated reason:
+
+- **Whitespace, and spelling inside a single word.** Changing a word changes what a rule
+  says, and soul#214's wrong claims each read correctly on their own.
+- **Commits a skill writes itself and gates mechanically**: `/gh-pr-merge`'s release
+  bookkeeping, CLAUDE.md syncs, `CITATION.cff` refreshes.
+- **Commits from the skills built to run unattended**: `/compact-prep`'s capture commit
+  of the working tree and its convention appends, and `/claude-memory-audit`'s writes to
+  CLAUDE.md and `research/`. They are exempt for now, not reviewed, and a capture commit
+  can carry code. Whether they should get review is soul#359.
+
+The review is the cheap half. Scaffolding costs a plan, a branch and an archive; a review
+costs a few reviewer agents, and its three-round floor stays, because small edits are
+exactly where its findings have come from.
+
+*7 lines of evidence for this rule are in `conventions/feature-workflow.md`, which `/code-check` reads in full.*
 
 ## Skills That Slot In
 
 - `/planning-init <N>` — start
 - `/planning-update` — sync checkboxes mid-session
-- `/code-check` — before every commit
+- `/code-check` — before each commit, or once over the branch (`/code-check branch`)
 - `/planning-archive` — when issue closes
 - `/gh-pr-push` — open the PR
 - `/gh-pr-merge` — merge with release bookkeeping
@@ -1699,7 +1826,11 @@ number or it does not get made.
 
 The same rule covers process state. `ps` and task-status listings have both been
 observed wrong; check the artifact (an output file's size, its mtime, the
-service's own API) rather than the wrapper.
+service's own API) rather than the wrapper — and check that the artifact is the
+file, not a link to it. A subagent's `tasks/<id>.output` is a **symlink**: `ls -l` and
+`stat` report the link, whose size is the length of the path it points to and whose
+mtime is the spawn time, so it looks frozen while the transcript behind it grows. Use
+`ls -lL` (§6, "Don't trust status").
 
 ### The same blind spot picks the wrong waiting tool
 
@@ -1716,13 +1847,34 @@ Pick the instrument by how many answers you need:
 
 | you need | use |
 |---|---|
-| one notification when a condition becomes true | `Bash(run_in_background)` with an `until` loop that exits |
+| one notification when a condition becomes true | `Bash(run_in_background)` with an `until` loop that exits, its probe local or the whole loop on the remote host |
 | one per state change, ending on its own | `Monitor` with a command that emits and then exits |
 | a value you must have before the next step | a **foreground** call, so the blocking is explicit |
 | a long job that notifies when it exits | `Bash(run_in_background)` with the command as plain foreground text: no `&`, no `nohup` |
 
 A repeated `sleep N; grep` is right in none of them. **Tell: if you are about to
 spawn a second waiter for the same thing, the first one was the wrong shape.**
+
+**An `until` waiter is only as good as the exit status its probe reads, and `ssh` to
+a Mac on the tailnet does not carry one.** Tailscale SSH runs the remote command under
+macOS `/usr/bin/login`, which waits for the command and then exits 0 whatever it returned, so
+`ssh host 'grep -q DONE run.log'` succeeds whether `DONE` is there or not, and
+`until ssh host '…'; do sleep 60; done` ends at its first probe and reports success. Put
+the loop on the remote side and gate on what it prints —
+`ssh -o ServerAliveInterval=30 host 'until test -e /tmp/run.done; do sleep 60; done; echo FOUND'`
+— or test a probe's output, never its status (`code-check-shell.md`, "Over Tailscale SSH
+to a Mac, `ssh` exits 0"). The local loop itself is sound: its sleeps run 60 s apart and it
+outlives the Bash tool's 10-minute timeout.
+
+**And a waiter's notification is a wrapper's exit too.** When it fires, re-read the
+condition and the job's own state in a foreground call before reporting the job done. The
+marker must be something only this run's end can produce: clear it at launch, or check it
+is newer than a stamp touched at launch (`code-check.md`, "A wrapper's exit is not the
+work"). A string grepped out of a log is weaker than either, because a traced script writes
+the marker into the log when it reads the line that will print it, and an `EXIT` trap
+prints it on failure.
+
+*8 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
 
 A `Monitor` filter must also match the failure states, not just the success
 one — silence looks identical to "still running", so a watcher that greps only
@@ -1887,10 +2039,38 @@ code instead of a plan.
 
 ### Don't trust status
 
-**Never report an agent as "still running" without evidence.** Agent status and
-`TaskList` have both been observed to be wrong — `TaskList` reported "No tasks
-found" for an agent that was alive and later replied. Check the output file's
-mtime before claiming progress, and say what you checked.
+**Never report an agent as stalled, or as still working, on status alone.** Agent
+status and `TaskList` have both been observed to be wrong — `TaskList` reported "No
+tasks found" for an agent that was alive and later replied. The evidence that does
+exist is easy to misread: a subagent's `tasks/<id>.output` is a symlink, and `ls -l`
+reports the link — a size equal to the length of its target path, an mtime equal to
+the spawn time — so a working reviewer reads as frozen. A reviewer was called stalled
+"at 141 bytes" on exactly that, and returned minutes later with the best finding of
+its branch. `ls -lL` follows the link to the transcript, whose size grows with every
+step; never read the transcript itself, it overflows the context.
+
+Even a growing transcript shows activity, not that a report will arrive. So decide
+nothing on it; wait for the event, against a clock:
+
+- **Note the spawn time with `date -u`** (§5), and wait for the completion
+  notification, which is the event. Do not build a file waiter for a subagent
+  (`until [ -s review.md ]`): it fires on the first byte, and on whichever reviewer
+  writes a shared path first. Until the notification arrives, the true report is
+  "spawned at T, no notification yet", adding "transcript growing" only if `ls -lL`
+  showed it grow between two looks — never "stalled".
+- **Set a deadline and act only on its expiry.** For a `/code-check` round, 60 minutes
+  from the spawn. Rounds taking 30 to 43 minutes are on record, and every one of them
+  returned. You have no clock, so check expiry by subtracting the spawn time from
+  `date -u` at each wake. When there is nothing else to do, one backgrounded
+  `sleep <remaining>; echo DEADLINE` is the timer. A background Plan review has no
+  deadline, because the work does not wait on it (`planning.md`); one run
+  synchronously on purpose blocks in the open and needs none.
+- **Meanwhile, keep working, outside the diff.** The reviewer reads the files you
+  would be editing.
+- **A replacement gets a new findings path, and the original keeps its own.** The
+  original may still deliver, and it may deliver the best finding of the branch; read
+  whichever arrives, both if both do. A replacement is a spawn, so it counts toward the
+  bound above.
 
 **And never record a review as "Clean" on the strength of an idle notification.**
 From the parent's side an idle ping is indistinguishable from an agent that had
@@ -1901,8 +2081,12 @@ agents UNNAMED"). Passing `name` turns a spawn into a persistent teammate that i
 instead of completing; pass it only for a collaborator you will keep messaging, and
 shut it down when done. The rule that survives either spawn shape:
 the reviewer **writes its findings to a file and reports only the path**, and a
-missing or empty file means the round produced nothing and is re-run — never
-"Clean". `planning.md` carries the mechanics; `code-check/SKILL.md` applies them.
+missing or empty file **after the completion notification, or once the deadline above
+has passed,** means the round produced nothing and is re-run — never "Clean". Before
+either, a missing file is a round still in flight. `planning.md` carries the
+mechanics; `code-check/SKILL.md` applies them.
+
+*15 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
 
 ### Verify claims, in both directions
 
@@ -1943,6 +2127,17 @@ It breaks **Always Away** directly: an unattended run that stops for approval on
   predicted, and the one that blocks is the one you did not.
 - Diagnostic: if a run keeps stopping for approval, look at whether the loop sits
   inside or outside the process boundary before adding allowlist entries.
+
+### A subagent that must not know the answer must be a Plan or Explore type
+
+A `general-purpose` subagent carries the project's `CLAUDE.md`, and `Plan` and `Explore` do not, so a
+blind reader, a blind reviewer or any control that must not see prior results is spawned as `Plan` or
+`Explore`. Check it rather than trusting the brief: a canary of each type, given no tools and asked only
+whether its context mentions the term in question, settles it in seconds. Neither type can write, so take
+its output from the transcript by script, not by retyping, and audit the transcript's tool calls for reads
+outside what it was given.
+
+*4 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
 
 ---
 
@@ -2446,7 +2641,7 @@ Skip planning for single-file edits, quick fixes, or tasks with obvious next ste
 
    That mis-spawn is what produced the silent-delivery failures below, so check `name` before suspecting settings. Teammate mode (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` + `teammateMode`, merged globally from `soul/settings/defaults.json`) shapes what a *named* spawn becomes; it is not by itself why findings go missing, and an unnamed spawn delivers fine with it enabled.
 
-   **Get the findings into a file — but check who is doing the writing.** Message delivery has silently failed twice: one review arrived as idle notifications with no content, and one was routed to a different session on the user's phone, surfacing only because the user mentioned it. From this side an idle ping is indistinguishable from an agent that had nothing to say, so the loss is invisible. A file (`planning/active/review-<N>.md`) survives routing, survives the agent exiting, and is greppable later.
+   **Get the findings into a file — but check who is doing the writing.** Message delivery has silently failed twice: one review arrived as idle notifications with no content, and one was routed to a different session on the user's phone, surfacing only because the user mentioned it. From this side an idle ping is indistinguishable from an agent that had nothing to say, so the loss is invisible. A file (`planning/active/review-<N>.md`) survives routing, survives the agent exiting, and is greppable later. One path per **spawn**: a replacement gets its own, because the original may still deliver into the one it was given, and a missing file reads as a lost review only after the completion notification or the deadline in `karpathy.md` §6, "Don't trust status".
 
    **The `Plan` and `Explore` agent types have no Write tool, so they cannot write that file.** Both plan reviews on 2026-08-26 (gq#61, gq#40) were instructed to and were structurally unable to; one said so outright — *"I have no Write/Edit tools and am explicitly barred from creating files; an agent instruction can't lift that"* — and returned the full review as reply text instead. Both arrived intact, ~26 findings each. So:
 
@@ -2486,7 +2681,7 @@ Skip planning for single-file edits, quick fixes, or tasks with obvious next ste
 4. **Lock naming before the baseline** — If naming feedback surfaces during planning (legacy filename, inconsistency with an existing file family), fold the rename into the convention + task_plan BEFORE the baseline commit, not as a follow-up. Pre-baseline it's free; retrofitting after implementation cascades (soul#52: `build_exec_pdf.R` → `run_pagedown_exec_summary.R` locked in pre-baseline meant zero downstream rework).
 5. **Commit the plan** — After Plan-agent review + fixes. This is the baseline.
 6. **Work in atomic commits** — Each commit bundles code changes WITH checkbox updates in the planning files. The diff shows both what was done and the checkbox marking it done.
-7. **Code check before commit** — Run `/code-check` on staged diffs before committing. Don't mark a task done until the diff passes review.
+7. **Code check before commit** — Run `/code-check` on staged diffs before committing, or once over the branch with `/code-check branch` before the PR (`feature-workflow.md`, "When to Skip"). Per commit, don't mark a task done until its diff passes review. In branch mode each commit still carries its own checkbox flip (Atomic Commits, below), the Validation box for `/code-check` is the one that waits for the branch review, and its fixes land as follow-up commits.
 8. **Archive when complete** — Move `planning/active/` to `planning/archive/` via `/planning-archive`. Write a README.md in the archive directory with a one-paragraph outcome summary and closing commit/PR ref — future sessions scan these to catch up fast. Where the work produced measurements, that README is also the evidence record; see below.
 
 ## The archive README is the measurement record
