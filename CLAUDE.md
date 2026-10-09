@@ -1019,6 +1019,12 @@ Read an inode with `fs::file_info(x)$inode`: base `file.info()` returns size, mo
 ### `cffr::cff_create()` writes a CRAN DOI for any package that shares a name with a CRAN package
 Drop the generated DOI (`x$doi <- NULL`) unless it is your own, and supply your own through `keys = list(doi = ...)`, because cffr assigns `10.32614/CRAN.package.<name>` whenever CRAN carries a package of that name, whatever your package is.
 
+### A `{python}` chunk needs reticulate even with `eval = FALSE`
+Set `python.reticulate = FALSE` on a Python chunk that only displays code, or declare reticulate: knitr hands every non-R chunk to its engine whatever `eval` says, and the `python` engine loads reticulate, so a render fails on a machine without it.
+
+### `readBin(size = 4)` returns NA for exactly 2^31, so it cannot read an unsigned 32-bit field
+Sum the bytes as doubles (`sum(as.numeric(raw[i + 1:4]) * 256^(0:3))`) to read a u32 or u64 from a binary header: R has no unsigned or 64-bit integer, and a signed read goes negative above 2^31 and returns `NA_integer_` at 2^31 itself, R's NA bit pattern.
+
 # Code Check — Shell
 Tool-level traps in bash, sed, git and `gh`, and in the host toolchain those commands depend on.
 
@@ -1191,6 +1197,21 @@ Never branch on the exit status of `ssh <mac-host> cmd` when the host serves Tai
 
 ### awk `==` compares version strings as numbers, so `1.1` matches `1.10`
 Compare a field to a version as strings, `($i "") == (v "")`: awk gives `split()` fields, `$i` and `-v` values string-or-number status, so when both sides look numeric `==` compares numbers, and `1.1 == 1.10` and `2.0 == 2` are true.
+
+### `gh api` prints an HTTP error's body on stdout and exits 1, ignoring `--jq`
+Branch on `gh api`'s exit status before reading its output.
+
+### Put cleanup on the EXIT trap, not RETURN: a shell killed by a signal never runs RETURN
+Clean up temp files and worktrees in one EXIT handler that reads globals.
+
+### `git worktree prune` deregisters every missing worktree in the repo, not only yours
+Remove only your own registration: `git worktree remove --force "$wt"`, and on failure delete only its admin dir (`git -C "$wt" rev-parse --absolute-git-dir`, captured right after `worktree add`).
+
+### `git push --porcelain` ends with `Done` on a rejection, so `tail -1` names no reason
+Take the reason from the `!` row's third tab field, falling back to the last line that is not `Done`: `awk -F'\t' '$1 == "!" { print $3; exit }'`.
+
+### In a Perl replacement, `$1` followed by a digit is a different group
+Write `${1}` whenever the text after a backreference starts with a digit: Perl reads `$1281399` as group 1281399, which does not exist, so the replacement is empty and the run exits 0.
 
 # Code Check — Spatial
 terra, sf, bcdata, GDAL/OGR CLIs.
@@ -1418,6 +1439,15 @@ Clip overlapping rasters bound for one VRT with a nodata value, not a mask band:
 
 ### Test HTTP range support by a 206, not by `Accept-Ranges`
 Trust a `Range` GET's `206`, not a HEAD's `Accept-Ranges`, and refuse a `200` (the whole object).
+
+### A label slice that ends exactly on a grid edge drops that edge when the stored coordinates drift
+Pad a label slice by half a cell (`sel(latitude=slice(60.05, 47.95))`, not `slice(60, 48)`) and assert the cell count of the result before fetching anything.
+
+### `terra::cells(r, lines, touches = FALSE)` gives each line's own cells, so a shared cell can belong to both
+Take per-feature cell membership from `terra::cells(r, terra::vect(x), touches = FALSE)`, which returns an `ID` (row of `x`) and `cell` for exactly the cells `rasterize(touches = FALSE)` burns.
+
+### A Freshwater Atlas main stem's downstream end lies on the receiving river's centreline, not at the confluence
+Do not use the `DOWNSTREAM_ROUTE_MEASURE = 0` point of a tributary's main stem as its mouth on the ground: the atlas routes the stem through the receiving river's polygon to that river's centreline, so the point sits mid-river.
 
 # Code Check Conventions
 Structured checklist for reviewing diffs before commit.
@@ -1723,6 +1753,55 @@ something and the issue did not:
 Vigilance does not catch this, because the drift happens exactly when attention
 moves to the merge. `/gh-pr-merge` reconciles at that moment — see its step 3b.
 
+## Public-repo text describes the package, and points nowhere private
+
+In a public repo, issues, PRs, comments, commit messages, NEWS and roxygen describe
+behaviour **in terms of the package's own inputs and conditions**. Our machines, tunnels,
+ports, local env files and private repos stay out, with the two exceptions below. Check
+where the text lands before you draft it, naming the destination: with no argument, `gh`
+reports the repo the session stands in, which reads private when you file from a private
+repo into a public one.
+
+```bash
+gh repo view <owner>/<repo> --json nameWithOwner,visibility --jq '"\(.nameWithOwner): \(.visibility)"'
+```
+
+**Why:** a public package is a tool for anyone who installs it. "On our dev box the
+tunnel on port N is down" tells an outside reader nothing about the package, and it
+publishes our setup. A link to a private repo 404s for everyone outside the
+organisation, and it names internal work as it does so.
+
+**How to apply:**
+
+- **Restate an infrastructure-only repro as its general condition.** "Credentials are
+  set and the server is unreachable, so the test errors instead of skipping" is the bug.
+  Which host it happened on is not. Propose a general mechanism, such as gating on a
+  reachable connection, not a workaround for one setup.
+- **Host names, tunnels, ports and local env files** (`~/.Renviron` and its like) stay in
+  private repos or machine-local notes. A public repo's `planning/` is committed, so it
+  is public too. One exception: where the machine is the subject of a measurement, such
+  as a benchmark between hosts or a run log named for the host that produced it, its
+  label stays. The setup around it still goes.
+- **No links to private repos, and no `owner/private-repo#N`, not even as provenance.**
+  Describe the dependency in words ("work on a downstream estimate is in progress"), or
+  leave it out.
+- **One exception: the R&D tracking cross-reference.** `/gh-pr-push` writes it into PR
+  bodies from the repo's `CLAUDE.md`, which is where its repo and issue number are
+  configured. Both stay: they are deliberate claim tagging, and they are the only private
+  pointers this rule allows.
+- **A public repo's `CLAUDE.md` is contributor text, and it is still public.** Package-level
+  setup, such as which env vars the connection helper reads and how live tests skip, stays.
+  Our host topology does not: which machine runs what, cross-host ssh recipes, tunnel ports.
+  Write those as a generic example, or keep them in machine-local memory. The
+  conventions synced below the marker are generated, so fix a private reference in them
+  at their source, never in place.
+
+This is the public-repo half of the rule that keeps project and client identifiers out of
+public text. Both apply wherever the destination is public, whichever repo the session is
+running in.
+
+*7 lines of evidence for this rule are in `conventions/feature-workflow.md`, which `/code-check` reads in full.*
+
 ## Why This Exists
 
 We've hit snags repeatedly when half-doing this — branches that mix concerns, tests bolted on after, code-check skipped (and then a bug ships in the diff), examples that fail in pkgdown. Each step is small; the cumulative reliability gain is real. The convention is here so it becomes the default expectation, not a thing the user has to remind every session about.
@@ -1831,6 +1910,22 @@ file, not a link to it. A subagent's `tasks/<id>.output` is a **symlink**: `ls -
 `stat` report the link, whose size is the length of the path it points to and whose
 mtime is the spawn time, so it looks frozen while the transcript behind it grows. Use
 `ls -lL` (§6, "Don't trust status").
+
+**Measure in UTC; report clock times to the user in Vancouver time, and name the zone.**
+An ETA, a "started at" or a "finished at" addressed to the user reads `9:22 AM PDT`, not
+`16:22Z`. Add the UTC time only when the exact instant matters: `9:22 AM PDT (16:22 UTC)`.
+Convert with a tool, never by hand, because PDT and PST alternate. `TZ=America/Vancouver date`
+gives the current time. For a given instant, use this, which needs only Python 3.9 or later:
+
+```bash
+python3 -c "import sys,datetime as d,zoneinfo as z; print(d.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00')).astimezone(z.ZoneInfo('America/Vancouver')).strftime('%-I:%M %p %Z'))" 2026-09-28T16:22:00Z
+```
+
+Keep the trailing `Z`, because a time with no offset is read as machine-local. Durations need
+no zone. Timestamps in stored artifacts stay in UTC: commit messages, logs, filenames,
+`research/`, and PR and issue bodies.
+
+*8 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
 
 ### The same blind spot picks the wrong waiting tool
 
@@ -2056,7 +2151,7 @@ nothing on it; wait for the event, against a clock:
   notification, which is the event. Do not build a file waiter for a subagent
   (`until [ -s review.md ]`): it fires on the first byte, and on whichever reviewer
   writes a shared path first. Until the notification arrives, the true report is
-  "spawned at T, no notification yet", adding "transcript growing" only if `ls -lL`
+  "spawned at T (in Vancouver time, §5; subtract in UTC), no notification yet", adding "transcript growing" only if `ls -lL`
   showed it grow between two looks — never "stalled".
 - **Set a deadline and act only on its expiry.** For a `/code-check` round, 60 minutes
   from the spawn. Rounds taking 30 to 43 minutes are on record, and every one of them
@@ -2146,7 +2241,7 @@ outside what it was given.
 **Measure before you characterise. Presence is not provenance. "Unknowable" is a
 claim.**
 
-Six principles that all fail the same way: something *feels* established — because
+The principles below all fail the same way: something *feels* established — because
 it is visible, because it is present, because someone said so — and gets offered
 with the confidence of a measurement.
 
@@ -2174,6 +2269,18 @@ one.** A bespoke parser silently narrows the population it can see, and the resu
 looks like a measurement rather than a sample — worse than not measuring, because it
 carries a number. Measured 10 of 80 with a hand-written matcher; routed through the
 package's own resolver it was 14 of 117.
+
+### A share is not robust to an unresolved definition until you measure the spread
+
+When work is blocked on a definition nobody has settled, it is tempting to express the
+result as a share, a ratio or a ranking and call it "unaffected by whichever definition
+proves correct". That is a claim, and usually one command checks it: **compute the statistic under each candidate
+definition and report the spread beside it.** If the spread is material against the claim
+being made, the definition is a blocker, so schedule it first. A share is invariant to a
+filter only when the filter is uncorrelated with the thing being measured. Check that; do
+not assume it.
+
+*13 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
 
 ### Presence is not provenance
 
@@ -2209,7 +2316,7 @@ the thing the prose describes.
 Where a release note is written from the issue rather than from the artifact, its numbers
 have been copied rather than derived, and no reader is positioned to notice.
 
-Five habits:
+Habits:
 
 - **Derive every number in a release note from the artifact it describes**, at the moment you
   write it. Not from the issue, not from the last release's notes, not from memory.
@@ -2231,8 +2338,15 @@ Five habits:
 - **When you find one instance stale, grep for the sentence, not the file.** A claim that
   sits in three documents is not fixed by repairing the one that was quoted; the other two
   still read as authoritative.
+- **A summary sentence over a set is a failure site of its own, even when every number under
+  it is right.** It gets written from the memory of a correct measurement rather than
+  re-derived from it, and it errs toward the tidier claim. Treat `every`, `each`, `all N`,
+  `nothing else`, `roughly doubles` and `between X and Y` as words to check, not words to
+  write. Walk the per-member evidence before writing the quantifier. When review keeps finding
+  these, a list of every quantified or inherited claim in the document, each with a measured
+  verdict, ends the loop (`code-check.md`, "A guard's scope, escape hatches, and remedies").
 
-*39 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
+*61 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
 
 ### "It can only be answered by testing" is a claim with an author
 
@@ -2406,6 +2520,22 @@ and needs `gh api repos/<owner>/<repo>/contents/<path>?ref=<branch>`.
 
 *12 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
 
+#### The temporal version: what you build against may be about to change
+
+The spatial miss above builds a duplicate. The temporal miss builds something correct
+against an artifact another repo has already decided to restructure. **Before a design
+depends on a peer repo's artifact** (a guard comparing against its files, an extractor
+reading its output, automation keyed to its layout), **search the peer repo's open issues
+and PRs for work that changes it**, and read the body of each adjacent hit, not only its
+title. Unquoted words match anywhere; a quoted phrase must match exactly and misses rewordings.
+A full 100 rows means the list was cut: narrow the words.
+
+```bash
+gh search issues --include-prs --repo NewGraphEnvironment/<peer> --state open --limit 100 <artifact words>
+```
+
+*6 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
+
 ## 8. Decisions Up Front, Then Run
 
 **Ask at the plan gate. After approval, run to the PR. Before a plan exists, a question wants an answer.**
@@ -2505,6 +2635,20 @@ what we are willing to say in public is the user's.
 - Offer the draft in the reply, not as a fait accompli, and say plainly that nothing
   has been posted when the work obviously produced something postable.
 
+### Auto mode refuses a production write whatever the chat says
+
+Auto mode's classifier can refuse a command as a production write: a live store rewritten,
+a deploy, a publish. When it does, approval given in chat does not reach it, and in the
+recorded case a restart did not clear it either. On the **first** such refusal, say so once and offer two routes:
+the user leaves auto mode for that step (Shift+Tab) and approves the prompt, or runs the
+bare command themselves (below). Do not retry, and do not suggest a restart.
+
+It is not the secret-read clamp (`newgraph.md`, "Reading a secret clamps the rest of the
+session"), which names *earlier conversation content* and needs a restart. This refusal
+names a **category** of action, such as "Production Deploy".
+
+*4 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
+
 ### Hand the user bare commands
 
 When the user must run a command themselves — an interactive login, a
@@ -2521,20 +2665,32 @@ handed-over relative path created the file somewhere nobody was looking. Absolut
 directory it resolves against. So:
 
 - Emit the command plain. Applies to fenced blocks and inline commands alike.
-- **Absolute paths** in any handed-over command that touches files
-  (`~/Projects/repo/<repo>/…`), whichever form the user ends up running it in.
+- **Anchor every path**, whichever form the user ends up running it in: absolute
+  (`~/Projects/repo/<repo>/…`), or relative after `cd ~/Projects/repo/<repo> &&` on the
+  **same** line, so a failed `cd` runs nothing. The second form keeps a log target short.
 - Keep it paste-safe: prefer `grep`/`awk` over a nested `python3 -c "…"` inside a
   single-quoted remote command, so the quoting survives the trip.
+- **Keep each line short enough not to wrap**, one command per line: a wrapped line can
+  paste as two commands. Say what the first line of output must read (for example
+  `PUBLISH run`), so a dropped flag that enables a write shows before anything is written. A
+  dropped guard (`--dry-run`, a scope flag) writes at once, which is one more reason not to wrap.
 
-**A file under `~/Downloads` is unreadable by the agent process, and no retry helps.**
-`Read`, `cp` and `pdftotext` on `~/Downloads/*` all fail with `Operation not permitted`.
-It is macOS folder protection (TCC) on the process, not a Claude Code permission mode, so
-`/permissions` does not change it; Desktop and Documents behave the same. Do not retry
-variants — ask for **one** copy into the repo, with absolute source and destination paths,
-then continue from the copy. (Granting the terminal app Full Disk Access removes it on one
-machine; the fallback stays for the next machine.)
+**A file under `~/Downloads` may be unreadable by the agent process: macOS grants that access
+per app, per machine. Probe before assuming either way:**
 
-*4 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
+```bash
+ls ~/Downloads >/dev/null 2>&1 && echo readable || echo blocked
+```
+
+If it prints `readable`, read the file where it is. If it prints `blocked`, `Read`, `cp` and
+`pdftotext` on `~/Downloads/*` all fail with `Operation not permitted`. That block is macOS
+folder protection (TCC) on the process, not a Claude Code permission mode, so `/permissions`
+does not change it. Desktop and Documents are protected the same way but granted separately,
+so probe each one. Do not retry variants: ask for
+**one** copy into the repo, with absolute source and destination paths, then continue from
+the copy. Granting the terminal app Full Disk Access removes the block for that app.
+
+*10 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
 
 ### Link every issue and PR you name to the user
 
