@@ -143,6 +143,9 @@ Using the field of view in QGIS to filter results
 The same `images.a11s.one` STAC API serves several complementary BC
 collections:
 
+- [`stac_pointcloud_bc`](https://github.com/NewGraphEnvironment/stac_pointcloud_bc)
+  — the LidarBC point clouds (`.laz`) of the same deliveries, one item per
+  file (`stac-pointcloud-bc`)
 - [`stac_floodplains_bc`](https://github.com/NewGraphEnvironment/stac_floodplains_bc)
   — floodplain land-cover change (`stac-floodplains-bc`)
 - [`stac_airphoto_bc`](https://github.com/NewGraphEnvironment/stac_airphoto_bc)
