@@ -380,6 +380,16 @@ jobs:
         if: (inputs.backfill || inputs.rename) && steps.publish.outputs.count != '0'
         run: .venv/bin/stacs audit --config stacs.toml --dir "$STAC_OUTPUT_DIR"
 
+      # The #2/#55 fields, over exactly what the sync is about to upload, on
+      # every kind of run. stacs audit checks the collection id and asset keys
+      # only; this checks that every item carries lidarbc:delivery (albers
+      # aside), no unprefixed datetime_unknown, the extension URLs its fields
+      # need, and a bbox equal to its footprint's bounds. A writer that forgot
+      # one would otherwise publish a mixed catalogue nothing reports (#34).
+      - name: Audit item fields (footprint, lidarbc)
+        if: steps.publish.outputs.count != '0' && steps.publish.outputs.count != ''
+        run: .venv/bin/python scripts/item_fields.py audit --dir "$STAC_OUTPUT_DIR"
+
       # Runs when there are new items OR only rebuilt ones: a pairing-only month
       # produces item JSONs and no new URLs, and skipping the sync would leave
       # them on the runner.

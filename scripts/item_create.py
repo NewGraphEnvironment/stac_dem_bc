@@ -33,6 +33,7 @@ from item_fields import footprints_load, has_footprint, pystac_item_fields_apply
 from stac_utils import (
     ASSET_DEM,
     ASSET_DSM,
+    LIDARBC_DATETIME_UNKNOWN,
     geotiff_extract_metadata,
     item_create_from_cache,
     date_extract_from_path,
@@ -161,7 +162,7 @@ def process_item(path_item: str, collection_id: str, path_local: str,
         item.datetime = item_time
 
         if datetime_is_unknown:
-            item.properties["datetime_unknown"] = True
+            item.properties[LIDARBC_DATETIME_UNKNOWN] = True
 
         # Second asset: the digital surface model from the same flight.
         #

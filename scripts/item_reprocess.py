@@ -6,7 +6,7 @@ This script:
 1. Reads URLs from data/urls_invalid_items.txt
 2. Recreates STAC items with placeholder datetime for items missing dates
 3. Overwrites invalid JSON files with valid versions
-4. Flags items with datetime_unknown=True property
+4. Flags items with lidarbc:datetime_unknown=True
 
 Usage:
     python scripts/item_reprocess.py
@@ -25,6 +25,7 @@ from item_fields import footprints_load, pystac_item_fields_apply
 from stac_utils import (
     ASSET_DEM,
     ASSET_DSM,
+    LIDARBC_DATETIME_UNKNOWN,
     item_create_from_cache,
     date_extract_from_path,
     datetime_parse_item,
@@ -116,7 +117,7 @@ def process_item(path_item: str, collection, results_lookup,
         item.datetime = item_time
 
         if datetime_is_unknown:
-            item.properties["datetime_unknown"] = True
+            item.properties[LIDARBC_DATETIME_UNKNOWN] = True
 
         dsm_href = (dsm_lookup or {}).get(href_item)
         if dsm_href:

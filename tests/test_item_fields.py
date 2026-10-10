@@ -69,3 +69,97 @@ def test_no_footprint_row_builds_the_extent_and_says_so(tmp_path, tile):
     assert r is not None and r["footprint"] is False
     it = json.loads(open(out / f"{r['id']}.json").read())
     assert "file:checksum" not in it["assets"]["dem"]
+
+
+# =============================================================================
+# lidarbc: fields (#55, and the datetime_unknown rename)
+# =============================================================================
+
+import subprocess  # noqa: E402
+
+import item_fields  # noqa: E402
+import stac_utils  # noqa: E402
+
+REPO = os.path.join(os.path.dirname(__file__), "..")
+GDW = "https://nrs.objectstore.gov.bc.ca/gdwuts"
+
+
+def body(href, props=None):
+    return {"type": "Feature", "id": "x", "stac_extensions": [], "properties": props or {},
+            "geometry": None, "bbox": None, "links": [],
+            "assets": {"dem": {"href": href, "roles": ["data"]}}}
+
+
+@pytest.mark.parametrize("href,want", [
+    (f"{GDW}/092/092g/2016/dem/bc_092g036_1_1_1_x.tif", "092/092g/2016"),
+    (f"{GDW}/102/102i/2012/dem/bcts_102i059_4_3_4_x_2012_dem.tif", "102/102i/2012"),
+    (f"{GDW}/092/092l/2012/dem/bcts_092l032_2_1_3_x_2012_dem%20(2).tif", "092/092l/2012"),
+    (f"{GDW}/albers10k2m/_completed_dem/dem_055_154.tif", None),
+])
+def test_delivery_comes_from_the_href(href, want):
+    assert stac_utils.lidarbc_delivery(href) == want
+
+
+def test_delivery_counts_match_55():
+    urls = [u.strip() for u in open(os.path.join(REPO, "data", "urls_list.txt")) if u.strip()]
+    got = [stac_utils.lidarbc_delivery(u) for u in urls]
+    albers = sum(1 for u in urls if "/albers10k2m/" in u)
+    assert sum(g is None for g in got) == albers            # only albers omit it
+    assert all(g is not None for u, g in zip(urls, got) if "/albers10k2m/" not in u)
+    assert albers > 2000 and len(urls) - albers > 100_000   # #55: 2,245 and 100,171 at filing
+
+
+def test_apply_adds_delivery_and_renames_datetime_unknown():
+    it = body(f"{GDW}/092/092g/2016/dem/bc_092g036_1_1_1_x.tif")
+    assert item_fields.item_lidarbc_apply(it) == ["lidarbc"]
+    assert it["properties"]["lidarbc:delivery"] == "092/092g/2016"
+    assert stac_utils.LIDARBC_EXT in it["stac_extensions"]
+    assert item_fields.item_lidarbc_apply(it) == []           # idempotent
+
+    al = body(f"{GDW}/albers10k2m/_completed_dem/dem_055_154.tif", {"datetime_unknown": True})
+    item_fields.item_lidarbc_apply(al)
+    assert al["properties"] == {"lidarbc:datetime_unknown": True}
+    assert stac_utils.LIDARBC_EXT in al["stac_extensions"]
+
+
+def test_no_builder_writes_the_unprefixed_field():
+    for f in ("item_create.py", "item_reprocess.py"):
+        src = open(os.path.join(REPO, "scripts", f)).read()
+        assert '"datetime_unknown"' not in src, f
+
+
+def test_builders_write_the_prefixed_field(tmp_path, tile):
+    path, _, meta = tile
+    undated = str(tmp_path / "dem_055_154.tif")       # the albers shape: no date anywhere
+    import shutil
+    shutil.copy(path, undated)
+    out = tmp_path / "o"
+    out.mkdir()
+    r = item_create.process_item(undated, "stac-elevation-bc", str(out), {undated: meta}, {}, {})
+    it = json.loads(open(out / f"{r['id']}.json").read())
+    assert it["properties"]["lidarbc:datetime_unknown"] is True
+    assert "datetime_unknown" not in it["properties"]
+
+
+def test_audit_passes_a_good_set_and_names_each_fault(tmp_path):
+    good = body(f"{GDW}/092/092g/2016/dem/bc_092g036_1_1_1_x.tif")
+    item_fields.item_lidarbc_apply(good)
+    (tmp_path / "a.json").write_text(json.dumps(good))
+    assert item_fields.audit_dir(str(tmp_path))["faults"] == {}
+
+    bad = body(f"{GDW}/093/093l/2019/dem/bc_093l001_x.tif", {"datetime_unknown": True})
+    (tmp_path / "b.json").write_text(json.dumps(bad))
+    faults = item_fields.audit_dir(str(tmp_path))["faults"]
+    assert set(faults) == {"missing lidarbc:delivery", "unprefixed datetime_unknown"}
+
+
+def test_audit_cli_exits_nonzero_on_a_fault(tmp_path):
+    (tmp_path / "b.json").write_text(json.dumps(body(f"{GDW}/093/093l/2019/dem/x.tif")))
+    r = subprocess.run([sys.executable, os.path.join(REPO, "scripts", "item_fields.py"),
+                        "audit", "--dir", str(tmp_path)], capture_output=True, text=True)
+    assert r.returncode == 1, r.stdout + r.stderr
+
+
+def test_audit_refuses_an_empty_directory(tmp_path):
+    with pytest.raises(SystemExit):
+        item_fields.audit_dir(str(tmp_path))

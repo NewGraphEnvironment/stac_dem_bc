@@ -53,10 +53,10 @@ Review findings and dispositions: `review-1.md`.
 - [x] Tests for both item paths and the helper
 
 ## Phase 5: `lidarbc:` fields (#55 + rename) — schema waits on crate#23
-- [ ] Tests first: delivery from the href (`gdwuts/<block>/<sheet>/<year>/`), omitted for albers; counts re-derived from `data/urls_list.txt` (100,171 / 2,245); `datetime_unknown` written only as `lidarbc:datetime_unknown`
-- [ ] One helper writes `lidarbc:delivery`, `lidarbc:datetime_unknown` and the `lidarbc` schema URL, used by both item paths
-- [ ] Collection: one `related` link to stac-pointcloud-bc (`collection_patch.py`)
-- [ ] Field audit run on every staged set (each non-albers item has `lidarbc:delivery`; no unprefixed `datetime_unknown`; declared extension URLs present)
+- [x] Tests first: delivery from the href (`gdwuts/<block>/<sheet>/<year>/`), omitted for albers; counts re-derived from `data/urls_list.txt` (100,171 / 2,245); `datetime_unknown` written only as `lidarbc:datetime_unknown`
+- [x] One helper writes `lidarbc:delivery`, `lidarbc:datetime_unknown` and the `lidarbc` schema URL, used by both item paths
+- [x] Collection: one `related` link to stac-pointcloud-bc (`collection_patch.py`)
+- [x] Field audit run on every staged set (each non-albers item has `lidarbc:delivery`; no unprefixed `datetime_unknown`; declared extension URLs present)
 - [ ] Confirm crate#23's `lidarbc` schema answers 200 after redirects, `$id` equals its URL, and declares both fields
 
 ## Phase 6: Rewrite published items (one pass)
