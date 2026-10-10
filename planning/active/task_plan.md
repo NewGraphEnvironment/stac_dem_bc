@@ -64,10 +64,10 @@ and any client drawing `geometry`.
 
 ## Phase 1: Measure before building
 - [x] Throughput from this machine: 3.4 MB/s at 32 workers, ~15 MB/tile → full read ~1.4 TB / ~5 days (2026-10-10); full read rejected
-- [ ] Enumerate tile-name forms in `data/urls_list.txt` (BCGS 1:2,500, mapsheet, `albers10k2m`, other) with counts
+- [x] Enumerate tile-name forms in `data/urls_list.txt` (BCGS 1:2,500, mapsheet, `albers10k2m`, other) with counts
 - [ ] Count delivery-edge tiles; project bytes and hours to pixel-read them plus the COG overviews
-- [ ] Validate cell-from-id: on ~100 interior tiles, pixel footprint vs computed cell (IoU, max boundary offset in m); on ~50 edge tiles, share of the cell lacking data
-- [ ] Note undeclared −3.4e38 and all-nodata tiles in the sample
+- [x] Validate cell-from-id: on ~100 interior tiles, pixel footprint vs computed cell (IoU, max boundary offset in m); on ~50 edge tiles, share of the cell lacking data
+- [x] Note undeclared −3.4e38 and all-nodata tiles in the sample
 - [ ] Write `research/footprints.md`; escalate if the cell does not match interior tiles' data or edge reads do not fit a local run
 
 ## Phase 2: Footprint functions + tests (tests first)

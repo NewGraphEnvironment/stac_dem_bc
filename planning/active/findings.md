@@ -59,3 +59,39 @@ nothing to do here; #55 adds `lidarbc:delivery`, schema in crate#23.
 
 | Error | Resolution |
 |-------|------------|
+
+## Phase 1 measurements (2026-10-10)
+
+Scripts: scratch probes `cell_probe.py`, `edge_probe.py`, `pix_probe.py` (to be committed as
+`scripts/footprint_measure.py` with the functions they prototype).
+
+### Tile-name forms in `data/urls_list.txt` (102,416 URLs)
+| form | example | count | COG |
+|---|---|---|---|
+| BCGS 1:2,500 (`bc_`/`bcts_`, quadrants `_q_q_q_` or concatenated `qqq`) | `bc_094o003_2_2_2_xli1m_…`, `bc_093l031242_xl2m_…`, `bcts_092l005_1_1_2_x_2012_dem` | 97,723 | 2,915 True / 94,808 False |
+| `bc_<20k sheet>_` without quadrants | `bc_082e002_xli1m_utm11_2018` (1875x1454 px at 1 m: NOT a full 1:20k cell) | 2,448 | 1,494 True / 954 False |
+| `albers10k2m/_completed_dem/dem_NNN_NNN` | 5000x5000 px, 100 MB, EPSG:3005, strip, overviews to 157x157 | 2,245 | False |
+
+### BCGS cell from tile id — numbering verified
+NTS block NN-M: east lon = -(48+8*NN), south lat = 40+4*M; letters a–p 1°x2°, boustrophedon from
+the SE (a–d westward, e–h eastward, …). **1:20k numbers 001–100 count from the SW corner, eastward
+by rows going north; quadrants 1,2 are the SOUTH pair (1=SW, 2=SE, 3=NW, 4=NE).** First attempt
+assumed NW origin: every cell landed mirrored about the letter's mid-latitude (8/8 centres off by
+exactly that reflection). After the fix: 3,000 random cached-bounds tiles, **0** cells extend outside
+their raster's bounds; cell/raster-rectangle area median 0.925 (p5 0.894, p95 0.956).
+
+### Pixel footprint vs cell (144 random 1:2,500 tiles, 1 m, downloaded whole)
+- Full tiles: valid data covers the cell and extends ~22 m (Hausdorff) beyond it — fp/cell area
+  median 1.041 (1.038–1.044, n=112). Tiles overlap their neighbours by a constant buffer.
+- **Gaps inside the cell (>0.1% of cell lacking data): 21 of 112 interior tiles (19%), 8 of 32 edge
+  tiles (25%).** Interior gaps reach 36%, 48%, 48% of the cell. **The delivery-edge heuristic does not
+  predict gaps** — it would read 8 of the 29 gap tiles. Approved design premise falsified.
+- Undeclared -3.4e38: 0 of 144. All-nodata: 0 of 144.
+- Edge tiles (8-neighbour test): sheet+year grouping 26,305 (27%); year grouping 23,490 (24%).
+  484 tiles share a cell+year with another tile (re-deliveries / overlapping zones).
+
+### Throughput, revised
+The 2026-10-10 morning sample (2.1–3.4 MB/s, 9–17.5 MB/file) drew from ALL non-COG rows, so it
+included 100 MB albers tiles — that inflated the ~1.4 TB / ~5 day full-read estimate. 1:2,500 tiles
+alone: mean 5.9 MB (median 6.1). 120 tiles at 16 workers: 714 MB in 92 s = **7.8 MB/s** (22:46 UTC).
+Full read of the 94,808 non-COG 1:2,500 tiles: **559 GB ≈ 20 h at 7.8 MB/s (46 h at 3.4 MB/s)**.
