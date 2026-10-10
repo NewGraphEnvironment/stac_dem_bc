@@ -57,12 +57,12 @@ Review findings and dispositions: `review-1.md`.
 - [x] One helper writes `lidarbc:delivery`, `lidarbc:datetime_unknown` and the `lidarbc` schema URL, used by both item paths
 - [x] Collection: one `related` link to stac-pointcloud-bc (`collection_patch.py`)
 - [x] Field audit run on every staged set (each non-albers item has `lidarbc:delivery`; no unprefixed `datetime_unknown`; declared extension URLs present)
-- [ ] Confirm crate#23's `lidarbc` schema answers 200 after redirects, `$id` equals its URL, and declares both fields
+- [ ] Confirm crate#23's `lidarbc` schema answers 200 after redirects — **v1.0.0 lacks `lidarbc:datetime_unknown`; v1.1.0 is crate#26, open**, `$id` equals its URL, and declares both fields
 
 ## Phase 6: Rewrite published items (one pass)
-- [ ] `scripts/footprint_apply.py` on `item_rewrite` (manifest `data/footprint_done.txt`, own migration name): footprint fields, `lidarbc:` fields, rename; the 44 sourceless items get only the lidarbc edits, counted apart; tests mirroring `test_item_backfill.py`
-- [ ] `update.yml` dispatch input `footprint`, wired at every `backfill || rename` site incl. the conflicting-inputs guard and the manifest discard; full validation to scratch
-- [ ] Local dry run on a sample of published items: `stacs audit`, field audit, `item_validate.py`
+- [x] `scripts/footprint_apply.py` on `item_rewrite` (manifest `data/footprint_done.txt`, own migration name): footprint fields, `lidarbc:` fields, rename; the 44 sourceless items get only the lidarbc edits, counted apart; tests mirroring `test_item_backfill.py`
+- [x] `update.yml` dispatch input `footprint`, wired at every `backfill || rename` site incl. the conflicting-inputs guard and the manifest discard; full validation to scratch
+- [x] Local dry run on a sample of published items: `stacs audit`, field audit, `item_validate.py`
 - [ ] Before the dispatch: rebase on main, re-extract `urls_list − cache`, confirm cache covers every published URL
 - [ ] Publish (dispatch after merge, then `stacs register --mode drift` + `stacs verify`) — **only on the user's word**
 

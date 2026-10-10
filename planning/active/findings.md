@@ -133,3 +133,16 @@ Full read of the 94,808 non-COG 1:2,500 tiles: **559 GB ≈ 20 h at 7.8 MB/s (46
   88 m inside its cell, EPSG:26911). A mislabelled zone puts the raster hundreds of km away, so the
   guard now asks whether cell and raster intersect at all. Re-run: 50 download, 0 refused.
 - `--max-minutes 0` was read as "no budget" (truthiness); caught by its test; fixed.
+
+## Phase 5/6 (2026-10-10)
+
+- crate#23's `lidarbc` v1.0.0 deployed (PR crate#24 merged 23:10:35Z) **without**
+  `lidarbc:datetime_unknown` — the field was added to the issue minutes before. v1.0.0 rejects
+  undeclared `lidarbc:` keys (`patternProperties ^(?!lidarbc:)`, `additionalProperties: false`);
+  measured with pystac on the published albers item: `'lidarbc:datetime_unknown' does not match any
+  of the regexes`. Filed crate#26 (v1.1.0); `LIDARBC_EXT` points at v1.1.0, which must answer
+  before merge. crate#23 body corrected.
+- Rewrite rehearsal, 200 published items (082e/2017) into scratch: written 200, 0 errors, all from
+  footprints; `--verify 20` passed; `stacs audit` OK; field audit 0 faults; `item_validate` 200/200
+  valid (against v1.0.0 — no albers in the sample, which is why it passed).
+- Extraction rate in the full run: ~0.8 tiles/s in its first 8 min (rehearsal 1.2/s).

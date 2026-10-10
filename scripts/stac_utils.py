@@ -59,8 +59,9 @@ ASSET_DSM = "dsm"
 # Facts about LidarBC's objectstore paths, under a prefix that names what they
 # describe (stac_pointcloud_bc#12). The schema is crate's (crate#23); pystac
 # fetches it whenever an item is validated, so this URL must answer before any
-# item naming it is built.
-LIDARBC_EXT = "https://newgraphenvironment.github.io/crate/stac/lidarbc/v1.0.0/schema.json"
+# item naming it is built. v1.1.0, not v1.0.0: v1.0.0 rejects any lidarbc: key
+# it does not declare, and it shipped without lidarbc:datetime_unknown (crate#26).
+LIDARBC_EXT = "https://newgraphenvironment.github.io/crate/stac/lidarbc/v1.1.0/schema.json"
 LIDARBC_DELIVERY = "lidarbc:delivery"
 # Was the unprefixed `datetime_unknown` until #2; true when neither the file
 # name nor the path carries a date and `datetime` is a placeholder.

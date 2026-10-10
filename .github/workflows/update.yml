@@ -46,6 +46,16 @@ on:
           the second would fetch the published body over the first's output.
         type: boolean
         default: false
+      footprint:
+        description: >-
+          #2 ONE-TIME: rewrite every published item with its footprint
+          (geometry, bbox, proj:geometry), valid_percent and file checksum on
+          dem, and the lidarbc: fields (#55). Reads data/footprints.csv, which
+          must cover every listed URL. Rewrites ~102k item bodies in place; ids
+          and hrefs are unchanged. Safe to re-run -- already-rewritten items are
+          detected and not re-uploaded. Do NOT set with backfill or rename.
+        type: boolean
+        default: false
 
 permissions:
   id-token: write   # OIDC token for AWS
@@ -84,7 +94,7 @@ jobs:
           uv pip install --python .venv/bin/python \
             "pystac[validation]>=1.12.0" "pystac-client>=0.8.0" \
             "rio-stac>=0.11.0" "rasterio>=1.4.0" rio-cogeo shapely \
-            pandas requests tqdm deepdiff pytest \
+            pandas requests tqdm deepdiff pytest pyyaml \
             "stacs @ git+https://github.com/NewGraphEnvironment/stacs@v0.1.0"
           .venv/bin/python -c "import rasterio, rio_stac, pystac, jsonschema, stacs; print('imports OK, rasterio', rasterio.__version__, 'stacs', stacs.__version__)"
 
@@ -103,9 +113,11 @@ jobs:
       # A step that FAILS, not an `if:` that skips: `if: inputs.rename &&
       # !inputs.backfill` would silently do nothing and report success.
       - name: Refuse conflicting one-time dispatches
-        if: inputs.backfill && inputs.rename
+        if: >-
+          (inputs.backfill && inputs.rename) || (inputs.backfill && inputs.footprint)
+          || (inputs.rename && inputs.footprint)
         run: |
-          echo "::error title=Conflicting inputs::backfill and rename both set." \
+          echo "::error title=Conflicting inputs::more than one of backfill, rename, footprint set." \
                "They rewrite the same items into the same directory, so the" \
                "second would overwrite the first. Dispatch them separately."
           exit 1
@@ -152,7 +164,7 @@ jobs:
         run: .venv/bin/python scripts/dsm_pair.py
 
       - name: Fetch current collection from S3
-        if: steps.detect.outputs.new_urls == 'true' || inputs.backfill || inputs.rename
+        if: steps.detect.outputs.new_urls == 'true' || inputs.backfill || inputs.rename || inputs.footprint
         run: |
           mkdir -p "$STAC_OUTPUT_DIR"
           curl -fsSL https://stac-dem-bc.s3.amazonaws.com/collection.json \
@@ -163,7 +175,7 @@ jobs:
       # Idempotent: a no-op once the published collection carries the fields.
       - name: Patch collection metadata
         id: collpatch
-        if: steps.detect.outputs.new_urls == 'true' || inputs.backfill || inputs.rename
+        if: steps.detect.outputs.new_urls == 'true' || inputs.backfill || inputs.rename || inputs.footprint
         # --clear-version: this run is about to append items, which makes any
         # version the collection carries FALSE rather than merely stale. A wrong
         # version says "you already have this one"; absent says "go and check".
@@ -298,12 +310,25 @@ jobs:
             --errors-log data/migrate_errors.txt \
             --workers 16 --verify 40
 
+      # #2 ONE-TIME. After item_create and the rebuild, so items built or rebuilt
+      # this run (already carrying their footprint) are skipped as staged, and
+      # checked to be in the rewritten shape rather than trusted.
+      - name: Rewrite published items with footprints (dispatch only)
+        if: inputs.footprint
+        run: |
+          .venv/bin/python scripts/footprint_apply.py \
+            --collection "$STAC_OUTPUT_DIR/collection.json" \
+            --out-dir "$STAC_OUTPUT_DIR" \
+            --manifest data/footprint_done.txt \
+            --errors-log data/footprint_apply_errors.txt \
+            --workers 16 --verify 40
+
       # Separate from the shortfall count above: this one gates validate/sync and
       # must include rebuilt items, since a pairing-only month produces item
       # JSONs and no new URLs at all.
       - name: Count items to publish
         id: publish
-        if: steps.detect.outputs.changes == 'true' || inputs.backfill || inputs.rename
+        if: steps.detect.outputs.changes == 'true' || inputs.backfill || inputs.rename || inputs.footprint
         run: |
           TOTAL=$(find "$STAC_OUTPUT_DIR" -maxdepth 1 -type f -name "*.json" ! -name "collection.json" | wc -l | tr -d ' ')
           echo "items staged for publish: $TOTAL"
@@ -323,7 +348,8 @@ jobs:
       - name: Validate new items (gate)
         if: steps.publish.outputs.count != '0' && steps.publish.outputs.count != ''
         run: |
-          if [ "${{ inputs.backfill }}" = "true" ] || [ "${{ inputs.rename }}" = "true" ]; then
+          if [ "${{ inputs.backfill }}" = "true" ] || [ "${{ inputs.rename }}" = "true" ] \
+             || [ "${{ inputs.footprint }}" = "true" ]; then
             .venv/bin/python scripts/item_validate.py \
               --items-dir "$STAC_OUTPUT_DIR" \
               --output "$RUNNER_TEMP/validation_rewrite.csv"
@@ -358,7 +384,7 @@ jobs:
       # publishing. It now sees exactly what the sync is about to upload.
       - name: Audit newly created items (monthly)
         if: >-
-          !inputs.backfill && !inputs.rename
+          !inputs.backfill && !inputs.rename && !inputs.footprint
           && steps.publish.outputs.count != '0' && steps.publish.outputs.count != ''
         run: |
           .venv/bin/stacs audit --config stacs.toml --dir "$STAC_OUTPUT_DIR" \
@@ -377,7 +403,7 @@ jobs:
       #
       # An empty directory is a failure inside stacs audit, not a vacuous pass.
       - name: Audit staged items against the collection (rewrite runs)
-        if: (inputs.backfill || inputs.rename) && steps.publish.outputs.count != '0'
+        if: (inputs.backfill || inputs.rename || inputs.footprint) && steps.publish.outputs.count != '0'
         run: .venv/bin/stacs audit --config stacs.toml --dir "$STAC_OUTPUT_DIR"
 
       # The #2/#55 fields, over exactly what the sync is about to upload, on
@@ -423,11 +449,13 @@ jobs:
             data/backfill_errors.txt
             data/migrate_done.txt
             data/migrate_errors.txt
+            data/footprint_done.txt
+            data/footprint_apply_errors.txt
             logs/footprint_errors.txt
           if-no-files-found: ignore
 
       - name: Commit refreshed caches
-        if: always() && (steps.detect.outputs.changes == 'true' || inputs.backfill || inputs.rename)
+        if: always() && (steps.detect.outputs.changes == 'true' || inputs.backfill || inputs.rename || inputs.footprint)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -450,7 +478,7 @@ jobs:
           if [ "${{ steps.sync.outcome }}" != "success" ]; then
             echo "sync did not run (outcome: ${{ steps.sync.outcome }}) -" \
                  "discarding rewrite manifests so the work is redone, not skipped"
-            for f in data/migrate_done.txt data/backfill_done.txt; do
+            for f in data/migrate_done.txt data/backfill_done.txt data/footprint_done.txt; do
               # Unstage always; restore only a file git actually tracks.
               # Branching explicitly rather than suppressing stderr on a
               # mutating command: `git checkout --` destroys working-tree
