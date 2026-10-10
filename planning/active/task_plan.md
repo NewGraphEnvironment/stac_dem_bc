@@ -4,104 +4,70 @@ Currently our "footprints" are actually bounding boxes: every item's `geometry` 
 the raster extent, no-data included. We would prefer to exclude the nodata values. Folds in #55
 (`lidarbc:delivery`), whose "next full rebuild" is this issue's rewrite.
 
-## Context (from plan approval, 2026-10-10)
+## Context (plan approved 2026-10-10, revised the same day)
 
-Every item's `geometry` is `box(transform_bounds(raster extent))` — `scripts/stac_utils.py:338-347`
-(`item_create_from_cache`). So geometry == bbox, nodata included, and `/search?intersects=` returns
-tiles whose nodata an AOI falls in. Neighbouring tiles' boxes overlap.
+Every item's `geometry` is the raster extent box (`stac_utils.item_create_from_cache`), or for the
+~58k rio_stac-built items a reprojected extent quad. Neither excludes nodata, and neighbouring
+tiles overlap.
 
-Probes (read-only):
-- 2026-10-09: two populations. Small BCGS 1:2,500 tiles (`bc_094j064_4_1_2_…`): Float32, **strip
-  layout, no overviews**. Mapsheet tiles (`bc_082f037_…`): 338 MB **COGs with overviews**. Cache:
-  98,051 non-COG, 4,409 COG. Three small tiles were 98.9–99.4% valid: the raster is the UTM
-  rectangle around a lat/lon grid cell, so the nodata is mostly corner slivers.
-- 2026-10-10, throughput from this machine: 96 random small tiles, **2.1 MB/s at 8 workers, 3.4 MB/s
-  at 32**, mean file ~15 MB (9–17.5 per batch). GitHub serves this machine 7.2 MB/s on one stream,
-  so the cap is at least partly the objectstore. Full read of every small tile ≈ **1.4 TB ≈ 5 days**:
-  not workable, and a typical 8k-file month (~120 GB) would not fit the runner either.
+**Revision 2026-10-10 (Phase 1 + plan review 1).** The approved "grid cell + read edges" design
+was falsified: 19% of interior tiles and 25% of edge tiles have gaps inside their cell, so the edge
+test finds 8 of 29 (`findings.md`). The full-read cost had been overstated (albers tiles in the
+sample): 94,808 small tiles × 5.9 MB ≈ 560 GB ≈ 20 h at 7.8 MB/s, streamed (peak disk ~130 MB).
+User decisions, 2026-10-10:
+- **Read every tile once. Footprint = BCGS cell ∩ valid data** (non-BCGS tiles: valid data ∩
+  raster extent). Files with overviews are read at the coarsest overview; the rest downloaded whole.
+- **`file:checksum` (sha256 multihash) + `file:size` on the `dem` asset** of every downloaded tile.
+- **`raster:bands[0].statistics.valid_percent` on the `dem` asset.**
+- **`datetime_unknown` → `lidarbc:datetime_unknown`** (added to crate#23's `lidarbc` list).
+- Earlier: stage only, publish on the user's word; `proj:geometry` = footprint, `proj:bbox` stays
+  the raster extent; #55 (`lidarbc:delivery`) folded into the same rewrite.
+- Queryables are pgstac-side: NewGraphEnvironment/stacs#8, not this PR.
 
-**Design decided 2026-10-10: grid cell + read edges.** A small tile's footprint is its BCGS 1:2,500
-cell, computed from the tile id with no download. Pixels are read only where real gaps are likely:
-tiles at the edge of their delivery (a neighbouring cell is missing from the same mapsheet-year), and
-the mapsheet COGs at their coarsest overview. Accepted trade-off: a gap inside a cell whose
-neighbours are all delivered goes undetected. **No `file:checksum`** — it needs a full read
-(declined on cost, 2026-10-10).
-
-**Folded in: #55 (`lidarbc:delivery`), decided 2026-10-10.** #2's rewrite of all 102k items is the
-"next full rebuild" #55 waits for, so one rewrite and one re-registration carries both. Its schema is
-crate#23 (expected very soon); pystac fetches it at validation, so the #55 writer and the rewrite wait
-for it. No other renaming applies: published items carry only `datetime` + `proj:*`, no `nge:`
-fields (checked 2026-10-10). Footprints use standard fields only (`geometry`, `bbox`,
-`proj:geometry`); `method`/`valid_fraction` stay in the cache, never on items.
-
-Gate decisions: stage only, publish on the user's word; `proj:geometry` = footprint, `proj:bbox`
-stays the raster extent (needed with `proj:shape`/`proj:transform`).
-
-QGIS's STAC plugin draws `bbox`, so QGIS will look the same; the change shows in API spatial queries
-and any client drawing `geometry`.
-
-## Approach
-
-- `bcgs_cell_from_tile_id()`: parse NTS 1:250k + BCGS 1:20k number + 10k/5k/2.5k quadrant digits
-  → lon/lat cell polygon (NAD83 ≈ 4326; cell edges are parallels/meridians, straight in 4326).
-- Edge test: from `data/urls_list.txt` alone, a tile is an edge tile if any of its 8 neighbour cells
-  is absent from the same `<block>/<sheet>/<year>` delivery. Monotone month to month: a pixel-read
-  footprint stays true when neighbours arrive later.
-- `footprint_from_pixels()`: rasterio + shapely (no stactools). Mask = declared nodata AND clamp
-  −100..5000 (undeclared −3.4e38). Small tiles downloaded whole to a tempfile (strip layout);
-  COGs at coarsest overview. `features.shapes` → union → simplify ~2 px → `transform_geom` to 4326
-  (densified) → round 7 dp. Polygon or MultiPolygon; all-nodata refuses.
-- Item `bbox` = footprint bounds; `proj:geometry` = footprint reprojected to native CRS (densified).
-- Cache `data/footprints.csv` (`url, footprint_wkt` [4326], `method` = cell|pixels|overview,
-  `valid_fraction` [pixels/overview only]), written by `scripts/footprint_extract.py`, committed
-  like the other caches; monthly step before `item_create.py`.
-- Tiles whose names are not BCGS 1:2,500 (e.g. `albers10k2m`, other forms Phase 1 finds) go by
-  pixels/overview, or keep today's extent box if unreadable — counted, logged, never silent.
-- Published items: new caller of `scripts/item_rewrite.py` (`footprint_apply.py`), editing only
-  `geometry`, `bbox`, `proj:geometry` (where present) and adding `lidarbc:delivery` — rewrite, not
-  rebuild, as #31/#34.
-
+Review findings and dispositions: `review-1.md`.
 
 ## Phase 1: Measure before building
-- [x] Throughput from this machine: 3.4 MB/s at 32 workers, ~15 MB/tile → full read ~1.4 TB / ~5 days (2026-10-10); full read rejected
-- [x] Enumerate tile-name forms in `data/urls_list.txt` (BCGS 1:2,500, mapsheet, `albers10k2m`, other) with counts
-- [ ] Count delivery-edge tiles; project bytes and hours to pixel-read them plus the COG overviews
-- [x] Validate cell-from-id: on ~100 interior tiles, pixel footprint vs computed cell (IoU, max boundary offset in m); on ~50 edge tiles, share of the cell lacking data
-- [x] Note undeclared −3.4e38 and all-nodata tiles in the sample
-- [ ] Write `research/footprints.md`; escalate if the cell does not match interior tiles' data or edge reads do not fit a local run
+- [x] Throughput from this machine (morning sample, later corrected for albers contamination)
+- [x] Enumerate tile-name forms in `data/urls_list.txt` with counts
+- [x] Validate cell-from-id against cached bounds (3,000) and pixels (144); numbering is SW-origin
+- [x] Note undeclared −3.4e38 and all-nodata tiles in the sample (0 and 0 of 144)
+- [x] Escalate: edge heuristic falsified → user chose full read (2026-10-10)
+- [ ] `research/footprints.md`: what is known (numbering, overlap pad, gap rates, cost), with producers
 
 ## Phase 2: Footprint functions + tests (tests first)
-- [ ] `tests/test_footprint.py`: cell-from-id against hand-checked cells (incl. Phase 1 measured tiles); unparseable id refuses; edge detection on a synthetic delivery; synthetic rasters (MemoryFile) — full valid, nodata corner, undeclared −3.4e38, two islands → MultiPolygon, all-nodata refuses
-- [ ] `bcgs_cell_from_tile_id()`, `tile_is_delivery_edge()`, `footprint_from_pixels()` in `stac_utils.py`
-- [ ] bbox ⊇ geometry and 4326 output asserted; restore-the-bug check that each guard fires
+- [ ] `tests/test_footprint.py`: cell from every id form (underscore, concatenated, `bcts_`), non-BCGS ids → None; full-population check that every cached-bounds BCGS tile's cell lies inside its raster bounds (zero I/O)
+- [ ] Synthetic rasters: full cell → "cell" (no WKT); corner gap; two islands → MultiPolygon; specks dropped and small holes filled; undeclared −3.4e38 and out-of-range values invalid; all-nodata refuses
+- [ ] Acceptance asserted in tests: valid, CCW exterior rings, vertex cap, within cell (BCGS) or raster extent, bbox == bounds of the rounded geometry, data outside the footprint ≤ tolerance (outward bias)
+- [ ] `scripts/footprint.py`: `bcgs_cell()`, `footprint_from_mask()`, `footprint_read()` (download-whole or coarsest overview by overview presence, sha256 + size when downloaded, `CPL_VSIL_CURL_NON_CACHED` on retry)
+- [ ] Restore-the-bug check that each guard fires
 
-## Phase 3: Cache + extraction script
-- [ ] `scripts/footprint_extract.py` (`--incremental`, `--urls-file`, `--limit`): cell for interior BCGS tiles, pixels for edges/others, overview for COGs; writes `data/footprints.csv` atomically, resumable, errors to a file + rate gate (`item_rewrite.error_tolerable`)
-- [ ] `https://` guard on the new cache (`url_scheme_check`) and `tests/test_urls_scheme.py` coverage
-- [ ] Full extraction run locally with logging (`logs/`), cache committed; counts by method recorded
+## Phase 3: Cache + extraction
+- [ ] `scripts/footprint_extract.py`: `--incremental` = `urls_list − cache`, `--urls-file`, `--limit`, `--workers`, `--max-minutes`, `--min-free-gb`; streamed temp files in one dir cleared at start/exit; rows appended as they finish (resumable); errors file + rate gate; writes `data/urls_footprint_changed.txt` (computed this run, not new this month)
+- [ ] `data/footprints.csv` columns: url, method, footprint_wkt (EPSG:4326, empty = the cell), valid_percent, checksum, size; `https://` guard and `test_urls_scheme.py` coverage
+- [ ] Full local run with logging (`logs/`), peak disk logged; cache committed; counts by method recorded in findings
 
 ## Phase 4: New-item path
-- [ ] `item_create_from_cache` takes optional footprint → geometry/bbox/proj:geometry; missing → extent box, counted
-- [ ] Same override in item_create's rio_stac fallback and `item_reprocess.py` (one helper)
-- [ ] `update.yml`: footprint step before item_create; `footprints.csv` in the cache commit-back; fallback count in the run summary
-- [ ] Tests for both paths
+- [ ] One helper applies a footprint row to an item (geometry, bbox, proj:geometry in the item's CRS incl. `proj:wkt2`, ∩ proj:bbox; file + raster fields on `dem`; extension URLs); used by item_create's cache and rio_stac branches and `item_reprocess.py`
+- [ ] Missing row → geometry left as built, counted and logged; the URL is picked up by the next extract and rebuilt via `urls_footprint_changed.txt`
+- [ ] `update.yml`: footprint step (time-boxed) before item_create; footprint-changed rebuild beside the pairing rebuild; `build_safe.sh` and README Quick Start get the step
+- [ ] Tests for both item paths and the helper
 
-## Phase 5: `lidarbc:delivery` (#55) — waits on crate#23
-- [ ] Confirm crate#23's `lidarbc` schema: URL answers 200, `$id` equals the URL, `lidarbc:delivery` pattern `^[0-9]{3}/[0-9]{3}[a-p]/[0-9]{4}$`
-- [ ] Tests first: delivery from the href's `gdwuts/<block>/<sheet>/<year>/`; omitted for `albers10k2m/_completed_dem`; counts re-derived from `data/urls_list.txt` (#55 measured 100,171 / 2,245)
-- [ ] One helper writes `lidarbc:delivery` + the schema URL in `stac_extensions`, used by both item paths
-- [ ] Collection: `lidarbc:delivery` in queryables, one `related` link to stac-pointcloud-bc (`collection_patch.py`)
+## Phase 5: `lidarbc:` fields (#55 + rename) — schema waits on crate#23
+- [ ] Tests first: delivery from the href (`gdwuts/<block>/<sheet>/<year>/`), omitted for albers; counts re-derived from `data/urls_list.txt` (100,171 / 2,245); `datetime_unknown` written only as `lidarbc:datetime_unknown`
+- [ ] One helper writes `lidarbc:delivery`, `lidarbc:datetime_unknown` and the `lidarbc` schema URL, used by both item paths
+- [ ] Collection: one `related` link to stac-pointcloud-bc (`collection_patch.py`)
+- [ ] Field audit run on every staged set (each non-albers item has `lidarbc:delivery`; no unprefixed `datetime_unknown`; declared extension URLs present)
+- [ ] Confirm crate#23's `lidarbc` schema answers 200 after redirects, `$id` equals its URL, and declares both fields
 
-## Phase 6: Rewrite published items (footprint + delivery, one pass)
-- [ ] `scripts/footprint_apply.py` on `item_rewrite` (own manifest/migration name), one idempotent edit; tests mirroring `test_item_backfill.py`
-- [ ] Dry run + `--verify` sample; `stacs audit`; `item_validate.py` (fetches the crate schema)
-- [ ] Hand over publish commands (S3 sync + `stacs register --mode drift` + `stacs verify`) — **not run without the user's word**
-
-If crate#23 is not published when Phases 1–4 are done: commit, report, leave 5–6 open rather than ship a footprint-only rewrite.
+## Phase 6: Rewrite published items (one pass)
+- [ ] `scripts/footprint_apply.py` on `item_rewrite` (manifest `data/footprint_done.txt`, own migration name): footprint fields, `lidarbc:` fields, rename; the 44 sourceless items get only the lidarbc edits, counted apart; tests mirroring `test_item_backfill.py`
+- [ ] `update.yml` dispatch input `footprint`, wired at every `backfill || rename` site incl. the conflicting-inputs guard and the manifest discard; full validation to scratch
+- [ ] Local dry run on a sample of published items: `stacs audit`, field audit, `item_validate.py`
+- [ ] Before the dispatch: rebase on main, re-extract `urls_list − cache`, confirm cache covers every published URL
+- [ ] Publish (dispatch after merge, then `stacs register --mode drift` + `stacs verify`) — **only on the user's word**
 
 ## Phase 7: Docs
-- [ ] README (remove #2 from "future work"; describe geometry, its cell/pixel methods and the interior-gap limit, `lidarbc:delivery`), scripts/README, CLAUDE.md data tree, NEWS Unreleased (minor bump at merge); PR closes #2 and #55
-
+- [ ] README (remove #2 from "future work"; geometry, checksum, valid_percent, `lidarbc:` fields, QGIS bbox note), scripts/README, CLAUDE.md data tree, NEWS Unreleased; PR closes #2, #55 (queryables to stacs#8)
 
 ## Validation
 
