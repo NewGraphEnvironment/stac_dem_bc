@@ -83,7 +83,11 @@ def pystac_item_fields_apply(item: pystac.Item, url: str, footprints: dict) -> p
     """The same, for an Item a builder has just made."""
     d = item.to_dict(include_self_link=False, transform_hrefs=False)
     item_fields_apply(d, url, footprints)
-    return pystac.Item.from_dict(d)
+    # migrate=False: pystac 1.15 otherwise upgrades projection v1.1.0 to v2.0.0
+    # and swaps proj:epsg for proj:code, so every item built from here on would
+    # differ in shape from the 102k published ones -- and from the rewrite,
+    # which edits JSON directly.
+    return pystac.Item.from_dict(d, migrate=False)
 
 
 # =============================================================================

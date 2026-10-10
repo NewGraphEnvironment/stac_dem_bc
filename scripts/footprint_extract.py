@@ -22,10 +22,14 @@ Outcomes:
                           monthly; reported, and the item keeps its geometry)
   transient failure       written to --errors, NOT cached, retried next run
 
---changed-out lists URLs that gained a row this run and are NOT new this month:
-items already published whose footprint arrived after they were built (a run
-that ran out of --max-minutes, a transient failure). The workflow rebuilds them,
-as it does for a DSM pairing change.
+--changed-out lists URLs that gained a row and are NOT new this month: items
+already published whose footprint arrived after they were built (a run that ran
+out of --max-minutes, a transient failure). The workflow rebuilds them, as it
+does for a DSM pairing change. The list is CUMULATIVE: each URL is appended the
+moment its row is written, and the workflow empties the file only after a
+successful sync. The cache rows are committed even when the job fails, so a
+list rebuilt from "this run's writes" would drop a URL whose row was committed
+but whose item never reached S3, and nothing would list it again.
 
 Usage:
     python scripts/footprint_extract.py --limit 50                 # rehearsal
@@ -116,6 +120,19 @@ def cache_finalize(path: str = CACHE) -> int:
     return len(rows)
 
 
+def changed_finalize(path: str) -> int:
+    """Dedupe and sort the cumulative rebuild list in place. Returns its length."""
+    if not os.path.exists(path):
+        open(path, "w").close()
+        return 0
+    urls = sorted(set(urls_read(path)))
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as fh:
+        fh.writelines(f"{u}\n" for u in urls)
+    os.replace(tmp, path)
+    return len(urls)
+
+
 def changed_select(written_urls: list[str], new_urls: set[str]) -> list[str]:
     """URLs that gained a row this run and are not new this month: published items to rebuild."""
     return sorted(u for u in written_urls if u not in new_urls)
@@ -174,7 +191,8 @@ def _dir_bytes(d: str) -> int:
 
 def run(todo: list[str], cache_path: str, errors_path: str, workers: int,
         max_minutes: float | None, min_free_gb: float, population: int,
-        read=footprint_read, tmp_root: str | None = None) -> tuple[int, dict]:
+        read=footprint_read, tmp_root: str | None = None,
+        changed_path: str | None = None, new_urls: set | None = None) -> tuple[int, dict]:
     """Fill the cache for `todo`. Returns (exit code, stats)."""
     stats = {"written": 0, "error": 0, "by_method": {}, "peak_scratch_bytes": 0,
              "stopped": "", "written_urls": []}
@@ -182,6 +200,7 @@ def run(todo: list[str], cache_path: str, errors_path: str, workers: int,
     workdir = tempfile.mkdtemp(prefix="footprint_", dir=tmp_root)
     new_file = not os.path.exists(cache_path) or os.path.getsize(cache_path) == 0
     try:
+        changed_fh = open(changed_path, "a") if changed_path else None
         with open(cache_path, "a", newline="") as cache_fh, open(errors_path, "a") as err_fh:
             w = csv.DictWriter(cache_fh, FIELDS, lineterminator="\n")
             if new_file:
@@ -221,6 +240,10 @@ def run(todo: list[str], cache_path: str, errors_path: str, workers: int,
                             continue
                         w.writerow(row)
                         cache_fh.flush()
+                        if changed_fh and url not in (new_urls or set()):
+                            # After the row, so a URL is never listed without one.
+                            changed_fh.write(f"{url}\n")
+                            changed_fh.flush()
                         stats["written"] += 1
                         stats["written_urls"].append(url)
                         m = row["method"]
@@ -233,6 +256,8 @@ def run(todo: list[str], cache_path: str, errors_path: str, workers: int,
                                     stats["peak_scratch_bytes"] / 1e6)
                     refill()
     finally:
+        if changed_path and changed_fh:
+            changed_fh.close()
         shutil.rmtree(workdir, ignore_errors=True)
 
     if stats["stopped"].startswith("free disk"):
@@ -293,19 +318,20 @@ def main() -> int:
     logger.info("%d URLs, %d cached, %d to read%s", len(urls), len(cached), len(todo),
                 f" (limit {args.limit})" if args.limit else "")
 
+    new = set(urls_read(URLS_NEW)) if os.path.exists(URLS_NEW) else set()
     code, stats = (EXIT_OK, {"written": 0, "error": 0, "by_method": {}, "peak_scratch_bytes": 0,
                              "stopped": "", "written_urls": []})
     if todo:
         code, stats = run(todo, args.cache, args.errors, args.workers, args.max_minutes,
-                          args.min_free_gb, population, tmp_root=args.tmp_dir)
+                          args.min_free_gb, population, tmp_root=args.tmp_dir,
+                          changed_path=args.changed_out, new_urls=new)
     n = cache_finalize(args.cache) if os.path.exists(args.cache) else 0
 
     if args.changed_out:
-        new = set(urls_read(URLS_NEW)) if os.path.exists(URLS_NEW) else set()
-        changed = changed_select(stats["written_urls"], new)
-        with open(args.changed_out, "w") as fh:
-            fh.writelines(f"{u}\n" for u in changed)
-        logger.info("%d already-published URLs gained a footprint -> %s", len(changed), args.changed_out)
+        listed = changed_finalize(args.changed_out)
+        logger.info("%d already-published URLs gained a footprint this run; %d listed for "
+                    "rebuild in %s (cumulative until a sync succeeds)",
+                    len(changed_select(stats["written_urls"], new)), listed, args.changed_out)
 
     logger.info("Wrote %d rows (%s), %d transient errors; cache holds %d; peak scratch %.0f MB",
                 stats["written"], stats["by_method"], stats["error"], n,

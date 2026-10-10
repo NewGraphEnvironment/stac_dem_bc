@@ -163,3 +163,14 @@ def test_audit_cli_exits_nonzero_on_a_fault(tmp_path):
 def test_audit_refuses_an_empty_directory(tmp_path):
     with pytest.raises(SystemExit):
         item_fields.audit_dir(str(tmp_path))
+
+
+def test_builders_keep_the_published_projection_shape(tmp_path, tile):
+    # pystac 1.15's from_dict migrates projection v1.1.0 -> v2.0.0 and
+    # proj:epsg -> proj:code unless told not to; the catalogue is v1.1.0.
+    path, row, meta = tile
+    for sub, m in (("c", meta), ("r", {**meta, "epsg": None})):
+        it = build(tmp_path, path, row, m, sub)
+        assert it["properties"]["proj:epsg"] == 26910 and "proj:code" not in it["properties"]
+        assert "https://stac-extensions.github.io/projection/v1.1.0/schema.json" in it["stac_extensions"]
+        assert not any("projection/v2" in e for e in it["stac_extensions"])

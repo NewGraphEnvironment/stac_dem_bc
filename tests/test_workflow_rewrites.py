@@ -58,3 +58,11 @@ def test_the_footprint_rewrite_step_runs_only_on_dispatch():
     s = {s.get("name"): s for s in steps()}["Rewrite published items with footprints (dispatch only)"]
     assert s["if"] == "inputs.footprint"
     assert "--manifest data/footprint_done.txt" in s["run"]
+
+
+def test_the_footprint_rebuild_list_is_cleared_only_after_a_sync_that_rebuilt_it():
+    commit = {s.get("name"): s for s in steps()}["Commit refreshed caches"]["run"]
+    i = commit.index(": > data/urls_footprint_changed.txt")
+    guard = commit[commit.rfind("if [", 0, i):i]
+    assert 'steps.sync.outcome }}" = "success"' in guard
+    assert "steps.rebuild.outcome" in guard and "inputs.footprint" in guard

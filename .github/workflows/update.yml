@@ -256,6 +256,7 @@ jobs:
       # URLs -- so both diffs drive one rebuild pass. Each file is written empty
       # when nothing changed, so the step is a cheap no-op.
       - name: Rebuild items whose DSM pairing or footprint changed
+        id: rebuild
         if: steps.detect.outputs.changes == 'true'
         run: |
           for f in data/urls_pairing_changed.txt data/urls_footprint_changed.txt; do
@@ -492,6 +493,20 @@ jobs:
                 echo "  $f is untracked; leaving it uncommitted"
               fi
             done
+          fi
+
+          # The footprint rebuild list is cumulative (footprint_extract.py): a
+          # URL stays on it until the items rebuilt from it have reached S3.
+          # Emptied only here, only after a successful sync. Its rows in
+          # footprints.csv are committed either way, so dropping the list on a
+          # failed run would strand those items at their extent for good.
+          # And only when something rebuilt them: the rebuild step, or the
+          # footprint rewrite, which rewrites every published item.
+          if [ "${{ steps.sync.outcome }}" = "success" ] && [ -s data/urls_footprint_changed.txt ] \
+             && { [ "${{ steps.rebuild.outcome }}" = "success" ] || [ "${{ inputs.footprint }}" = "true" ]; }; then
+            echo "sync succeeded - clearing the footprint rebuild list"
+            : > data/urls_footprint_changed.txt
+            git add data/urls_footprint_changed.txt
           fi
 
           if git diff --cached --quiet; then

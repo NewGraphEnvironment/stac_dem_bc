@@ -126,3 +126,19 @@ def test_audit_names_a_footprint_outside_bc():
             U[2]: {"method": "download", "footprint_wkt": "not wkt"},
             U[3]: {"method": "download", "footprint_wkt": ""}}
     assert fe.cache_audit(rows) == {"outside BC": [U[0]], "unparseable WKT": [U[2]]}
+
+
+def test_the_rebuild_list_is_cumulative_and_skips_new_urls(tmp_path):
+    changed = tmp_path / "changed.txt"
+    changed.write_text(f"{U[3]}\n")                       # left by a run whose sync failed
+    go(tmp_path, U[:3], ok, changed_path=str(changed), new_urls={U[1]})
+    assert fe.changed_finalize(str(changed)) == 3
+    assert changed.read_text().splitlines() == [U[0], U[2], U[3]]
+
+
+def test_a_url_is_listed_only_once_its_row_is_written(tmp_path):
+    changed = tmp_path / "changed.txt"
+    go(tmp_path, U, flaky, population=0, changed_path=str(changed), new_urls=set())
+    listed = set(changed.read_text().split())
+    cached = {r["url"] for r in rows(tmp_path / "c.csv")}
+    assert listed == cached and U[2] not in listed       # the transient failure is in neither
