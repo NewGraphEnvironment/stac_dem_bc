@@ -35,11 +35,11 @@ Review findings and dispositions: `review-1.md`.
 - [ ] `research/footprints.md`: what is known (numbering, overlap pad, gap rates, cost), with producers
 
 ## Phase 2: Footprint functions + tests (tests first)
-- [ ] `tests/test_footprint.py`: cell from every id form (underscore, concatenated, `bcts_`), non-BCGS ids → None; full-population check that every cached-bounds BCGS tile's cell lies inside its raster bounds (zero I/O)
-- [ ] Synthetic rasters: full cell → "cell" (no WKT); corner gap; two islands → MultiPolygon; specks dropped and small holes filled; undeclared −3.4e38 and out-of-range values invalid; all-nodata refuses
-- [ ] Acceptance asserted in tests: valid, CCW exterior rings, vertex cap, within cell (BCGS) or raster extent, bbox == bounds of the rounded geometry, data outside the footprint ≤ tolerance (outward bias)
-- [ ] `scripts/footprint.py`: `bcgs_cell()`, `footprint_from_mask()`, `footprint_read()` (download-whole or coarsest overview by overview presence, sha256 + size when downloaded, `CPL_VSIL_CURL_NON_CACHED` on retry)
-- [ ] Restore-the-bug check that each guard fires
+- [x] `tests/test_footprint.py`: cell from every id form (underscore, concatenated, `bcts_`), non-BCGS ids → None; full-population check that every cached-bounds BCGS tile's cell lies inside its raster bounds (zero I/O)
+- [x] Synthetic rasters: full cell → "cell" (no WKT); corner gap; two islands → MultiPolygon; specks dropped and small holes filled; undeclared −3.4e38 and out-of-range values invalid; all-nodata refuses
+- [x] Acceptance asserted in tests: valid, CCW exterior rings, vertex cap, within cell (BCGS) or raster extent, bbox == bounds of the rounded geometry, data outside the footprint ≤ tolerance (outward bias)
+- [x] `scripts/footprint.py`: `bcgs_cell()`, `footprint_from_mask()`, `footprint_read()` (download-whole or coarsest overview by overview presence, sha256 + size when downloaded, `CPL_VSIL_CURL_NON_CACHED` on retry)
+- [x] Restore-the-bug check that each guard fires
 
 ## Phase 3: Cache + extraction
 - [ ] `scripts/footprint_extract.py`: `--incremental` = `urls_list − cache`, `--urls-file`, `--limit`, `--workers`, `--max-minutes`, `--min-free-gb`; streamed temp files in one dir cleared at start/exit; rows appended as they finish (resumable); errors file + rate gate; writes `data/urls_footprint_changed.txt` (computed this run, not new this month)

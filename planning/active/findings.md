@@ -95,3 +95,30 @@ The 2026-10-10 morning sample (2.1–3.4 MB/s, 9–17.5 MB/file) drew from ALL n
 included 100 MB albers tiles — that inflated the ~1.4 TB / ~5 day full-read estimate. 1:2,500 tiles
 alone: mean 5.9 MB (median 6.1). 120 tiles at 16 workers: 714 MB in 92 s = **7.8 MB/s** (22:46 UTC).
 Full read of the 94,808 non-COG 1:2,500 tiles: **559 GB ≈ 20 h at 7.8 MB/s (46 h at 3.4 MB/s)**.
+
+## Phase 2 (2026-10-10)
+
+- **Two tiles declare the wrong UTM zone.** `bc_082e003_3_2_2_xli1m_utm11_20240721_20240726.tif`
+  and `bc_082f010_1_1_1_xli1m_utm11_20241008_20250813.tif` are named `utm11`, carry UTM-11
+  coordinates, and declare EPSG:6657 (NAD83(CSRS) / UTM zone **14**N + CGVD2013). Their published
+  items' bbox is in Manitoba (-101.5, 49.05). Found by the full-population cell check (44,197
+  cached BCGS tiles): every other cell lies inside its raster, worst -1.25 m (flush 2 m tiles).
+  `footprint_from_mask` refuses such tiles (`FootprintCrsMismatch`); not repaired here — an
+  upstream data defect to surface.
+- albers10k2m overviews are an external `.ovr` sidecar: `GDAL_DISABLE_READDIR_ON_OPEN=EMPTY_DIR`
+  hid them and the 100 MB tile was downloaded whole (23.7 s); without it, overview read in 3.5 s.
+- Real reads, one per path: gap tile `092f095_1_1_3` → MultiPolygon, 97 vertices, 87.6% valid;
+  `082f037` 338 MB COG → overview, 99.34%; `082e002` no-quadrant → download, 93.3%;
+  `093l078313` 2 m concatenated id → download, 70.0%. Temp dir empty afterwards.
+- Mutation table (`test_footprint.py`, scratch copy): NW-origin quadrants, flipped 1:20k rows,
+  no outward buffer, no hygiene, wrong orientation, no vertex cap, no CRS check, no range clamp
+  all go RED. Removing the empty-mask guard stays GREEN because `_hygiene` raises the same
+  `FootprintEmpty` — redundant, not untested. The first fixtures could not reach two failures
+  (pixel-aligned straight edge never simplifies inward; speck sat in the pad outside the cell);
+  replaced with a ragged diagonal edge and in-cell speck/hole.
+
+| Error | Resolution |
+|-------|------------|
+| BCGS regex `bcts?_` never matched `bc_` (needs `bct`) | `bc(?:ts)?_` |
+| Every cell mirrored about the letter block's mid-latitude | 1:20k rows and quadrants count from the south |
+| Population test: cell 1.3e6 m outside raster | Two tiles declare UTM 14; refused, reported |
