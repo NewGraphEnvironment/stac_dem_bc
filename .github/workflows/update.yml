@@ -219,16 +219,35 @@ jobs:
       # and lists it in urls_footprint_changed.txt, which the rebuild step
       # below turns into a corrected item. A failure here degrades geometry for
       # a month; it never loses an item. It is a warning, not silence.
+      #
+      # Every run, not only months the bucket changed: a tile the time box
+      # missed, or an item a failed run left on the rebuild list, would
+      # otherwise wait for the next upstream change, however long that is.
+      # With nothing to do it exits in seconds. `pending` drives the rebuild,
+      # publish and commit steps below on a run with no upstream change.
       - name: Compute footprints for tiles not yet cached
         id: footprints
-        if: steps.detect.outputs.changes == 'true'
+        if: steps.detect.outcome == 'success'
         continue-on-error: true
         run: |
+          NEW=()
+          # Only this run's new URLs are excluded from the rebuild list; on a
+          # run with no new URLs, data/urls_new.txt is last month's.
+          if [ "${{ steps.detect.outputs.new_urls }}" = "true" ]; then NEW=(--new-urls data/urls_new.txt); fi
+          set +e
           .venv/bin/python scripts/footprint_extract.py \
             --workers 16 --max-minutes 120 --min-free-gb 5 \
             --errors logs/footprint_errors.txt \
-            --changed-out data/urls_footprint_changed.txt \
-            || { echo "::warning title=Footprints incomplete::footprint_extract exited $? - affected items keep their extent until next month; see logs/footprint_errors.txt"; exit 1; }
+            --changed-out data/urls_footprint_changed.txt "${NEW[@]}"
+          rc=$?
+          set -e
+          if [ -s data/urls_footprint_changed.txt ]; then
+            echo "pending=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning title=Footprints incomplete::footprint_extract exited $rc - affected items keep their extent until a later run computes them; see logs/footprint_errors.txt"
+            exit 1
+          fi
 
       - name: Create STAC items (incremental)
         if: steps.detect.outputs.new_urls == 'true'
@@ -257,7 +276,7 @@ jobs:
       # when nothing changed, so the step is a cheap no-op.
       - name: Rebuild items whose DSM pairing or footprint changed
         id: rebuild
-        if: steps.detect.outputs.changes == 'true'
+        if: steps.detect.outputs.changes == 'true' || steps.footprints.outputs.pending == 'true'
         run: |
           for f in data/urls_pairing_changed.txt data/urls_footprint_changed.txt; do
             if [ -f "$f" ]; then cat "$f"; fi
@@ -329,7 +348,9 @@ jobs:
       # JSONs and no new URLs at all.
       - name: Count items to publish
         id: publish
-        if: steps.detect.outputs.changes == 'true' || inputs.backfill || inputs.rename || inputs.footprint
+        if: >-
+          steps.detect.outputs.changes == 'true' || steps.footprints.outputs.pending == 'true'
+          || inputs.backfill || inputs.rename || inputs.footprint
         run: |
           TOTAL=$(find "$STAC_OUTPUT_DIR" -maxdepth 1 -type f -name "*.json" ! -name "collection.json" | wc -l | tr -d ' ')
           echo "items staged for publish: $TOTAL"
@@ -456,7 +477,9 @@ jobs:
           if-no-files-found: ignore
 
       - name: Commit refreshed caches
-        if: always() && (steps.detect.outputs.changes == 'true' || inputs.backfill || inputs.rename || inputs.footprint)
+        if: >-
+          always() && (steps.detect.outputs.changes == 'true' || steps.footprints.outputs.pending == 'true'
+          || inputs.backfill || inputs.rename || inputs.footprint)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -496,16 +519,15 @@ jobs:
           fi
 
           # The footprint rebuild list is cumulative (footprint_extract.py): a
-          # URL stays on it until the items rebuilt from it have reached S3.
-          # Emptied only here, only after a successful sync. Its rows in
-          # footprints.csv are committed either way, so dropping the list on a
-          # failed run would strand those items at their extent for good.
-          # And only when something rebuilt them: the rebuild step, or the
-          # footprint rewrite, which rewrites every published item.
-          if [ "${{ steps.sync.outcome }}" = "success" ] && [ -s data/urls_footprint_changed.txt ] \
-             && { [ "${{ steps.rebuild.outcome }}" = "success" ] || [ "${{ inputs.footprint }}" = "true" ]; }; then
-            echo "sync succeeded - clearing the footprint rebuild list"
-            : > data/urls_footprint_changed.txt
+          # URL stays on it until ITS item has reached S3. Its rows in
+          # footprints.csv are committed either way, so dropping a URL on any
+          # weaker evidence strands that item at its extent for good. "The
+          # rebuild step exited 0" is weaker: item_create drops a URL it fails
+          # on and still exits 0. So prune exactly the URLs whose item was
+          # staged, and only after the sync that uploaded them succeeded.
+          if [ "${{ steps.sync.outcome }}" = "success" ] && [ -s data/urls_footprint_changed.txt ]; then
+            .venv/bin/python scripts/footprint_extract.py \
+              --prune-changed "$STAC_OUTPUT_DIR" --changed-out data/urls_footprint_changed.txt
             git add data/urls_footprint_changed.txt
           fi
 

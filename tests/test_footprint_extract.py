@@ -142,3 +142,15 @@ def test_a_url_is_listed_only_once_its_row_is_written(tmp_path):
     listed = set(changed.read_text().split())
     cached = {r["url"] for r in rows(tmp_path / "c.csv")}
     assert listed == cached and U[2] not in listed       # the transient failure is in neither
+
+
+def test_prune_keeps_every_url_whose_item_was_not_staged(tmp_path):
+    from stac_utils import url_to_item_id
+    changed = tmp_path / "changed.txt"
+    changed.write_text("".join(f"{u}\n" for u in U))
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    for u in (U[0], U[2]):                                # item_create dropped U[1] and U[3]
+        (staged / f"{url_to_item_id(u)}.json").write_text("{}")
+    assert fe.changed_prune(str(changed), str(staged)) == (2, 2)
+    assert changed.read_text().splitlines() == [U[1], U[3]]

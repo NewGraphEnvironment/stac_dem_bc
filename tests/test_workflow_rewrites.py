@@ -60,9 +60,22 @@ def test_the_footprint_rewrite_step_runs_only_on_dispatch():
     assert "--manifest data/footprint_done.txt" in s["run"]
 
 
-def test_the_footprint_rebuild_list_is_cleared_only_after_a_sync_that_rebuilt_it():
+def test_the_footprint_rebuild_list_is_pruned_by_staged_item_only_after_a_sync():
     commit = {s.get("name"): s for s in steps()}["Commit refreshed caches"]["run"]
-    i = commit.index(": > data/urls_footprint_changed.txt")
+    i = commit.index("--prune-changed")
     guard = commit[commit.rfind("if [", 0, i):i]
     assert 'steps.sync.outcome }}" = "success"' in guard
-    assert "steps.rebuild.outcome" in guard and "inputs.footprint" in guard
+    assert ": > data/urls_footprint_changed.txt" not in commit     # never emptied wholesale
+
+
+def test_footprints_run_every_run_and_pending_reaches_every_gate():
+    by = {s.get("name"): s for s in steps()}
+    assert by["Compute footprints for tiles not yet cached"]["if"] == "steps.detect.outcome == 'success'"
+    for name in ("Rebuild items whose DSM pairing or footprint changed", "Count items to publish",
+                 "Commit refreshed caches"):
+        assert "steps.footprints.outputs.pending == 'true'" in by[name]["if"], name
+
+
+def test_new_urls_are_passed_only_when_this_run_found_some():
+    run = {s.get("name"): s for s in steps()}["Compute footprints for tiles not yet cached"]["run"]
+    assert 'steps.detect.outputs.new_urls }}" = "true" ]; then NEW=(--new-urls data/urls_new.txt)' in run

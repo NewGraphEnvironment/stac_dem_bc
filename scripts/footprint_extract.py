@@ -61,14 +61,13 @@ from footprint import (
     within_bc,
 )
 from item_rewrite import error_tolerable
-from stac_utils import url_scheme_check
+from stac_utils import url_scheme_check, url_to_item_id
 
 logger = logging.getLogger(__name__)
 
 CACHE = "data/footprints.csv"
 ERRORS = "logs/footprint_errors.txt"   # transient, retried next run: not a cache
 URLS_LIST = "data/urls_list.txt"
-URLS_NEW = "data/urls_new.txt"
 FIELDS = ["url", "method", "footprint_wkt", "valid_percent", "checksum", "size"]
 METHOD_EMPTY = "empty"
 METHOD_CRS_MISMATCH = "crs_mismatch"
@@ -131,6 +130,26 @@ def changed_finalize(path: str) -> int:
         fh.writelines(f"{u}\n" for u in urls)
     os.replace(tmp, path)
     return len(urls)
+
+
+def changed_prune(path: str, staged_dir: str) -> tuple[int, int]:
+    """Drop from the rebuild list every URL whose item is staged in `staged_dir`. (pruned, kept)
+
+    Called only after a successful sync, so a staged item is a published one.
+    Not "the rebuild step exited 0": item_create drops a URL it fails on and
+    still exits 0, and clearing on that proxy stranded the failures for good.
+    A URL that keeps failing stays listed and is retried every run, visibly.
+    """
+    if not os.path.exists(path):
+        return 0, 0
+    urls = urls_read(path)
+    kept = [u for u in urls
+            if not os.path.exists(os.path.join(staged_dir, f"{url_to_item_id(u)}.json"))]
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as fh:
+        fh.writelines(f"{u}\n" for u in sorted(set(kept)))
+    os.replace(tmp, path)
+    return len(urls) - len(kept), len(set(kept))
 
 
 def changed_select(written_urls: list[str], new_urls: set[str]) -> list[str]:
@@ -283,6 +302,13 @@ def main() -> int:
     ap.add_argument("--max-minutes", type=float, default=None)
     ap.add_argument("--min-free-gb", type=float, default=20.0)
     ap.add_argument("--tmp-dir", default=None, help="Where the scratch directory goes (default: system temp)")
+    ap.add_argument("--new-urls", default=None,
+                    help="URLs new this run (data/urls_new.txt when detect found some). Not "
+                         "defaulted: on a run with no changes that file is last month's, and "
+                         "treating its URLs as new would keep their published items off the list")
+    ap.add_argument("--prune-changed", metavar="STAGED_DIR", default=None,
+                    help="After a successful sync: drop from --changed-out every URL whose item is "
+                         "staged in STAGED_DIR, and exit; reads nothing")
     ap.add_argument("--audit", action="store_true",
                     help="Check every footprint row in the cache (valid, inside BC) and exit; reads nothing")
     ap.add_argument("--changed-out", default=None,
@@ -290,6 +316,13 @@ def main() -> int:
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s",
                         datefmt="%H:%M:%S")
+
+    if args.prune_changed:
+        if not args.changed_out:
+            ap.error("--prune-changed needs --changed-out")
+        pruned, kept = changed_prune(args.changed_out, args.prune_changed)
+        logger.info("Rebuild list: %d published and pruned, %d kept for the next run", pruned, kept)
+        return EXIT_OK
 
     if args.audit:
         rows = cache_load(args.cache)
@@ -318,7 +351,7 @@ def main() -> int:
     logger.info("%d URLs, %d cached, %d to read%s", len(urls), len(cached), len(todo),
                 f" (limit {args.limit})" if args.limit else "")
 
-    new = set(urls_read(URLS_NEW)) if os.path.exists(URLS_NEW) else set()
+    new = set(urls_read(args.new_urls)) if args.new_urls else set()
     code, stats = (EXIT_OK, {"written": 0, "error": 0, "by_method": {}, "peak_scratch_bytes": 0,
                              "stopped": "", "written_urls": []})
     if todo:
