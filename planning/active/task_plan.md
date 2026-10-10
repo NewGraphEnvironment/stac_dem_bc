@@ -42,7 +42,7 @@ Review findings and dispositions: `review-1.md`.
 - [x] Restore-the-bug check that each guard fires
 
 ## Phase 3: Cache + extraction
-- [ ] `scripts/footprint_extract.py`: `--incremental` = `urls_list − cache`, `--urls-file`, `--limit`, `--workers`, `--max-minutes`, `--min-free-gb`; streamed temp files in one dir cleared at start/exit; rows appended as they finish (resumable); errors file + rate gate; writes `data/urls_footprint_changed.txt` (computed this run, not new this month)
+- [x] `scripts/footprint_extract.py`: `--incremental` = `urls_list − cache`, `--urls-file`, `--limit`, `--workers`, `--max-minutes`, `--min-free-gb`; streamed temp files in one dir cleared at start/exit; rows appended as they finish (resumable); errors file + rate gate; writes `data/urls_footprint_changed.txt` (computed this run, not new this month)
 - [ ] `data/footprints.csv` columns: url, method, footprint_wkt (EPSG:4326, empty = the cell), valid_percent, checksum, size; `https://` guard and `test_urls_scheme.py` coverage
 - [ ] Full local run with logging (`logs/`), peak disk logged; cache committed; counts by method recorded in findings
 

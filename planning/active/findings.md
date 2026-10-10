@@ -122,3 +122,14 @@ Full read of the 94,808 non-COG 1:2,500 tiles: **559 GB ≈ 20 h at 7.8 MB/s (46
 | BCGS regex `bcts?_` never matched `bc_` (needs `bct`) | `bc(?:ts)?_` |
 | Every cell mirrored about the letter block's mid-latitude | 1:20k rows and quadrants count from the south |
 | Population test: cell 1.3e6 m outside raster | Two tiles declare UTM 14; refused, reported |
+
+## Phase 3 rehearsal (2026-10-10)
+
+- First 50 URLs (082e/2017, `bc_082e003_…_xl1m_17603`): a genuinely patchy delivery. Footprint
+  share of cell tracks valid percent closely (2.87% valid → 0.021 of cell; 44.9% → 0.449; 99.9% →
+  the cell). 1.19–1.24 tiles/s at 16 workers, peak scratch 51–62 MB, 0 transient errors.
+- **Wrong turn:** the CRS guard first required the cell to lie inside the raster, and refused 4
+  of these 50. These rasters are cropped to their data (one is a 374 px sliver; another starts
+  88 m inside its cell, EPSG:26911). A mislabelled zone puts the raster hundreds of km away, so the
+  guard now asks whether cell and raster intersect at all. Re-run: 50 download, 0 refused.
+- `--max-minutes 0` was read as "no budget" (truthiness); caught by its test; fixed.

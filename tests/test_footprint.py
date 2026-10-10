@@ -101,7 +101,7 @@ def test_every_cached_tile_contains_its_cell():
         pad = np.minimum.reduce([
             tx.min(0) - rast[:, 0], ty.min(0) - rast[:, 1],
             rast[:, 2] - tx.max(0), rast[:, 3] - ty.max(0)])
-        far = pad < -fp.CRS_SLACK_M
+        far = pad < -5.0
         outside += [epsg] * int(far.sum())
         if (~far).any():
             worst = min(worst, pad[~far].min())
@@ -110,6 +110,19 @@ def test_every_cached_tile_contains_its_cell():
     # The only cells outside their rasters are the two zone-11 tiles that
     # declare UTM zone 14 (EPSG:6657); footprint_from_mask refuses those.
     assert outside == [6657, 6657], outside
+
+
+def test_a_raster_cropped_inside_its_cell_is_accepted():
+    # 2017 082e deliveries crop rasters to their data, so the cell extends past
+    # the raster. That is not a CRS fault; the footprint is data inside the cell.
+    c = cell_native()
+    x0, y0, x1, y1 = c.bounds
+    t = Affine(1.0, 0, x0 + 300, 0, -1.0, y1 - 100)
+    mask = np.ones((int(y1 - y0) - 400, int(x1 - x0) - 600), bool)
+    r = compute(mask, t)
+    g = fp.geom_native(r["footprint_wkt"], UTM10)
+    assert g.within(c.buffer(0.5))
+    assert g.area == pytest.approx(mask.size, rel=0.03)
 
 
 def test_a_tile_declaring_the_wrong_utm_zone_is_refused():

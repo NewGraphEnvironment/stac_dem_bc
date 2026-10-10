@@ -59,7 +59,6 @@ PROJ_DECIMALS = 2       # proj:geometry, as published values already are
 VERTEX_CAP = 100
 MIN_AREA_M2 = 1000.0    # specks dropped, holes filled, below this (scaled up for coarse reads)
 FULL_TOLERANCE = 1e-4   # share of the cell allowed to lack data and still be "the cell"
-CRS_SLACK_M = 5.0       # a cell may sit this far past its raster (2 m "(2).tif" tiles are flush)
 VALID_MIN, VALID_MAX = -100.0, 5000.0   # LidarBC tiles can carry undeclared -3.4e38
 
 # Files at or under this size are downloaded whole: it gives the exact
@@ -83,7 +82,7 @@ class FootprintEmpty(ValueError):
 
 
 class FootprintCrsMismatch(ValueError):
-    """A BCGS tile whose cell does not lie inside its raster in the CRS the file declares.
+    """A BCGS tile whose cell does not touch its raster in the CRS the file declares.
 
     Seen on two 2024 tiles named `..._utm11_...` that declare UTM zone 14
     (EPSG:6657): their published items sit in Manitoba. The cell from the id is
@@ -254,9 +253,12 @@ def footprint_from_mask(mask: np.ndarray, transform, crs, name: str) -> dict:
     cell = bcgs_cell(name)
     if cell is not None:
         clip = cell_in_crs(cell, crs)
-        if not clip.within(extent.buffer(CRS_SLACK_M)):
+        # Not "cell inside raster": some deliveries crop rasters to their data
+        # (2017 082e tiles start 88 m inside the cell, or are a 374 px sliver).
+        # A mislabelled UTM zone puts the raster hundreds of km from its cell.
+        if not clip.intersects(extent):
             raise FootprintCrsMismatch(
-                f"{name}: its cell is not inside the raster in the declared CRS {crs}")
+                f"{name}: its cell does not touch the raster in the declared CRS {crs}")
         if clip.difference(data).area <= FULL_TOLERANCE * clip.area:
             return {"footprint_wkt": "", "valid_percent": valid_percent}
     else:
