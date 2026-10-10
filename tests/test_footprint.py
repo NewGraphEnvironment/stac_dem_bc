@@ -397,3 +397,17 @@ def test_no_footprint_leaves_the_item_alone(row):
     before = json.dumps(it, sort_keys=True)
     assert fp.item_footprint_apply(it, row, "dem") == []
     assert json.dumps(it, sort_keys=True) == before
+
+
+def test_a_raster_with_no_geotransform_is_refused():
+    with pytest.raises(fp.FootprintNoGeoref):
+        fp.footprint_from_mask(np.ones((10, 10), bool), Affine.identity(), UTM10, "dem_1.tif")
+    with pytest.raises(fp.FootprintNoGeoref):
+        fp.footprint_from_mask(np.ones((10, 10), bool), Affine(1, 0, 5e5, 0, -1, 5.5e6), None, "dem_1.tif")
+
+
+def test_a_non_bcgs_footprint_outside_bc_is_refused():
+    # A wrong zone on a tile with no cell to check against: valid-looking, in Manitoba.
+    t = Affine(1.0, 0, 316000, 0, -1.0, 5437000)
+    with pytest.raises(fp.FootprintOutsideBC):
+        fp.footprint_from_mask(np.ones((100, 100), bool), t, "EPSG:6657", "bc_082e003_xli1m_utm11_2018.tif")

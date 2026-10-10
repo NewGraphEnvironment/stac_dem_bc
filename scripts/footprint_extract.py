@@ -44,12 +44,17 @@ import sys
 import tempfile
 import time
 
+import shapely
+
 from footprint import (
     FootprintCrsMismatch,
     FootprintEmpty,
+    FootprintNoGeoref,
+    FootprintOutsideBC,
     METHOD_DOWNLOAD,
     METHOD_OVERVIEW,
     footprint_read,
+    within_bc,
 )
 from item_rewrite import error_tolerable
 from stac_utils import url_scheme_check
@@ -63,7 +68,12 @@ URLS_NEW = "data/urls_new.txt"
 FIELDS = ["url", "method", "footprint_wkt", "valid_percent", "checksum", "size"]
 METHOD_EMPTY = "empty"
 METHOD_CRS_MISMATCH = "crs_mismatch"
-METHODS = {METHOD_DOWNLOAD, METHOD_OVERVIEW, METHOD_EMPTY, METHOD_CRS_MISMATCH}
+METHOD_NO_GEOREF = "no_georef"
+METHOD_OUTSIDE_BC = "outside_bc"
+METHODS = {METHOD_DOWNLOAD, METHOD_OVERVIEW, METHOD_EMPTY, METHOD_CRS_MISMATCH,
+           METHOD_NO_GEOREF, METHOD_OUTSIDE_BC}
+REFUSALS = {FootprintEmpty: METHOD_EMPTY, FootprintCrsMismatch: METHOD_CRS_MISMATCH,
+            FootprintNoGeoref: METHOD_NO_GEOREF, FootprintOutsideBC: METHOD_OUTSIDE_BC}
 
 EXIT_OK = 0
 EXIT_ERRORS = 1
@@ -125,12 +135,31 @@ def row_for(url: str, read=footprint_read, workdir: str = ".") -> dict:
     """One tile's cache row. Deterministic refusals become rows; anything else raises."""
     try:
         return {"url": url, **read(url, workdir)}
-    except FootprintEmpty:
-        return {"url": url, "method": METHOD_EMPTY, "footprint_wkt": "",
-                "valid_percent": 0.0, "checksum": "", "size": ""}
-    except FootprintCrsMismatch:
-        return {"url": url, "method": METHOD_CRS_MISMATCH, "footprint_wkt": "",
-                "valid_percent": "", "checksum": "", "size": ""}
+    except tuple(REFUSALS) as e:
+        return {"url": url, "method": REFUSALS[type(e)], "footprint_wkt": "",
+                "valid_percent": 0.0 if isinstance(e, FootprintEmpty) else "",
+                "checksum": "", "size": ""}
+
+
+def cache_audit(rows: dict) -> dict:
+    """Faults in a cache, by kind. A footprint row's WKT must parse, be valid, and lie in BC.
+
+    The guards in footprint.py stop a bad footprint being written; this checks
+    one that was written before a guard existed, or by an older copy of the code.
+    """
+    faults = {}
+    for url, r in rows.items():
+        if r["method"] not in (METHOD_DOWNLOAD, METHOD_OVERVIEW) or not r["footprint_wkt"]:
+            continue
+        try:
+            g = shapely.from_wkt(r["footprint_wkt"])
+            kind = None if not g.is_valid else (None if within_bc(g) else "outside BC")
+            kind = kind or (None if g.is_valid else "invalid geometry")
+        except Exception:       # noqa: BLE001 - any parse failure is the fault
+            kind = "unparseable WKT"
+        if kind:
+            faults.setdefault(kind, []).append(url)
+    return faults
 
 
 def _dir_bytes(d: str) -> int:
@@ -229,11 +258,25 @@ def main() -> int:
     ap.add_argument("--max-minutes", type=float, default=None)
     ap.add_argument("--min-free-gb", type=float, default=20.0)
     ap.add_argument("--tmp-dir", default=None, help="Where the scratch directory goes (default: system temp)")
+    ap.add_argument("--audit", action="store_true",
+                    help="Check every footprint row in the cache (valid, inside BC) and exit; reads nothing")
     ap.add_argument("--changed-out", default=None,
                     help="Write URLs that gained a row this run and are not in data/urls_new.txt")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s",
                         datefmt="%H:%M:%S")
+
+    if args.audit:
+        rows = cache_load(args.cache)
+        faults = cache_audit(rows)
+        counts = {}
+        for r in rows.values():
+            counts[r["method"]] = counts.get(r["method"], 0) + 1
+        logger.info("%d rows %s; %d with WKT", len(rows), dict(sorted(counts.items())),
+                    sum(1 for r in rows.values() if r["footprint_wkt"]))
+        for kind, urls in faults.items():
+            logger.error("FAULT %s: %d, e.g. %s", kind, len(urls), urls[:3])
+        return EXIT_ERRORS if faults else EXIT_OK
 
     urls = urls_read(args.urls_file)
     os.makedirs(os.path.dirname(args.errors) or ".", exist_ok=True)

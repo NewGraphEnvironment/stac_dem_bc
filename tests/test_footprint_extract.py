@@ -107,3 +107,22 @@ def test_changed_is_written_minus_new():
 
 def test_todo_dedupes_and_skips_cached():
     assert fe.todo_select([U[0], U[1], U[0], U[2]], {U[1]: {}}) == [U[0], U[2]]
+
+
+def test_new_refusals_are_cached_rows():
+    from footprint import FootprintNoGeoref, FootprintOutsideBC
+
+    def r(exc):
+        def read(url, workdir):
+            raise exc("x")
+        return read
+    assert fe.row_for(U[0], r(FootprintNoGeoref))["method"] == "no_georef"
+    assert fe.row_for(U[0], r(FootprintOutsideBC))["method"] == "outside_bc"
+
+
+def test_audit_names_a_footprint_outside_bc():
+    rows = {U[0]: {"method": "download", "footprint_wkt": "POLYGON ((-101.5 49, -101.4 49, -101.4 49.1, -101.5 49))"},
+            U[1]: {"method": "download", "footprint_wkt": "POLYGON ((-123 49.3, -122.9 49.3, -122.9 49.4, -123 49.3))"},
+            U[2]: {"method": "download", "footprint_wkt": "not wkt"},
+            U[3]: {"method": "download", "footprint_wkt": ""}}
+    assert fe.cache_audit(rows) == {"outside BC": [U[0]], "unparseable WKT": [U[2]]}

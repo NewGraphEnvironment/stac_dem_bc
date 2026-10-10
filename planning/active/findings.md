@@ -146,3 +146,10 @@ Full read of the 94,808 non-COG 1:2,500 tiles: **559 GB ≈ 20 h at 7.8 MB/s (46
   footprints; `--verify 20` passed; `stacs audit` OK; field audit 0 faults; `item_validate` 200/200
   valid (against v1.0.0 — no albers in the sample, which is why it passed).
 - Extraction rate in the full run: ~0.8 tiles/s in its first 8 min (rehearsal 1.2/s).
+- Full run, first 16 min: one `NotGeoreferencedWarning` ("no geotransform") from
+  `features.shapes`, not reproduced on the overview path. No row's WKT falls outside BC. Added
+  `FootprintNoGeoref` (no CRS / identity transform) and `FootprintOutsideBC` (non-BCGS tile with
+  a footprint outside BBOX_BC + 0.5°), cached as `no_georef` / `outside_bc`, and
+  `footprint_extract.py --audit`, which checks every written row. The running extraction is a
+  frozen copy without these guards, so its cache is audited after it finishes.
+- Full run rate: ~0.4 tiles/s through the `082e` 2018/2019 mapsheet COGs (overview reads).

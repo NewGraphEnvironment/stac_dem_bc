@@ -49,7 +49,7 @@ from shapely.geometry import MultiPolygon, Polygon, box, mapping, shape
 from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
 
-from stac_utils import encode_url_for_gdal
+from stac_utils import BBOX_BC, encode_url_for_gdal
 
 # BCGS is defined on NAD83 geographic coordinates.
 CELL_CRS = "EPSG:4269"
@@ -79,6 +79,18 @@ LETTERS = "abcdefghijklmnop"
 
 class FootprintEmpty(ValueError):
     """A tile with no valid data has no footprint; it must not get an empty one."""
+
+
+class FootprintNoGeoref(ValueError):
+    """A raster with no CRS, or an identity geotransform: its pixels have no place on the ground.
+
+    rasterio warns and carries on with pixel coordinates, so without this a
+    non-BCGS tile would get a footprint near 0 deg, 0 deg and nothing would object.
+    """
+
+
+class FootprintOutsideBC(ValueError):
+    """A footprint that does not lie inside BBOX_BC: a mislabelled CRS on a tile with no cell to check against."""
 
 
 class FootprintCrsMismatch(ValueError):
@@ -237,6 +249,8 @@ def footprint_from_mask(mask: np.ndarray, transform, crs, name: str) -> dict:
     tile is a BCGS tile whose data covers its whole cell. Raises FootprintEmpty
     when nothing is valid.
     """
+    if crs is None or transform.is_identity:
+        raise FootprintNoGeoref(f"{name}: no CRS or no geotransform")
     if not mask.any():
         raise FootprintEmpty(f"{name}: no valid cells")
     valid_percent = round(float(mask.mean()) * 100, 2)
@@ -274,7 +288,17 @@ def footprint_from_mask(mask: np.ndarray, transform, crs, name: str) -> dict:
         if vertex_count(ll) <= VERTEX_CAP:
             break
         t *= 2
+    if not within_bc(ll):
+        raise FootprintOutsideBC(f"{name}: footprint {tuple(round(v, 3) for v in ll.bounds)} is outside BC")
     return {"footprint_wkt": _wkt(ll), "valid_percent": valid_percent}
+
+
+BC_SLACK_DEG = 0.5   # tiles on the 60th parallel carry data metres past it; a wrong zone is hundreds of km
+
+
+def within_bc(g) -> bool:
+    w, s, e, n = BBOX_BC
+    return g.within(box(w, s, e, n).buffer(BC_SLACK_DEG, join_style="mitre"))
 
 
 def _extent(transform, h, w):
@@ -393,7 +417,7 @@ def footprint_read(url: str, workdir: str) -> dict:
                 os.remove(path)
             row = footprint_from_mask(mask, transform, crs, name)
             return {"method": METHOD_DOWNLOAD, **row, "checksum": checksum, "size": size}
-        except (FootprintEmpty, FootprintCrsMismatch):
+        except (FootprintEmpty, FootprintCrsMismatch, FootprintNoGeoref, FootprintOutsideBC):
             raise                                  # deterministic: retrying cannot help
         except Exception as e:                     # noqa: BLE001 - network, by assumption
             last = e
