@@ -47,10 +47,10 @@ Review findings and dispositions: `review-1.md`.
 - [ ] Full local run with logging (`logs/`), peak disk logged; cache committed; counts by method recorded in findings
 
 ## Phase 4: New-item path
-- [ ] One helper applies a footprint row to an item (geometry, bbox, proj:geometry in the item's CRS incl. `proj:wkt2`, ∩ proj:bbox; file + raster fields on `dem`; extension URLs); used by item_create's cache and rio_stac branches and `item_reprocess.py`
-- [ ] Missing row → geometry left as built, counted and logged; the URL is picked up by the next extract and rebuilt via `urls_footprint_changed.txt`
+- [x] One helper applies a footprint row to an item (geometry, bbox, proj:geometry in the item's CRS incl. `proj:wkt2`, ∩ proj:bbox; file + raster fields on `dem`; extension URLs); used by item_create's cache and rio_stac branches and `item_reprocess.py`
+- [x] Missing row → geometry left as built, counted and logged; the URL is picked up by the next extract and rebuilt via `urls_footprint_changed.txt`
 - [ ] `update.yml`: footprint step (time-boxed) before item_create; footprint-changed rebuild beside the pairing rebuild; `build_safe.sh` and README Quick Start get the step
-- [ ] Tests for both item paths and the helper
+- [x] Tests for both item paths and the helper
 
 ## Phase 5: `lidarbc:` fields (#55 + rename) — schema waits on crate#23
 - [ ] Tests first: delivery from the href (`gdwuts/<block>/<sheet>/<year>/`), omitted for albers; counts re-derived from `data/urls_list.txt` (100,171 / 2,245); `datetime_unknown` written only as `lidarbc:datetime_unknown`

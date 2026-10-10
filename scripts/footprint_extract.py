@@ -57,7 +57,7 @@ from stac_utils import url_scheme_check
 logger = logging.getLogger(__name__)
 
 CACHE = "data/footprints.csv"
-ERRORS = "data/footprint_errors.txt"
+ERRORS = "logs/footprint_errors.txt"   # transient, retried next run: not a cache
 URLS_LIST = "data/urls_list.txt"
 URLS_NEW = "data/urls_new.txt"
 FIELDS = ["url", "method", "footprint_wkt", "valid_percent", "checksum", "size"]
@@ -236,6 +236,7 @@ def main() -> int:
                         datefmt="%H:%M:%S")
 
     urls = urls_read(args.urls_file)
+    os.makedirs(os.path.dirname(args.errors) or ".", exist_ok=True)
     if os.path.exists(args.cache):
         # Before appending: a run killed mid-write leaves a partial last line,
         # and the next row would be glued onto it.

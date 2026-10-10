@@ -400,3 +400,63 @@ def footprint_read(url: str, workdir: str) -> dict:
             if attempt < ATTEMPTS - 1:
                 time.sleep(2 * (attempt + 1))
     raise RuntimeError(f"{name}: {last}")
+
+
+# =============================================================================
+# Onto an item
+# =============================================================================
+# One dict-based function serves both writers: item_create builds a pystac Item
+# and passes its dict through here, and the one-time rewrite edits published
+# bodies with it. Two copies would drift, and the drift would be invisible
+# until someone compared an item built monthly with one rewritten (AC2).
+
+FILE_EXT = "https://stac-extensions.github.io/file/v2.1.0/schema.json"
+RASTER_EXT = "https://stac-extensions.github.io/raster/v1.1.0/schema.json"
+FOOTPRINT_METHODS = {METHOD_DOWNLOAD, METHOD_OVERVIEW}
+
+
+def _item_crs(props: dict):
+    if props.get("proj:epsg"):
+        return f"EPSG:{int(props['proj:epsg'])}"
+    if props.get("proj:wkt2"):            # 160 items carry no epsg (research/pgstac_round_trip.md)
+        return rasterio.crs.CRS.from_wkt(props["proj:wkt2"])
+    return None
+
+
+def item_footprint_apply(item: dict, row: dict | None, dem_key: str) -> list[str]:
+    """Write a cache row's footprint onto an item dict. Returns what changed.
+
+    A row that is missing or refused (empty, crs_mismatch) changes nothing: the
+    item keeps the geometry it was built or published with, rather than one
+    regenerated here - for ~58k rio_stac-built items that would silently swap a
+    reprojected quad for a box.
+    """
+    if not row or row.get("method") not in FOOTPRINT_METHODS:
+        return []
+    before = json.dumps(item, sort_keys=True)
+    name = item["assets"][dem_key]["href"].rsplit("/", 1)[1]
+    geom, bbox = item_geometry(row["footprint_wkt"], name)
+    item["geometry"], item["bbox"] = geom, bbox
+
+    props = item["properties"]
+    changed_ext = set(item.get("stac_extensions", []))
+    if "proj:geometry" in props:
+        crs = _item_crs(props)
+        if crs is not None:
+            props["proj:geometry"] = proj_geometry(geom, crs, props.get("proj:bbox"))
+
+    dem = item["assets"][dem_key]
+    bands = dem.get("raster:bands") or [{}]
+    bands[0] = {**bands[0], "statistics": {**bands[0].get("statistics", {}),
+                                           "valid_percent": float(row["valid_percent"])}}
+    dem["raster:bands"] = bands
+    changed_ext.add(RASTER_EXT)
+    if row.get("checksum"):
+        dem["file:checksum"] = row["checksum"]
+        dem["file:size"] = int(row["size"])
+        changed_ext.add(FILE_EXT)
+    item["stac_extensions"] = sorted(changed_ext)
+
+    if json.dumps(item, sort_keys=True) == before:
+        return []
+    return ["footprint"]

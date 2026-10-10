@@ -198,6 +198,26 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Footprints (#2): every DEM URL not yet in data/footprints.csv is read
+      # once -- this month's new tiles, plus any a previous run did not reach.
+      # Before item_create, so new items are built with their footprint.
+      #
+      # Time-boxed rather than allowed to fail the month: a tile it does not
+      # reach is built with its raster extent, and the next run computes it
+      # and lists it in urls_footprint_changed.txt, which the rebuild step
+      # below turns into a corrected item. A failure here degrades geometry for
+      # a month; it never loses an item. It is a warning, not silence.
+      - name: Compute footprints for tiles not yet cached
+        id: footprints
+        if: steps.detect.outputs.changes == 'true'
+        continue-on-error: true
+        run: |
+          .venv/bin/python scripts/footprint_extract.py \
+            --workers 16 --max-minutes 120 --min-free-gb 5 \
+            --errors logs/footprint_errors.txt \
+            --changed-out data/urls_footprint_changed.txt \
+            || { echo "::warning title=Footprints incomplete::footprint_extract exited $? - affected items keep their extent until next month; see logs/footprint_errors.txt"; exit 1; }
+
       - name: Create STAC items (incremental)
         if: steps.detect.outputs.new_urls == 'true'
         run: .venv/bin/python scripts/item_create.py --incremental
@@ -218,15 +238,19 @@ jobs:
             echo "::warning title=Item shortfall::created $CREATED of $NEW new items - some source URLs failed metadata extraction or were invalid; see run-logs artifact and the triage notes in scripts/README.md"
           fi
 
-      # A DSM can arrive for a DEM already in the catalog. Nothing else would
-      # rebuild that item -- item_create.py otherwise only ever sees newly-listed
-      # DEM URLs -- so the pairing diff drives an explicit rebuild pass. The file
-      # is written empty when nothing changed, so the step is a cheap no-op.
-      - name: Rebuild items whose DSM pairing changed
+      # A DSM can arrive for a DEM already in the catalog, and a footprint can
+      # arrive for an item built without one (#2). Nothing else would rebuild
+      # those items -- item_create.py otherwise only ever sees newly-listed DEM
+      # URLs -- so both diffs drive one rebuild pass. Each file is written empty
+      # when nothing changed, so the step is a cheap no-op.
+      - name: Rebuild items whose DSM pairing or footprint changed
         if: steps.detect.outputs.changes == 'true'
         run: |
-          if [ -s data/urls_pairing_changed.txt ]; then
-            echo "rebuilding $(wc -l < data/urls_pairing_changed.txt) items"
+          for f in data/urls_pairing_changed.txt data/urls_footprint_changed.txt; do
+            if [ -f "$f" ]; then cat "$f"; fi
+          done | sort -u > "$RUNNER_TEMP/urls_rebuild.txt"
+          if [ -s "$RUNNER_TEMP/urls_rebuild.txt" ]; then
+            echo "rebuilding $(wc -l < "$RUNNER_TEMP/urls_rebuild.txt") items"
             if [ ! -s "$STAC_OUTPUT_DIR/collection.json" ]; then
               mkdir -p "$STAC_OUTPUT_DIR"
               curl -fsSL https://stac-dem-bc.s3.amazonaws.com/collection.json \
@@ -235,9 +259,9 @@ jobs:
               # step above.
               .venv/bin/python scripts/collection_patch.py --path "$STAC_OUTPUT_DIR/collection.json" --clear-version
             fi
-            .venv/bin/python scripts/item_create.py --urls-file data/urls_pairing_changed.txt
+            .venv/bin/python scripts/item_create.py --urls-file "$RUNNER_TEMP/urls_rebuild.txt"
           else
-            echo "no pairing changes"
+            echo "no pairing or footprint changes"
           fi
 
       # One-time reconciliation of the historical catalogue, run by dispatching
@@ -389,6 +413,7 @@ jobs:
             data/backfill_errors.txt
             data/migrate_done.txt
             data/migrate_errors.txt
+            logs/footprint_errors.txt
           if-no-files-found: ignore
 
       - name: Commit refreshed caches

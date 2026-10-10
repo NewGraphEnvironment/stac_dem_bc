@@ -327,3 +327,73 @@ def test_checksum_is_a_sha256_multihash():
     import hashlib
     h = hashlib.sha256(b"abc")
     assert fp.multihash(h) == "1220" + h.hexdigest()
+
+
+# =============================================================================
+# Onto an item (one function for the monthly build and the rewrite)
+# =============================================================================
+
+HREF = f"https://nrs.objectstore.gov.bc.ca/gdwuts/092/092g/2024/dem/{TILE}"
+
+
+def published(kind="cache"):
+    """Item bodies in the three shapes the catalogue holds."""
+    c = cell_native()
+    x0, y0, x1, y1 = c.buffer(22).bounds
+    props = {"datetime": "2024-01-01T00:00:00Z", "proj:bbox": [x0, y0, x1, y1],
+             "proj:geometry": mapping(box(x0, y0, x1, y1)), "proj:shape": [1, 1]}
+    if kind == "wkt2":
+        from rasterio.crs import CRS
+        props["proj:epsg"] = None
+        props["proj:wkt2"] = CRS.from_epsg(26910).to_wkt()
+    else:
+        props["proj:epsg"] = 26910
+    ll = shape(fp.transform_geom(UTM10, fp.OUT_CRS, mapping(box(x0, y0, x1, y1))))
+    geom = mapping(ll.envelope if kind == "cache" else ll)   # rio_stac: a reprojected quad
+    return json.loads(json.dumps({
+        "type": "Feature", "stac_version": "1.1.0",
+        "stac_extensions": ["https://stac-extensions.github.io/projection/v1.1.0/schema.json"],
+        "id": "092-092g-2024-dem-x", "geometry": geom, "bbox": list(shape(geom).bounds),
+        "properties": props, "links": [],
+        "assets": {"dem": {"href": HREF, "type": "image/tiff; application=geotiff", "roles": ["data"]}},
+    }))
+
+
+def gap_row():
+    t, mask, _, _ = gap_mask(0.4)
+    return {"method": "download", **compute(mask, t), "checksum": "1220" + "ab" * 32, "size": "5909570"}
+
+
+@pytest.mark.parametrize("kind", ["cache", "riostac", "wkt2"])
+def test_apply_writes_every_field_and_is_idempotent(kind):
+    it = published(kind)
+    row = gap_row()
+    assert fp.item_footprint_apply(it, row, "dem") == ["footprint"]
+    g = shape(it["geometry"])
+    assert it["bbox"] == list(g.bounds)
+    assert g.within(fp.bcgs_cell(TILE).buffer(1e-7))
+    pg = shape(it["properties"]["proj:geometry"])
+    assert pg.within(box(*it["properties"]["proj:bbox"]).buffer(0.01))
+    assert pg.area / cell_native().area == pytest.approx(0.6, abs=0.03)
+    dem = it["assets"]["dem"]
+    assert dem["raster:bands"][0]["statistics"]["valid_percent"] == row["valid_percent"]
+    assert dem["file:checksum"] == row["checksum"] and dem["file:size"] == 5909570
+    assert {fp.FILE_EXT, fp.RASTER_EXT} <= set(it["stac_extensions"])
+    assert fp.item_footprint_apply(it, row, "dem") == []      # a re-run rewrites nothing
+
+
+def test_a_cell_row_gives_the_cell():
+    it = published()
+    fp.item_footprint_apply(it, {"method": "download", "footprint_wkt": "", "valid_percent": "98.9",
+                                 "checksum": "", "size": ""}, "dem")
+    assert shape(it["geometry"]).equals(fp.bcgs_cell(TILE))
+    assert "file:checksum" not in it["assets"]["dem"]           # an overview read saw no bytes
+    assert fp.FILE_EXT not in it["stac_extensions"]
+
+
+@pytest.mark.parametrize("row", [None, {"method": "empty"}, {"method": "crs_mismatch"}])
+def test_no_footprint_leaves_the_item_alone(row):
+    it = published("riostac")
+    before = json.dumps(it, sort_keys=True)
+    assert fp.item_footprint_apply(it, row, "dem") == []
+    assert json.dumps(it, sort_keys=True) == before

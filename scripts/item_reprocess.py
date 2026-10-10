@@ -20,6 +20,8 @@ import os
 from tqdm import tqdm
 from datetime import datetime, timezone
 
+from item_fields import footprints_load, pystac_item_fields_apply
+
 from stac_utils import (
     ASSET_DEM,
     ASSET_DSM,
@@ -42,7 +44,7 @@ PATH_COLLECTION = f"{PATH_LOCAL}/collection.json"
 INVALID_URLS_FILE = "data/urls_invalid_items.txt"
 
 def process_item(path_item: str, collection, results_lookup,
-                 dsm_lookup: dict | None = None) -> dict | None:
+                 dsm_lookup: dict | None = None, footprints: dict | None = None) -> dict | None:
     """
     Process a single GeoTIFF URL to create a STAC item with datetime handling.
 
@@ -128,6 +130,8 @@ def process_item(path_item: str, collection, results_lookup,
                 ),
             )
 
+        item = pystac_item_fields_apply(item, href_item, footprints or {})
+
         # Save item JSON locally (overwrites invalid version)
         path_item_json = f"{PATH_LOCAL}/{item_id}.json"
         item.save_object(dest_href=path_item_json, include_self_link=False)
@@ -189,6 +193,8 @@ def main():
     from item_create import dsm_lookup_load
     dsm_lookup = dsm_lookup_load()
     print(f"✓ Loaded {len(dsm_lookup)} DEM->DSM pairs")
+    footprints = footprints_load()
+    print(f"✓ Loaded {len(footprints)} footprint rows")
     print()
 
     # Process items in parallel
@@ -203,7 +209,7 @@ def main():
                 tqdm(
                     executor.map(
                         lambda url: process_item(url, collection, results_lookup,
-                                                 dsm_lookup),
+                                                 dsm_lookup, footprints),
                         urls_to_process
                     ),
                     total=len(urls_to_process),
