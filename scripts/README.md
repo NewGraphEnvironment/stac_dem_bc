@@ -30,6 +30,7 @@ This pipeline builds a searchable catalog of British Columbia's Digital Elevatio
 Rscript scripts/urls_fetch.R
 python scripts/urls_check_access.py
 python scripts/collection_create.py
+python scripts/footprint_extract.py   # resumable; ~20 h the first time, then only new tiles
 python scripts/item_create.py
 python scripts/item_validate.py
 Rscript scripts/s3_sync.R
@@ -45,6 +46,7 @@ Rscript scripts/s3_sync.R
 | 2 | `urls_check_access.py` | Verify source URLs are actually reachable (parallel HTTP HEAD checks), flagging 403s or other access problems |
 | 3 | `collection_create.py` | Create the top-level STAC collection record (`collection.json`) with extent, providers and keywords |
 | 3b | `collection_patch.py` | Apply collection metadata (providers, keywords, description) to an **existing** `collection.json` — the monthly run fetches the published collection rather than regenerating it, so `collection_create.py` never runs there |
+| 3c | `footprint_extract.py` | Read every tile not yet in `data/footprints.csv` once and record its **footprint** — the BCGS 1:2,500 cell minus its no-data, or the valid data for tiles named off that grid — with `valid_percent`, and a sha256 + size where the file was downloaded whole. Streams to one scratch directory removed at exit; stops cleanly below `--min-free-gb`; resumable. Logic in `footprint.py` (#2) |
 | 4 | `item_create.py` | The main workhorse — read each GeoTIFF's metadata remotely, cache it, and generate a STAC JSON record for each file (32 parallel workers) |
 | 5 | `item_validate.py` | Check every generated STAC JSON against the spec using pystac, producing a pass/fail report |
 | 6 | `s3_sync.R` | Sync the local catalog to the S3 bucket, uploading only new or changed files |
@@ -74,6 +76,7 @@ metadata-cache rows predate spatial-metadata caching).
 | `item_rewrite.py` | The shared harness. Library only, no CLI: fetch with retry, a resumable manifest, the error-rate gate, and verification by re-derivation. Every behaviour in it has a named incident behind it |
 | `item_backfill.py` | #31: add the `dsm` asset to published items, and percent-encode the 90 legacy hrefs carrying literal spaces |
 | `item_migrate.py` | #34: move published items to the renamed collection and the renamed DEM asset key |
+| `footprint_apply.py` | #2/#55: footprint geometry, `valid_percent` and checksum on `dem`, `lidarbc:delivery`, and `datetime_unknown` → `lidarbc:datetime_unknown`. Uses `item_fields.py`, the same apply path `item_create.py` uses; refuses a full run until the footprint cache covers every listed URL |
 
 Three things to know before running either:
 
@@ -96,6 +99,8 @@ Three things to know before running either:
 
 | Script | What it does |
 |--------|--------------|
+| `footprint.py` | #2: the BCGS cell from a tile id, a footprint from a validity mask (outward-biased simplification, vertex cap, CCW, rounding), reading a tile, and writing the fields onto an item |
+| `item_fields.py` | #2/#55: the one path that applies footprint and `lidarbc:` fields to an item dict, and `audit`, which checks a staged set for them (stacs audit covers ids and asset keys only) |
 | `stac_utils.py` | Shared Python utilities — metadata extraction, date parsing, URL encoding, tile-key parsing for DEM/DSM pairing, constants (paths, BC bounding box) |
 | `urls_listing.R` | Shared objectstore listing — one bucket walk yielding DEM keys, DSM keys and `dsm/` directory membership |
 | `functions.R` | R utilities for VM deployment and table formatting |
@@ -118,6 +123,8 @@ data/dem_dsm_pairs.csv          (one row per DEM, always)
 data/dsm_pairing_report.md      (what paired, and every tile that did not)
   ↓ urls_check_access.py — verify URLs are reachable
 data/urls_access_checks.csv
+  ↓ footprint_extract.py — read each new tile once: footprint, valid %, sha256
+data/footprints.csv             (empty footprint_wkt = the tile's BCGS cell)
   ↓ item_create.py — read metadata, cache it, generate STAC records
 data/stac_geotiff_checks.csv          (cached metadata)
 stac/prod/stac_dem_bc/*.json           (one record per DEM tile)
@@ -139,6 +146,7 @@ Every step checks for existing outputs and skips work already done. You can re-r
 | `urls_fetch.R` | Reuses cached `urls_list.txt` in test mode |
 | `dsm_pair.py` | Nothing — it is pure and fast (~1 s over 100k tiles), and is re-run whenever the listing changes |
 | `urls_check_access.py` | URLs already checked (cached in CSV) |
+| `footprint_extract.py` | Tiles already in `data/footprints.csv`; a killed run keeps every row it wrote |
 | `item_create.py` | GeoTIFFs with cached metadata skip the slow remote read; existing items skip creation |
 | `item_validate.py` | In `--incremental` mode, only validates items added since the last run |
 | `s3_sync.R` | Only uploads new or changed files |

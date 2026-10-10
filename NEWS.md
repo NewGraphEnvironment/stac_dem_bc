@@ -11,7 +11,38 @@ matching `water-temp-bc`. Releases live here and in git tags.
 
 ## Unreleased
 
-Tooling only — the published catalogue is unchanged.
+**Catalogue change (#2, #55)**, published by dispatching `update.yml` with `footprint: true`
+after this merges. Until that dispatch runs, the published catalogue is unchanged.
+
+- **Item geometry is the tile's footprint**, not its raster extent. For tiles named on the BCGS
+  1:2,500 grid it is the grid cell minus any no-data inside it; for the rest (no-quadrant
+  sheet ids, `albers10k2m`) it is the valid data. Delivered rasters are the UTM rectangle
+  around the cell plus ~22 m of overlap, so a full tile's footprint is exactly its cell and
+  neighbours no longer overlap. A search over an area a tile has no data for no longer returns
+  it — in a sample of 144 tiles, 21 of 112 interior and 8 of 32 delivery-edge tiles had gaps
+  inside their cell, up to 48% of it. `bbox` is the bounds of the published geometry, and
+  `proj:geometry` the same footprint in the item's CRS. QGIS draws `bbox`, so a partly empty
+  tile's box shrinks; a diagonal strip of data still draws as a rectangle.
+- The `dem` asset carries `raster:bands[0].statistics.valid_percent` and, where the whole file
+  was read (every tile up to 64 MB), `file:checksum` (sha256 multihash) and `file:size`.
+  Larger files are read at their coarsest overview and carry no checksum. The DSM is assumed
+  to cover what the DEM covers.
+- `lidarbc:delivery` (`"092/092g/2016"`) on every item from a LidarBC delivery — every item but
+  the `albers10k2m` ones — the key stac-pointcloud-bc items carry, plus one `related` link from
+  the collection to stac-pointcloud-bc (#55). The `lidarbc:` schema is crate's (`lidarbc`
+  v1.1.0). Declaring the key as a queryable is pgstac-side and waits on
+  NewGraphEnvironment/stacs#8.
+- The `albers10k2m` items' unprefixed `datetime_unknown` is now `lidarbc:datetime_unknown`.
+- Not repaired, reported: two tiles named `…_utm11_…` declare UTM zone 14 (EPSG:6657), so their
+  published items sit in Manitoba — `bc_082e003_3_2_2_xli1m_utm11_20240721_20240726` and
+  `bc_082f010_1_1_1_xli1m_utm11_20241008_20250813`. The footprint step refuses them
+  (`crs_mismatch`) and they keep their published geometry.
+- Monthly runs compute footprints for tiles not yet cached before building items, time-boxed
+  and non-fatal: a tile it does not reach is built with its extent and rebuilt the next month
+  from `data/urls_footprint_changed.txt`. `item_fields.py audit` checks every staged set for
+  the new fields.
+
+Tooling — the published catalogue is unchanged by these.
 
 - Registration and verification are now the
   [`stacs`](https://github.com/NewGraphEnvironment/stacs) package, pinned at

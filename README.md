@@ -23,6 +23,26 @@ footprint:
 | `dem` | bare-earth digital elevation model — every item has one |
 | `dsm` | digital surface model, where the delivery published one — **95,888 of 102,460** |
 
+An item’s **geometry is its footprint** — the part of the tile that
+holds data, not the raster’s extent
+([\#2](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/2)).
+For tiles named on the BC Geographic System 1:2,500 grid it is the grid
+cell minus any no-data inside it, so a full tile’s footprint is exactly
+its cell and neighbours meet without overlapping; for the rest it is the
+valid data. A search for an area a tile has no data over no longer
+returns that tile. The `dem` asset carries
+`raster:bands[0].statistics.valid_percent` (the share of the raster
+holding elevations) and, where the whole file was read, `file:checksum`
+(sha256) and `file:size`. The DSM is assumed to cover what the DEM
+covers; its own coverage is not measured. Every item from a LidarBC
+delivery carries `lidarbc:delivery` (`"092/092g/2016"`), the key
+[`stac-pointcloud-bc`](https://github.com/NewGraphEnvironment/stac_pointcloud_bc)
+items share, so a tile matches its delivery’s point clouds with one
+filter
+([\#55](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/55));
+the `lidarbc:` fields are defined in
+[crate](https://github.com/NewGraphEnvironment/crate).
+
 <br>
 
 The catalog refreshes monthly: a scheduled [GitHub Actions
@@ -118,6 +138,11 @@ and filter by the current map view. See [Lutra Consulting’s STAC-in-QGIS
 blog post](https://www.lutraconsulting.co.uk/blogs/stac-in-qgis) for a
 walk-through.
 
+QGIS draws each item’s `bbox`, not its geometry. Since the bbox is the
+bounds of the footprint, a partly empty tile’s box now shrinks to its
+data, but a tile whose data is a diagonal strip still draws as a
+rectangle.
+
 <div class="figure">
 
 <img src="fig/a11sone01.png" alt="Connecting to https://images.a11s.one" width="100%" />
@@ -158,7 +183,11 @@ the goal open since the first build — and the July catch-up grew the
 collection from 58k to ~98k fully-validated items. Items now also carry
 the **digital surface model** alongside the bare-earth DEM
 ([\#31](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/31)),
-paired on tile id and acquisition date. Still ahead:
+paired on tile id and acquisition date, and each item’s geometry is its
+**footprint** — the tile’s grid cell minus its no-data — rather than its
+raster extent
+([\#2](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/2)).
+Still ahead:
 
 - **Registration from CI** — registration is a client-side upsert from
   this repo (the [`stacs`](https://github.com/NewGraphEnvironment/stacs)
@@ -179,10 +208,6 @@ paired on tile id and acquisition date. Still ahead:
   — 264 canopy-height tiles are published province-wide, ~1.1% coverage
   of the mapsheet-years that carry them. Worth indexing for
   completeness; not a substitute for deriving.
-- **True footprint geometry**
-  ([\#2](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/2)) —
-  recalculate per-item footprints to exclude no-data pixels rather than
-  using bounding boxes; gives accurate spatial-overlap queries.
 - **Structured logging + performance benchmarking**
   ([\#6](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/6)) —
   instrument the pipeline so build performance is quantifiable across

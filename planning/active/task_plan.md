@@ -32,7 +32,7 @@ Review findings and dispositions: `review-1.md`.
 - [x] Validate cell-from-id against cached bounds (3,000) and pixels (144); numbering is SW-origin
 - [x] Note undeclared −3.4e38 and all-nodata tiles in the sample (0 and 0 of 144)
 - [x] Escalate: edge heuristic falsified → user chose full read (2026-10-10)
-- [ ] `research/footprints.md`: what is known (numbering, overlap pad, gap rates, cost), with producers
+- [x] `research/footprints.md`: what is known (numbering, overlap pad, gap rates, cost), with producers
 
 ## Phase 2: Footprint functions + tests (tests first)
 - [x] `tests/test_footprint.py`: cell from every id form (underscore, concatenated, `bcts_`), non-BCGS ids → None; full-population check that every cached-bounds BCGS tile's cell lies inside its raster bounds (zero I/O)
@@ -49,7 +49,7 @@ Review findings and dispositions: `review-1.md`.
 ## Phase 4: New-item path
 - [x] One helper applies a footprint row to an item (geometry, bbox, proj:geometry in the item's CRS incl. `proj:wkt2`, ∩ proj:bbox; file + raster fields on `dem`; extension URLs); used by item_create's cache and rio_stac branches and `item_reprocess.py`
 - [x] Missing row → geometry left as built, counted and logged; the URL is picked up by the next extract and rebuilt via `urls_footprint_changed.txt`
-- [ ] `update.yml`: footprint step (time-boxed) before item_create; footprint-changed rebuild beside the pairing rebuild; `build_safe.sh` and README Quick Start get the step
+- [x] `update.yml`: footprint step (time-boxed) before item_create; footprint-changed rebuild beside the pairing rebuild; `build_safe.sh` and README Quick Start get the step
 - [x] Tests for both item paths and the helper
 
 ## Phase 5: `lidarbc:` fields (#55 + rename) — schema waits on crate#23
