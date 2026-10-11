@@ -42,6 +42,7 @@ import urllib.request
 
 import numpy as np
 import rasterio
+import rasterio.enums
 import rasterio.features
 from rasterio.warp import transform_geom
 import shapely
@@ -377,11 +378,25 @@ def _download(url: str, workdir: str):
     return path, multihash(h), size
 
 
+# A downloaded file is read whole only up to this many pixels. 954 non-COG
+# mapsheet tiles are 11k x 13k at 1 m (~520 MB, strip-organised, no overviews):
+# full resolution is ~650 MB of float32 plus a 160 Mpx polygonize per worker,
+# which a 16 GB runner cannot hold 16 times over. Decimated on read instead
+# (nearest), like an overview; the checksum still covers the whole download.
+MAX_READ_PIXELS = 25_000_000
+
+
 def _read(path, overview_level=None):
     kw = {} if overview_level is None else {"overview_level": overview_level}
     with rasterio.open(path, **kw) as src:
-        a = src.read(1)
-        return valid_mask(a, src.nodata), src.transform, src.crs
+        h, w = src.height, src.width
+        f = max(1, int(np.ceil(np.sqrt(h * w / MAX_READ_PIXELS))))
+        if f == 1:
+            return valid_mask(src.read(1), src.nodata), src.transform, src.crs
+        oh, ow = -(-h // f), -(-w // f)
+        a = src.read(1, out_shape=(oh, ow), resampling=rasterio.enums.Resampling.nearest)
+        transform = src.transform * src.transform.scale(w / ow, h / oh)
+        return valid_mask(a, src.nodata), transform, src.crs
 
 
 def footprint_read(url: str, workdir: str) -> dict:

@@ -220,6 +220,9 @@ jobs:
       # below turns into a corrected item. A failure here degrades geometry for
       # a month; it never loses an item. It is a warning, not silence.
       #
+      # 8 workers, not 16: mapsheet tiles are ~520 MB downloads (no overviews),
+      # so 16 in flight is ~10 GB of scratch on a runner with little more free.
+      #
       # Every run, not only months the bucket changed: a tile the time box
       # missed, or an item a failed run left on the rebuild list, would
       # otherwise wait for the next upstream change, however long that is.
@@ -236,7 +239,7 @@ jobs:
           if [ "${{ steps.detect.outputs.new_urls }}" = "true" ]; then NEW=(--new-urls data/urls_new.txt); fi
           set +e
           .venv/bin/python scripts/footprint_extract.py \
-            --workers 16 --max-minutes 120 --min-free-gb 5 \
+            --workers 8 --max-minutes 120 --min-free-gb 10 \
             --errors logs/footprint_errors.txt \
             --changed-out data/urls_footprint_changed.txt "${NEW[@]}"
           rc=$?

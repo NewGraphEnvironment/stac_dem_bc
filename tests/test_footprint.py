@@ -411,3 +411,20 @@ def test_a_non_bcgs_footprint_outside_bc_is_refused():
     t = Affine(1.0, 0, 316000, 0, -1.0, 5437000)
     with pytest.raises(fp.FootprintOutsideBC):
         fp.footprint_from_mask(np.ones((100, 100), bool), t, "EPSG:6657", "bc_082e003_xli1m_utm11_2018.tif")
+
+
+def test_a_large_download_is_decimated_on_read(tmp_path, monkeypatch):
+    import rasterio
+    monkeypatch.setattr(fp, "MAX_READ_PIXELS", 10_000)
+    t, mask, _, _ = gap_mask(0.4)
+    a = np.where(mask, 500.0, -32767.0).astype("float32")
+    path = str(tmp_path / TILE)
+    with rasterio.open(path, "w", driver="GTiff", width=a.shape[1], height=a.shape[0], count=1,
+                       dtype="float32", crs=UTM10, transform=t, nodata=-32767) as dst:
+        dst.write(a, 1)
+    m, tr, crs = fp._read(path)
+    assert m.size <= 10_000 * 1.1
+    # the same footprint, at the coarser resolution
+    full = fp.geom_native(compute(mask, t)["footprint_wkt"], UTM10)
+    coarse = fp.geom_native(fp.footprint_from_mask(m, tr, crs, TILE)["footprint_wkt"], UTM10)
+    assert coarse.symmetric_difference(full).area / full.area < 0.05

@@ -153,3 +153,15 @@ Full read of the 94,808 non-COG 1:2,500 tiles: **559 GB ≈ 20 h at 7.8 MB/s (46
   `footprint_extract.py --audit`, which checks every written row. The running extraction is a
   frozen copy without these guards, so its cache is audited after it finishes.
 - Full run rate: ~0.4 tiles/s through the `082e` 2018/2019 mapsheet COGs (overview reads).
+
+## Large strip tiles (2026-10-10, during the full run)
+
+- 954 non-COG, non-BCGS, non-albers tiles (no-quadrant mapsheet ids; most in 092p/2019, 094a/2024,
+  082f/2022, 082l/2019, …): sample of 10 averaged **521 MB**, 11–12k × 13–15k px at 1 m,
+  `Block=<width>x1`, **no overviews**. ≈ 500 GB, ≈ +20 h at 7 MB/s, on top of the 1:2,500 tiles.
+- A decimated remote read (`out_shape` 1/8, nearest, `/vsicurl/`) of one 600 MB tile did not
+  finish in 10 min: range requests over 11k strips are slower than downloading. Killed.
+- Full run peak scratch 6.8 GB (24 workers × up to 688 MB); Python RSS 2.9–3.6 GB of 68 GB.
+- Changed for later runs (the frozen full run keeps its behaviour): a downloaded raster over 25 Mpx
+  is decimated on read (nearest; ~3 m for a mapsheet), checksum still over the whole file; CI uses
+  8 workers and a 10 GB free-disk floor.
