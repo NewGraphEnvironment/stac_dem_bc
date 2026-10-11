@@ -316,10 +316,12 @@ def test_a_coastline_finishes_and_holds_all_its_data():
                          capture_output=True, text=True).stdout.strip()
     mask, t, crs = coast_mask()
     g = fp.geom_native(out, crs)
-    data = fp.polygonize(mask, t)
+    # What the function promises to cover: the data after speck hygiene. The
+    # fixture loses no part to hygiene, so the allowance is rounding, not area
+    # (an under-buffer by t/2 drops 1,538 m2 here; 10 * MIN_AREA_M2 hid it).
+    data = fp._hygiene(fp.polygonize(mask, t), max(fp.MIN_AREA_M2, (4 * abs(t.a)) ** 2))
     assert fp.vertex_count(shapely_wkt.loads(out)) <= fp.VERTEX_CAP
-    # Specks under MIN_AREA_M2 are dropped by design; everything else is inside.
-    assert data.difference(g.buffer(0.01)).area <= 10 * fp.MIN_AREA_M2
+    assert data.difference(g.buffer(0.01)).area < 1.0
 
 
 def test_a_non_bcgs_tile_is_clipped_to_its_extent():

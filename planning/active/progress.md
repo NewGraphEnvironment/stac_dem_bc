@@ -29,3 +29,4 @@
 - Full run stalled at 10,244 rows: all 24 workers in GEOS buffer on coastal mapsheet tiles (findings, "The full run stalled"). Stopped (`bfdthucrx`); the cache is resumable and intact (complete last line)
 - Fix: simplify before buffering after round 1; real coastal mask as fixture; test fails at 60 s against the old loop. 310 tests pass
 - Restarted from a frozen copy of HEAD (guards included)
+- Review round 5 (one reviewer, the buffer fix): coverage argument sound, mitre 2.0 never short, test fails on the old loop; one fragile finding — the 10×MIN_AREA_M2 allowance hid a 1,538 m² under-buffer. Tightened to hygiene-cleaned data < 1 m²; mutant now RED
