@@ -36,8 +36,16 @@ def test_every_condition_naming_two_rewrites_names_all_three():
             assert len(named) == 3, f"{s.get('name')}: {cond}"
 
 
+# Steps that name rewrite inputs for reasons other than "is this a rewrite run":
+# the rebuild names `footprint` (its rewrite covers the footprint list) and
+# `backfill` (it re-pairs), separately, and neither branch is about rename.
+NOT_REWRITE_BRANCHES = {"Rebuild items whose DSM pairing or footprint changed"}
+
+
 def test_every_shell_branch_naming_two_rewrites_names_all_three():
     for s in steps():
+        if s.get("name") in NOT_REWRITE_BRANCHES:
+            continue
         run = s.get("run", "")
         for line_block in run.split("\n          if ["):
             named = [r for r in REWRITES if r in line_block]
@@ -94,3 +102,10 @@ def test_monthly_validation_gate_is_a_full_pass_over_the_staged_set():
     monthly = run[run.index("else"):]
     first = monthly.index('--output "$RUNNER_TEMP/validation_staged.csv"')
     assert first < monthly.index('--items-dir "$STAC_OUTPUT_DIR" --incremental')
+
+
+def test_the_footprint_list_is_not_rebuilt_on_dispatch_or_when_too_long():
+    run = {s.get("name"): s for s in steps()}["Rebuild items whose DSM pairing or footprint changed"]["run"]
+    add = run.index("LISTS+=(data/urls_footprint_changed.txt)")
+    block = run[run.index('if [ "${{ inputs.footprint }}" = "true" ]'):add]
+    assert '-gt 2000' in block and "elif" in block and "else" in block

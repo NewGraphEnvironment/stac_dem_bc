@@ -117,3 +117,11 @@ def test_another_migrations_manifest_is_refused(world, monkeypatch):
     (tmp / "done.txt").write_text("# migration: 34-collection-rename\nx\n")
     with pytest.raises(RuntimeError):
         run(monkeypatch, argv)
+
+
+def test_a_full_run_refuses_a_cache_with_faults(world, monkeypatch):
+    tmp, out, argv, _ = world
+    fps = tmp / "footprints.csv"
+    rows = fps.read_text().replace(",download,,", ",download,\"POLYGON ((-101.5 49, -101.4 49, -101.4 49.1, -101.5 49))\",", 1)
+    fps.write_text(rows)
+    assert run(monkeypatch, argv) == 1

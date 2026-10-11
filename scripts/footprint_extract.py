@@ -330,14 +330,13 @@ def main() -> int:
     ap.add_argument("--audit", action="store_true",
                     help="Check every footprint row in the cache (valid, inside BC) and exit; reads nothing")
     ap.add_argument("--changed-out", default=None,
-                    help=f"Rebuild list: URLs that gain a row and are not new (default {CHANGED} "
-                         f"when the default cache is used, so no caller can add rows unlisted)")
+                    help=f"Rebuild list ({CHANGED} in CI): URLs that gain a row and are not new. "
+                         f"Not defaulted: a local or first run reads tiles whose items the one-time "
+                         f"footprint rewrite covers, and listing ~100k of them would make every "
+                         f"monthly run try to rebuild them all")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s",
                         datefmt="%H:%M:%S")
-
-    if args.changed_out is None and args.cache == CACHE:
-        args.changed_out = CHANGED
 
     if args.prune_changed:
         if not args.changed_out:

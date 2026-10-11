@@ -30,7 +30,10 @@ This pipeline builds a searchable catalog of British Columbia's Digital Elevatio
 Rscript scripts/urls_fetch.R
 python scripts/urls_check_access.py
 python scripts/collection_create.py
-python scripts/footprint_extract.py   # resumable; ~20 h the first time, then only new tiles
+python scripts/footprint_extract.py   # resumable; ~40 h the first time, then only new tiles
+# A local run writes rows without listing their published items for rebuild (CI
+# passes --changed-out). Follow one with a footprint dispatch of update.yml, which
+# rewrites every published item from the cache and leaves correct ones untouched.
 python scripts/item_create.py
 python scripts/item_validate.py
 Rscript scripts/s3_sync.R

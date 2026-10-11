@@ -284,7 +284,24 @@ jobs:
           # The pairing list only when this run re-paired: dsm_pair writes it on
           # runs with upstream changes, and on a footprint-only run the
           # committed file is the last change-month's -- already published.
-          LISTS=(data/urls_footprint_changed.txt)
+          #
+          # The footprint list is skipped on the footprint dispatch, which
+          # rewrites every published item itself, and when it is too long to
+          # rebuild from source on a runner (item_create reads ~half the tiles
+          # remotely; ~100k would exceed the job timeout every month and never
+          # reach the sync that prunes it). Skipped URLs stay listed; a
+          # footprint dispatch stages their rewritten bodies and the commit
+          # step prunes them.
+          LISTS=()
+          N_FP=0
+          if [ -f data/urls_footprint_changed.txt ]; then N_FP=$(wc -l < data/urls_footprint_changed.txt | tr -d ' '); fi
+          if [ "${{ inputs.footprint }}" = "true" ]; then
+            echo "footprint dispatch: the rewrite covers the $N_FP listed footprint URL(s)"
+          elif [ "$N_FP" -gt 2000 ]; then
+            echo "::warning title=Footprint rebuild list too long::$N_FP URLs - not rebuilt from source; dispatch update.yml with footprint=true to rewrite them"
+          else
+            LISTS+=(data/urls_footprint_changed.txt)
+          fi
           if [ "${{ steps.detect.outputs.changes }}" = "true" ] || [ "${{ inputs.backfill }}" = "true" ]; then
             LISTS+=(data/urls_pairing_changed.txt)
           fi

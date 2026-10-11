@@ -41,7 +41,7 @@ import sys
 import threading
 
 from footprint import FOOTPRINT_METHODS, item_geometry
-from footprint_extract import CACHE, cache_load, urls_read
+from footprint_extract import CACHE, cache_audit, cache_load, urls_read
 from item_fields import item_faults, item_fields_apply
 from item_rewrite import (
     ERR_EDIT,
@@ -126,6 +126,13 @@ def main() -> int:
         logger.error("%d listed URL(s) have no footprint row, e.g. %s. Run "
                      "scripts/footprint_extract.py to completion first.",
                      len(uncovered), sorted(uncovered)[:2])
+        return 1
+    faults = cache_audit(footprints)
+    if faults and args.limit is None:
+        # The guards that refuse a bad footprint arrived after the first full
+        # extraction started; this checks what it wrote before publishing it.
+        for kind, urls in faults.items():
+            logger.error("Footprint cache FAULT %s: %d, e.g. %s", kind, len(urls), urls[:2])
         return 1
     logger.info("Footprint rows: %d (covering %d of %d listed URLs)",
                 len(footprints), len(listed) - len(uncovered), len(listed))
