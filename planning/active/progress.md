@@ -23,3 +23,9 @@
 - `/code-check branch`: 4 rounds (`607d197`, `802f7d2`, `d199881`, `61ba107`), plus large-tile decimation `72c0444`. Rounds 2 and 4 each found a defect inside the previous round's fix; ended by enumeration (round 3's 22-row table, re-walked in round 4). Filed #56, #57 (pre-existing).
 - Full extraction: 2,729 rows at 00:33Z (0.53 tiles/s); the 954 ~520 MB mapsheet tiles dominate; ETA ~2 days
 - Next: draft PR; when extraction completes — `--audit`, commit data/footprints.csv, NEWS counts, delete data/footprint_errors.txt, archive, mark ready
+
+## Session 2026-10-11 — extraction stall
+
+- Full run stalled at 10,244 rows: all 24 workers in GEOS buffer on coastal mapsheet tiles (findings, "The full run stalled"). Stopped (`bfdthucrx`); the cache is resumable and intact (complete last line)
+- Fix: simplify before buffering after round 1; real coastal mask as fixture; test fails at 60 s against the old loop. 310 tests pass
+- Restarted from a frozen copy of HEAD (guards included)

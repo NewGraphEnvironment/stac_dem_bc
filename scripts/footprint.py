@@ -281,7 +281,14 @@ def footprint_from_mask(mask: np.ndarray, transform, crs, name: str) -> dict:
 
     t = tol
     while True:
-        g = data.buffer(t, join_style="mitre", mitre_limit=2.0).simplify(t)
+        if t == tol:
+            g = data.buffer(t, join_style="mitre", mitre_limit=2.0).simplify(t)
+        else:
+            # Never buffer the pixel staircase itself by a large distance: GEOS
+            # buffer goes quadratic in it (a coastal tile took 347 s at 192 m and
+            # hours above). Simplify by t/2 first, so the buffer by t still covers
+            # every pixel and the closing simplify by t/2 cannot cut back into it.
+            g = data.simplify(t / 2).buffer(t, join_style="mitre", mitre_limit=2.0).simplify(t / 2)
         g = unary_union(_polygons(g.intersection(clip)))
         if g.is_empty:
             raise FootprintEmpty(f"{name}: no data inside the {'cell' if cell else 'extent'}")

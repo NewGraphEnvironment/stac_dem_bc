@@ -165,3 +165,36 @@ Full read of the 94,808 non-COG 1:2,500 tiles: **559 GB ≈ 20 h at 7.8 MB/s (46
 - Changed for later runs (the frozen full run keeps its behaviour): a downloaded raster over 25 Mpx
   is decimated on read (nearest; ~3 m for a mapsheet), checksum still over the whole file; CI uses
   8 workers and a 10 GB free-disk floor.
+
+## The full run stalled on coastal mapsheet tiles (2026-10-11)
+
+- 10,000 rows by 2026-10-11T04:57Z, then 244 rows in the next 10.5 h; last row 13:23Z. The process
+  sat at ~935% CPU and 19.7 GB RSS with no open scratch file and no network traffic. `sample`
+  put all 24 worker threads in `GEOSBufferWithParams_r` → `BufferBuilder::insertUniqueEdge` /
+  `EdgeList::findEqualEdge`. In flight: 082g014, 082j081, 082l08x, 082m0xx, 092b0xx (2019 `xl1m`
+  mapsheets; 092b is the Saanich coast).
+- Mechanism: the footprint loop doubles the tolerance t until the outline is ≤ 100 vertices, and
+  every round buffered the **full-resolution pixel staircase** by t. A mitre buffer of a staircase
+  goes quadratic in t. Measured on `bc_092b032_xl1m_utm10_2019.tif` (3346×4975 mask at 3 m, 54% valid,
+  18,786 vertices, 7 parts):
+
+  | t (m) | buffer s |
+  |---|---|
+  | 6 | 0.11 |
+  | 24 | 2.45 |
+  | 96 | 72 |
+  | 192 | 347 |
+
+  Small 1:2,500 tiles stop at round 1 or 2, which is why 10k rows passed before it showed.
+- Fix: rounds after the first simplify by t/2, buffer by t, simplify by t/2. That still covers
+  every pixel, measured at each round. The whole loop on that tile: **0.26 s**, 58 vertices.
+  Round 1 is unchanged, so cached single-round rows are what HEAD produces. Rows from multi-round
+  tiles written before the fix differ by under a tolerance and are both outward. They are kept.
+- Round 1 (`buffer(t).simplify(t)`) leaves 9.7 m² of 80.7 km² outside on that tile: a mitre-corner
+  effect, with t = 2 px. Not material, and left as is.
+- Test: the real mask is committed as `tests/fixtures/coast_mask_092b032.npz` (43 KB, packbits). A
+  synthetic random-walk coast did not reproduce the slowdown (old loop 1 s). The test computes in a
+  child with `timeout=60`: against the old loop it FAILS at 60 s (checked) rather than hanging.
+- Residual: `--max-minutes` stops new submissions but waits on work in flight, so a hang inside
+  one tile outlives it. In CI the job's `timeout-minutes: 330` is the backstop, and the rows from
+  that run would be lost with the commit step. No other hang is known; this is noted, not fixed.

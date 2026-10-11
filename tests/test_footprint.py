@@ -290,6 +290,38 @@ def test_noisy_edge_is_capped():
     assert fp.vertex_count(g) <= fp.VERTEX_CAP
 
 
+COAST_FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "coast_mask_092b032.npz")
+
+
+def coast_mask():
+    """The validity mask of bc_092b032_xl1m_utm10_2019.tif at the 3 m it is read at:
+    a coastal mapsheet tile, 54% valid, whose shoreline hung the full extraction."""
+    z = np.load(COAST_FIXTURE)
+    h, w = z["shape"]
+    mask = np.unpackbits(z["bits"], axis=1, count=int(w)).astype(bool)
+    return mask, Affine(*z["transform"]), f"EPSG:{int(z['epsg'])}"
+
+
+def test_a_coastline_finishes_and_holds_all_its_data():
+    # Buffering the full-resolution pixel staircase by a growing distance is
+    # quadratic: on this tile 72 s at 96 m and 347 s at 192 m, and 24 workers sat
+    # in GEOS buffer for hours (2026-10-11). Computed in a child so a regression
+    # fails rather than hangs.
+    import subprocess
+    code = ("import sys; sys.path[:0] = [{s!r}, {t!r}]; import test_footprint as tf, footprint as fp; "
+            "m, t, c = tf.coast_mask(); "
+            "print(fp.footprint_from_mask(m, t, c, 'bc_092b032_xl1m_utm10_2019.tif')['footprint_wkt'])"
+            ).format(s=os.path.join(REPO, "scripts"), t=os.path.dirname(__file__))
+    out = subprocess.run([sys.executable, "-c", code], check=True, timeout=60,
+                         capture_output=True, text=True).stdout.strip()
+    mask, t, crs = coast_mask()
+    g = fp.geom_native(out, crs)
+    data = fp.polygonize(mask, t)
+    assert fp.vertex_count(shapely_wkt.loads(out)) <= fp.VERTEX_CAP
+    # Specks under MIN_AREA_M2 are dropped by design; everything else is inside.
+    assert data.difference(g.buffer(0.01)).area <= 10 * fp.MIN_AREA_M2
+
+
 def test_a_non_bcgs_tile_is_clipped_to_its_extent():
     name = "dem_055_154.tif"
     t = Affine(2.0, 0, 550000, 0, -2.0, 1540000)
