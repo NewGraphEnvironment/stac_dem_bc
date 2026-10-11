@@ -41,6 +41,7 @@ Usage:
 import argparse
 import concurrent.futures
 import csv
+import json
 import logging
 import os
 import shutil
@@ -66,6 +67,7 @@ from stac_utils import url_scheme_check, url_to_item_id
 logger = logging.getLogger(__name__)
 
 CACHE = "data/footprints.csv"
+CHANGED = "data/urls_footprint_changed.txt"
 ERRORS = "logs/footprint_errors.txt"   # transient, retried next run: not a cache
 URLS_LIST = "data/urls_list.txt"
 FIELDS = ["url", "method", "footprint_wkt", "valid_percent", "checksum", "size"]
@@ -132,19 +134,32 @@ def changed_finalize(path: str) -> int:
     return len(urls)
 
 
-def changed_prune(path: str, staged_dir: str) -> tuple[int, int]:
-    """Drop from the rebuild list every URL whose item is staged in `staged_dir`. (pruned, kept)
+def changed_prune(path: str, staged_dir: str, footprints: dict) -> tuple[int, int]:
+    """Drop from the rebuild list every URL whose published body now carries its fields. (pruned, kept)
 
     Called only after a successful sync, so a staged item is a published one.
     Not "the rebuild step exited 0": item_create drops a URL it fails on and
     still exits 0, and clearing on that proxy stranded the failures for good.
-    A URL that keeps failing stays listed and is retried every run, visibly.
+    Not "a file is staged" either: a backfill dispatch stages an edited copy of
+    the published body, extent and all. The test is the one footprint_apply
+    uses for staged items: applying the fields again changes nothing. A URL
+    that keeps failing stays listed and is retried every run, visibly.
     """
+    from item_fields import item_fields_apply     # imports this module; deferred
+
     if not os.path.exists(path):
         return 0, 0
     urls = urls_read(path)
-    kept = [u for u in urls
-            if not os.path.exists(os.path.join(staged_dir, f"{url_to_item_id(u)}.json"))]
+
+    def done(u):
+        p = os.path.join(staged_dir, f"{url_to_item_id(u)}.json")
+        if not os.path.exists(p):
+            return False
+        with open(p) as fh:
+            body = json.load(fh)
+        return item_fields_apply(body, u, footprints) == []
+
+    kept = [u for u in urls if not done(u)]
     tmp = f"{path}.tmp"
     with open(tmp, "w") as fh:
         fh.writelines(f"{u}\n" for u in sorted(set(kept)))
@@ -257,12 +272,15 @@ def run(todo: list[str], cache_path: str, errors_path: str, workers: int,
                             err_fh.write(f"{url}\t{e}\n")
                             err_fh.flush()
                             continue
-                        w.writerow(row)
-                        cache_fh.flush()
                         if changed_fh and url not in (new_urls or set()):
-                            # After the row, so a URL is never listed without one.
+                            # BEFORE the row: a row without a list entry strands
+                            # its published item; an entry without a row is
+                            # harmless (its rebuild has nothing new, and the
+                            # next run writes the row and lists it again).
                             changed_fh.write(f"{url}\n")
                             changed_fh.flush()
+                        w.writerow(row)
+                        cache_fh.flush()
                         stats["written"] += 1
                         stats["written_urls"].append(url)
                         m = row["method"]
@@ -312,15 +330,19 @@ def main() -> int:
     ap.add_argument("--audit", action="store_true",
                     help="Check every footprint row in the cache (valid, inside BC) and exit; reads nothing")
     ap.add_argument("--changed-out", default=None,
-                    help="Write URLs that gained a row this run and are not in data/urls_new.txt")
+                    help=f"Rebuild list: URLs that gain a row and are not new (default {CHANGED} "
+                         f"when the default cache is used, so no caller can add rows unlisted)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s",
                         datefmt="%H:%M:%S")
 
+    if args.changed_out is None and args.cache == CACHE:
+        args.changed_out = CHANGED
+
     if args.prune_changed:
         if not args.changed_out:
             ap.error("--prune-changed needs --changed-out")
-        pruned, kept = changed_prune(args.changed_out, args.prune_changed)
+        pruned, kept = changed_prune(args.changed_out, args.prune_changed, cache_load(args.cache))
         logger.info("Rebuild list: %d published and pruned, %d kept for the next run", pruned, kept)
         return EXIT_OK
 

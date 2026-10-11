@@ -174,3 +174,18 @@ def test_builders_keep_the_published_projection_shape(tmp_path, tile):
         assert it["properties"]["proj:epsg"] == 26910 and "proj:code" not in it["properties"]
         assert "https://stac-extensions.github.io/projection/v1.1.0/schema.json" in it["stac_extensions"]
         assert not any("projection/v2" in e for e in it["stac_extensions"])
+
+
+def test_hrefs_are_percent_encoded_at_construction(tmp_path, tile):
+    # #25: published hrefs carry %20; a rebuild must not reintroduce a raw space.
+    import shutil
+    path, _, meta = tile
+    spaced = str(tmp_path / "bc_092g036_1_1_1_xli1m_utm10_2024 (2).tif")
+    shutil.copy(path, spaced)
+    out = tmp_path / "s"
+    out.mkdir()
+    dsm = spaced.replace("bc_", "dsm_")
+    r = item_create.process_item(spaced, "stac-elevation-bc", str(out), {spaced: meta}, {spaced: dsm}, {})
+    it = json.loads(open(out / f"{r['id']}.json").read())
+    for k in ("dem", "dsm"):
+        assert " " not in it["assets"][k]["href"] and "%20" in it["assets"][k]["href"], k

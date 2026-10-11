@@ -358,8 +358,12 @@ def _content_length(url: str) -> int | None:
     return int(n) if n else None
 
 
-def _download(url: str, workdir: str):
-    """Stream `url` to a temp file in `workdir`, hashing as it goes. Caller deletes the file."""
+def _download(url: str, workdir: str, expected: int | None = None):
+    """Stream `url` to a temp file in `workdir`, hashing as it goes. Caller deletes the file.
+
+    urllib returns a short body without raising, so the size is checked against
+    Content-Length: a truncated file would otherwise be hashed as if whole.
+    """
     h = hashlib.sha256()
     size = 0
     fd, path = tempfile.mkstemp(suffix=".tif", dir=workdir)
@@ -372,6 +376,8 @@ def _download(url: str, workdir: str):
                 h.update(chunk)
                 out.write(chunk)
                 size += len(chunk)
+        if expected is not None and size != expected:
+            raise RuntimeError(f"short read: {size} of {expected} bytes")
     except BaseException:
         os.remove(path)
         raise
@@ -389,6 +395,9 @@ MAX_READ_PIXELS = 25_000_000
 def _read(path, overview_level=None):
     kw = {} if overview_level is None else {"overview_level": overview_level}
     with rasterio.open(path, **kw) as src:
+        # Before any decimation: a scaled identity transform is no longer identity.
+        if src.crs is None or src.transform.is_identity:
+            raise FootprintNoGeoref(f"{os.path.basename(str(path))}: no CRS or no geotransform")
         h, w = src.height, src.width
         f = max(1, int(np.ceil(np.sqrt(h * w / MAX_READ_PIXELS))))
         if f == 1:
@@ -425,7 +434,7 @@ def footprint_read(url: str, workdir: str) -> dict:
                         mask, transform, crs = _read(vsi, overview_level=len(ovr) - 1)
                         row = footprint_from_mask(mask, transform, crs, name)
                         return {"method": METHOD_OVERVIEW, **row, "checksum": "", "size": length or ""}
-            path, checksum, size = _download(http, workdir)
+            path, checksum, size = _download(http, workdir, length)
             try:
                 mask, transform, crs = _read(path)
             finally:

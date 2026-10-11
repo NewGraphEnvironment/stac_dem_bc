@@ -428,3 +428,15 @@ def test_a_large_download_is_decimated_on_read(tmp_path, monkeypatch):
     full = fp.geom_native(compute(mask, t)["footprint_wkt"], UTM10)
     coarse = fp.geom_native(fp.footprint_from_mask(m, tr, crs, TILE)["footprint_wkt"], UTM10)
     assert coarse.symmetric_difference(full).area / full.area < 0.05
+
+
+def test_no_georef_is_caught_before_decimation(tmp_path, monkeypatch):
+    # A scaled identity transform is not identity; the check must see the source.
+    import rasterio
+    monkeypatch.setattr(fp, "MAX_READ_PIXELS", 100)
+    path = str(tmp_path / "x.tif")
+    with rasterio.open(path, "w", driver="GTiff", width=60, height=60, count=1, dtype="float32",
+                       crs=UTM10) as dst:
+        dst.write(np.full((60, 60), 500, "float32"), 1)
+    with pytest.raises(fp.FootprintNoGeoref):
+        fp._read(path)

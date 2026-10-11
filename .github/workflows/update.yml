@@ -281,7 +281,14 @@ jobs:
         id: rebuild
         if: steps.detect.outputs.changes == 'true' || steps.footprints.outputs.pending == 'true'
         run: |
-          for f in data/urls_pairing_changed.txt data/urls_footprint_changed.txt; do
+          # The pairing list only when this run re-paired: dsm_pair writes it on
+          # runs with upstream changes, and on a footprint-only run the
+          # committed file is the last change-month's -- already published.
+          LISTS=(data/urls_footprint_changed.txt)
+          if [ "${{ steps.detect.outputs.changes }}" = "true" ] || [ "${{ inputs.backfill }}" = "true" ]; then
+            LISTS+=(data/urls_pairing_changed.txt)
+          fi
+          for f in "${LISTS[@]}"; do
             if [ -f "$f" ]; then cat "$f"; fi
           done | sort -u > "$RUNNER_TEMP/urls_rebuild.txt"
           if [ -s "$RUNNER_TEMP/urls_rebuild.txt" ]; then
@@ -379,6 +386,13 @@ jobs:
               --items-dir "$STAC_OUTPUT_DIR" \
               --output "$RUNNER_TEMP/validation_rewrite.csv"
           else
+            # The gate is a FULL pass over what is staged: --incremental skips
+            # any id already in the ledger, which is every rebuilt item (a
+            # pairing or footprint rebuild republishes a changed body), so on its
+            # own it would wave them through unvalidated. The incremental run
+            # after it only records new ids in the committed ledger.
+            .venv/bin/python scripts/item_validate.py --items-dir "$STAC_OUTPUT_DIR" \
+              --output "$RUNNER_TEMP/validation_staged.csv"
             .venv/bin/python scripts/item_validate.py --items-dir "$STAC_OUTPUT_DIR" --incremental
           fi
 

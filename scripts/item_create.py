@@ -157,7 +157,7 @@ def process_item(path_item: str, collection_id: str, path_local: str,
                 collection_url=PATH_S3_JSON,
                 asset_roles=["data"]
             )
-            item.assets[ASSET_DEM].href = href_item
+            item.assets[ASSET_DEM].href = encode_url_for_gdal(href_item)   # #25
 
         item.datetime = item_time
 
@@ -177,7 +177,7 @@ def process_item(path_item: str, collection_id: str, path_local: str,
             item.add_asset(
                 ASSET_DSM,
                 pystac.Asset(
-                    href=dsm_href,
+                    href=encode_url_for_gdal(dsm_href),
                     media_type=media_type,
                     roles=["data"],
                     title="Digital surface model",

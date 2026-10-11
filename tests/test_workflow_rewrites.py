@@ -79,3 +79,18 @@ def test_footprints_run_every_run_and_pending_reaches_every_gate():
 def test_new_urls_are_passed_only_when_this_run_found_some():
     run = {s.get("name"): s for s in steps()}["Compute footprints for tiles not yet cached"]["run"]
     assert 'steps.detect.outputs.new_urls }}" = "true" ]; then NEW=(--new-urls data/urls_new.txt)' in run
+
+
+def test_the_pairing_list_is_rebuilt_only_on_a_run_that_repaired():
+    run = {s.get("name"): s for s in steps()}["Rebuild items whose DSM pairing or footprint changed"]["run"]
+    i = run.index("LISTS+=(data/urls_pairing_changed.txt)")
+    guard = run[run.rfind("if [", 0, i):i]
+    assert "steps.detect.outputs.changes" in guard and "inputs.backfill" in guard
+    assert "for f in data/urls_pairing_changed.txt" not in run
+
+
+def test_monthly_validation_gate_is_a_full_pass_over_the_staged_set():
+    run = {s.get("name"): s for s in steps()}["Validate new items (gate)"]["run"]
+    monthly = run[run.index("else"):]
+    first = monthly.index('--output "$RUNNER_TEMP/validation_staged.csv"')
+    assert first < monthly.index('--items-dir "$STAC_OUTPUT_DIR" --incremental')

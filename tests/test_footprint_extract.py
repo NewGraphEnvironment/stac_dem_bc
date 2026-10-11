@@ -144,13 +144,39 @@ def test_a_url_is_listed_only_once_its_row_is_written(tmp_path):
     assert listed == cached and U[2] not in listed       # the transient failure is in neither
 
 
-def test_prune_keeps_every_url_whose_item_was_not_staged(tmp_path):
+def test_prune_drops_only_urls_whose_staged_body_carries_its_fields(tmp_path):
+    import json
     from stac_utils import url_to_item_id
     changed = tmp_path / "changed.txt"
     changed.write_text("".join(f"{u}\n" for u in U))
     staged = tmp_path / "staged"
     staged.mkdir()
-    for u in (U[0], U[2]):                                # item_create dropped U[1] and U[3]
-        (staged / f"{url_to_item_id(u)}.json").write_text("{}")
-    assert fe.changed_prune(str(changed), str(staged)) == (2, 2)
-    assert changed.read_text().splitlines() == [U[1], U[3]]
+    row = {"method": "download", "footprint_wkt": "", "valid_percent": "99.0", "checksum": "", "size": ""}
+    foot = {u: row for u in U}
+
+    def body(u):
+        return {"type": "Feature", "id": url_to_item_id(u), "stac_extensions": [], "links": [],
+                "geometry": None, "bbox": None, "properties": {},
+                "assets": {"dem": {"href": u, "roles": ["data"]}}}
+    from item_fields import item_fields_apply
+    done = body(U[0])
+    item_fields_apply(done, U[0], foot)                  # rebuilt with its footprint
+    (staged / f"{url_to_item_id(U[0])}.json").write_text(json.dumps(done))
+    # a backfill dispatch staged U[2]'s published body unchanged: extent, no fields
+    (staged / f"{url_to_item_id(U[2])}.json").write_text(json.dumps(body(U[2])))
+    # U[1] and U[3]: item_create dropped them, nothing staged
+    assert fe.changed_prune(str(changed), str(staged), foot) == (1, 3)
+    assert changed.read_text().splitlines() == [U[1], U[2], U[3]]
+
+
+def test_a_short_download_is_refused(tmp_path):
+    import footprint as fp
+    src = tmp_path / "src.bin"
+    src.write_bytes(b"x" * 1000)
+    work = tmp_path / "w"
+    work.mkdir()
+    with pytest.raises(RuntimeError, match="short read"):
+        fp._download(src.as_uri(), str(work), expected=5000)
+    assert list(work.iterdir()) == []                     # the partial file is removed
+    path, checksum, size = fp._download(src.as_uri(), str(work), expected=1000)
+    assert size == 1000 and checksum.startswith("1220")

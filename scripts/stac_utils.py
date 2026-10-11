@@ -406,7 +406,9 @@ def item_create_from_cache(
     item.add_asset(
         ASSET_DEM,
         pystac.Asset(
-            href=url,
+            # Percent-encoded at construction (#25): a raw space cannot even be
+            # formed into a request, and the published bodies carry %20.
+            href=encode_url_for_gdal(url),
             media_type=media_type,
             roles=["data"],
         ),
