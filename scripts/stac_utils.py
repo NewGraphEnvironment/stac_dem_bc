@@ -53,6 +53,34 @@ PATH_RESULTS_CSV = "data/stac_geotiff_checks.csv"
 ASSET_DEM = "dem"
 ASSET_DSM = "dsm"
 
+# =============================================================================
+# lidarbc: item fields (#55, #2)
+# =============================================================================
+# Facts about LidarBC's objectstore paths, under a prefix that names what they
+# describe (stac_pointcloud_bc#12). The schema is crate's (crate#23); pystac
+# fetches it whenever an item is validated, so this URL must answer before any
+# item naming it is built. v1.1.0, not v1.0.0: v1.0.0 rejects any lidarbc: key
+# it does not declare, and it shipped without lidarbc:datetime_unknown (crate#26).
+LIDARBC_EXT = "https://newgraphenvironment.github.io/crate/stac/lidarbc/v1.1.0/schema.json"
+LIDARBC_DELIVERY = "lidarbc:delivery"
+# Was the unprefixed `datetime_unknown` until #2; true when neither the file
+# name nor the path carries a date and `datetime` is a placeholder.
+LIDARBC_DATETIME_UNKNOWN = "lidarbc:datetime_unknown"
+DATETIME_UNKNOWN_LEGACY = "datetime_unknown"
+
+_DELIVERY_RE = re.compile(r"/gdwuts/([0-9]{3}/[0-9]{3}[a-p]/[0-9]{4})/")
+
+
+def lidarbc_delivery(url: str) -> str | None:
+    """`<block>/<sheet>/<year>` of a LidarBC href, e.g. "092/092g/2016"; None for albers10k2m.
+
+    The same key stac-pointcloud-bc carries, so the two collections match on one
+    filter where several flights cover a tile.
+    """
+    m = _DELIVERY_RE.search(url)
+    return m.group(1) if m else None
+
+
 # BC bounding box (hardcoded — provincial boundary is stable)
 BBOX_BC = [-140, 48, -114, 60]
 
@@ -378,7 +406,9 @@ def item_create_from_cache(
     item.add_asset(
         ASSET_DEM,
         pystac.Asset(
-            href=url,
+            # Percent-encoded at construction (#25): a raw space cannot even be
+            # formed into a request, and the published bodies carry %20.
+            href=encode_url_for_gdal(url),
             media_type=media_type,
             roles=["data"],
         ),

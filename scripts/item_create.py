@@ -29,9 +29,11 @@ from pystac import Link, RelType
 from tqdm import tqdm
 
 from dsm_pair import PAIRED, PAIRS_CSV
+from item_fields import footprints_load, has_footprint, pystac_item_fields_apply
 from stac_utils import (
     ASSET_DEM,
     ASSET_DSM,
+    LIDARBC_DATETIME_UNKNOWN,
     geotiff_extract_metadata,
     item_create_from_cache,
     date_extract_from_path,
@@ -90,7 +92,8 @@ def dsm_lookup_load(path: str = PAIRS_CSV) -> dict[str, str]:
 # =============================================================================
 
 def process_item(path_item: str, collection_id: str, path_local: str,
-                 results_lookup: dict, dsm_lookup: dict | None = None) -> dict | None:
+                 results_lookup: dict, dsm_lookup: dict | None = None,
+                 footprints: dict | None = None) -> dict | None:
     """Process a single GeoTIFF URL to create a STAC item.
 
     Uses cached metadata when available (no remote read). Falls back to
@@ -154,12 +157,12 @@ def process_item(path_item: str, collection_id: str, path_local: str,
                 collection_url=PATH_S3_JSON,
                 asset_roles=["data"]
             )
-            item.assets[ASSET_DEM].href = href_item
+            item.assets[ASSET_DEM].href = encode_url_for_gdal(href_item)   # #25
 
         item.datetime = item_time
 
         if datetime_is_unknown:
-            item.properties["datetime_unknown"] = True
+            item.properties[LIDARBC_DATETIME_UNKNOWN] = True
 
         # Second asset: the digital surface model from the same flight.
         #
@@ -174,12 +177,16 @@ def process_item(path_item: str, collection_id: str, path_local: str,
             item.add_asset(
                 ASSET_DSM,
                 pystac.Asset(
-                    href=dsm_href,
+                    href=encode_url_for_gdal(dsm_href),
                     media_type=media_type,
                     roles=["data"],
                     title="Digital surface model",
                 ),
             )
+
+        # Footprint geometry, valid_percent and checksum (#2): the same
+        # function the one-time rewrite uses, so the two cannot differ.
+        item = pystac_item_fields_apply(item, href_item, footprints or {})
 
         path_item_json = f"{path_local}/{item_id}.json"
         item.save_object(dest_href=path_item_json, include_self_link=False)
@@ -188,7 +195,8 @@ def process_item(path_item: str, collection_id: str, path_local: str,
         item_href = f"{PATH_S3_STAC}/{item_id}.json"
         encoded_item_href = encode_url_for_gdal(item_href)
 
-        return {"id": item_id, "item": item, "href": encoded_item_href}
+        return {"id": item_id, "item": item, "href": encoded_item_href,
+                "footprint": has_footprint(href_item, footprints or {})}
     except Exception as e:
         logger.error("Error processing %s: %s", href_item, e)
         return None
@@ -359,6 +367,11 @@ def main():
     # DEM -> DSM pairing (scripts/dsm_pair.py)
     dsm_lookup = dsm_lookup_load()
 
+    # Footprints (scripts/footprint_extract.py). A tile without one keeps its
+    # raster extent; the next extract computes it and lists the URL in
+    # data/urls_footprint_changed.txt, which the workflow rebuilds.
+    footprints = footprints_load()
+
     # Parallel item creation
     logger.info("Creating STAC items with %d workers...", args.workers)
     try:
@@ -366,7 +379,7 @@ def main():
             results = list(filter(None, tqdm(
                 executor.map(
                     lambda url: process_item(url, collection.id, path_local,
-                                             results_lookup, dsm_lookup),
+                                             results_lookup, dsm_lookup, footprints),
                     urls_to_check
                 ),
                 total=len(urls_to_check),
@@ -396,6 +409,10 @@ def main():
 
         logger.info("Created %d items, added %d links, skipped %d duplicates",
                      len(results), added_count, skipped_count)
+        without = sum(1 for r in results if not r["footprint"])
+        if without:
+            logger.warning("%d of %d items built without a footprint (geometry = raster "
+                           "extent until the next footprint_extract run)", without, len(results))
     else:
         logger.warning("No items were created")
 

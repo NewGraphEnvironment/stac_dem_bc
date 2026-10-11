@@ -20,5 +20,6 @@ dependencies:
       - requests  # HTTP checks (stac_utils, urls_check_access.py)
       - tqdm
       - deepdiff  # JSON/dict comparison for QA and debugging
+      - pyyaml  # tests/test_workflow_rewrites.py reads update.yml
       # Registration and verification (#49); tag pinned, matched by update.yml
       - stacs @ git+https://github.com/NewGraphEnvironment/stacs@v0.1.0

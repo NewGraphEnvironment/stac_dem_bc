@@ -55,6 +55,8 @@ Each item carries up to two assets from the same flight over the same footprint:
 | `dem` | bare-earth digital elevation model — every item has one |
 | `dsm` | digital surface model, where the delivery published one — **95,888 of 102,460** |
 
+An item's **geometry is its footprint** — the part of the tile that holds data, not the raster's extent ([#2](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/2)). For tiles named on the BC Geographic System 1:2,500 grid it is the grid cell minus any no-data inside it, so a full tile's footprint is exactly its cell and neighbours meet without overlapping; for the rest it is the valid data. A search for an area a tile has no data over no longer returns that tile. The `dem` asset carries `raster:bands[0].statistics.valid_percent` (the share of the raster holding elevations) and, where the whole file was read, `file:checksum` (sha256) and `file:size`. The DSM is assumed to cover what the DEM covers; its own coverage is not measured. Every item from a LidarBC delivery carries `lidarbc:delivery` (`"092/092g/2016"`), the key [`stac-pointcloud-bc`](https://github.com/NewGraphEnvironment/stac_pointcloud_bc) items share, so a tile matches its delivery's point clouds with one filter ([#55](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/55)); the `lidarbc:` fields are defined in [crate](https://github.com/NewGraphEnvironment/crate).
+
 <br>
 
 The catalog refreshes monthly: a scheduled [GitHub Actions workflow](.github/workflows/update.yml) detects new tiles on the objectstore and appends them incrementally, with each month's changes landing as a commit to [`data/`](data/) — a git audit trail of what was added, removed, and validated. How the automation works, its failure modes, and where the evidence lives are documented in [`scripts/`](scripts/README.md), alongside a plain-language guide to the concepts behind the pipeline (COG, STAC, pgstac, validation caching).
@@ -152,6 +154,8 @@ when your area was last flown rather than on where it is.
 
 QGIS 3.42 added native STAC support — connect directly to the catalog and filter by the current map view. See [Lutra Consulting's STAC-in-QGIS blog post](https://www.lutraconsulting.co.uk/blogs/stac-in-qgis) for a walk-through.
 
+QGIS draws each item's `bbox`, not its geometry. Since the bbox is the bounds of the footprint, a partly empty tile's box now shrinks to its data, but a tile whose data is a diagonal strip still draws as a rectangle.
+
 ```{r echo=FALSE, fig.cap="Connecting to https://images.a11s.one"}
 knitr::include_graphics("fig/a11sone01.png")
 ```
@@ -172,13 +176,12 @@ The same `images.a11s.one` STAC API serves several complementary BC collections:
 
 ## Roadmap
 
-The big one landed in 2026: the catalog is now **self-updating** ([#23](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/23)) — the goal open since the first build — and the July catch-up grew the collection from 58k to ~98k fully-validated items. Items now also carry the **digital surface model** alongside the bare-earth DEM ([#31](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/31)), paired on tile id and acquisition date. Still ahead:
+The big one landed in 2026: the catalog is now **self-updating** ([#23](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/23)) — the goal open since the first build — and the July catch-up grew the collection from 58k to ~98k fully-validated items. Items now also carry the **digital surface model** alongside the bare-earth DEM ([#31](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/31)), paired on tile id and acquisition date, and each item's geometry is its **footprint** — the tile's grid cell minus its no-data — rather than its raster extent ([#2](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/2)). Still ahead:
 
 - **Registration from CI** — registration is a client-side upsert from this repo (the [`stacs`](https://github.com/NewGraphEnvironment/stacs) package, configured by `stacs.toml`), but it still runs from a laptop: no GitHub Actions runner can reach the STAC host today. Closing that needs a tailnet or deploy-key decision in the infrastructure repo, and it unblocks every catalogue repo at once.
 - **Upstream-deletion handling** ([#28](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/28)) — propagate objectstore removals to the catalog. The September run settled the open question — the deleted tiles did not reappear under new names, so they are deletions rather than a rename in flight.
 - **Surface models published as point cloud only** — 1,211 DEM tiles across 11 mapsheet-years have a `dsm/` directory holding only `.laz`. Recorded as a declared coverage gap in `data/dsm_pairing_report.md`; deriving a raster from the point cloud is unscoped.
 - **CHM** ([#29](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/29)) — 264 canopy-height tiles are published province-wide, ~1.1% coverage of the mapsheet-years that carry them. Worth indexing for completeness; not a substitute for deriving.
-- **True footprint geometry** ([#2](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/2)) — recalculate per-item footprints to exclude no-data pixels rather than using bounding boxes; gives accurate spatial-overlap queries.
 - **Structured logging + performance benchmarking** ([#6](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/6)) — instrument the pipeline so build performance is quantifiable across runs.
 - **uv-based Python dependency management** ([#16](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/16)) — the CI workflow already installs with uv; migrate the local conda environment to match.
 
