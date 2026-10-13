@@ -19,6 +19,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
+import collection_patch as cp  # noqa: E402
 from collection_patch import (  # noqa: E402
     COLLECTION_ID,
     VERSION_EXT,
@@ -173,3 +174,24 @@ def test_cli_rejects_stamp_and_clear_together(tmp_path):
         capture_output=True, text=True)
     assert r.returncode != 0
     assert "mutually exclusive" in r.stderr
+
+
+# --- #55: the related link to stac-pointcloud-bc ----------------------------
+
+def test_related_link_added_once_before_the_items():
+    c = {"id": cp.COLLECTION_ID, "links": [{"rel": "root", "href": "r"},
+                                           {"rel": "item", "href": "i1"}, {"rel": "item", "href": "i2"}]}
+    _, changed = cp.collection_patch(c)
+    assert "related link to stac-pointcloud-bc" in changed
+    rel = [l for l in c["links"] if l["rel"] == "related"]
+    assert rel == [cp.RELATED_POINTCLOUD]
+    assert [l["rel"] for l in c["links"]] == ["root", "related", "item", "item"]
+    _, again = cp.collection_patch(c)
+    assert "related link to stac-pointcloud-bc" not in again
+
+
+def test_a_stale_related_link_is_replaced_not_duplicated():
+    stale = {**cp.RELATED_POINTCLOUD, "title": "old"}
+    c = {"id": cp.COLLECTION_ID, "links": [stale, {"rel": "item", "href": "i"}]}
+    cp.collection_patch(c)
+    assert [l for l in c["links"] if l["rel"] == "related"] == [cp.RELATED_POINTCLOUD]

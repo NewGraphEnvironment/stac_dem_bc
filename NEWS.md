@@ -11,7 +11,44 @@ matching `water-temp-bc`. Releases live here and in git tags.
 
 ## Unreleased
 
-Tooling only — the published catalogue is unchanged.
+**Catalogue change (#2, #55)**, published by dispatching `update.yml` with `footprint: true`
+after this merges. Until that dispatch runs, the published catalogue is unchanged.
+
+- **Item geometry is the tile's footprint**, not its raster extent. For tiles named on the BCGS
+  1:2,500 grid it is the grid cell minus any no-data inside it; for the rest (no-quadrant
+  sheet ids, `albers10k2m`) it is the valid data. Delivered rasters are the UTM rectangle
+  around the cell plus ~22 m of overlap, so a full tile's footprint is exactly its cell and
+  neighbours no longer overlap. A search over an area a tile has no data for no longer returns
+  it — in a sample of 144 tiles, 21 of 112 interior and 8 of 32 delivery-edge tiles had gaps
+  inside their cell, up to 48% of it. `bbox` is the bounds of the published geometry, and
+  `proj:geometry` the same footprint in the item's CRS. QGIS draws `bbox`, so a partly empty
+  tile's box shrinks; a diagonal strip of data still draws as a rectangle.
+- The `dem` asset carries `raster:bands[0].statistics.valid_percent` and, where the whole file
+  was downloaded, `file:checksum` (sha256 multihash) and `file:size`. Files over 64 MB that have
+  overviews are read at their coarsest overview over HTTP and carry no checksum. The DSM is
+  assumed to cover what the DEM covers.
+- Measured over all 102,416 listed tiles (2026-10-10 to 10-13, one local run, 0 transient
+  errors): 101,443 downloaded whole (all checksummed), 955 read at overview. Their footprints:
+  74,010 are exactly their cell, 25,774 a polygon, 2,614 a multipolygon. 16 tiles hold no valid
+  data and 2 are the UTM-14 tiles below; those 18 keep their published geometry. Median
+  `valid_percent` 95.96; 4,390 tiles are under half valid. The 44 published items whose source
+  is gone upstream (#28) get the `lidarbc:` edits only.
+- `lidarbc:delivery` (`"092/092g/2016"`) on every item from a LidarBC delivery — every item but
+  the `albers10k2m` ones — the key stac-pointcloud-bc items carry, plus one `related` link from
+  the collection to stac-pointcloud-bc (#55). The `lidarbc:` schema is crate's (`lidarbc`
+  v1.1.0). Declaring the key as a queryable is pgstac-side and waits on
+  NewGraphEnvironment/stacs#8.
+- The `albers10k2m` items' unprefixed `datetime_unknown` is now `lidarbc:datetime_unknown`.
+- Not repaired, reported: two tiles named `…_utm11_…` declare UTM zone 14 (EPSG:6657), so their
+  published items sit in Manitoba — `bc_082e003_3_2_2_xli1m_utm11_20240721_20240726` and
+  `bc_082f010_1_1_1_xli1m_utm11_20241008_20250813`. The footprint step refuses them
+  (`crs_mismatch`) and they keep their published geometry.
+- Monthly runs compute footprints for tiles not yet cached before building items, time-boxed
+  and non-fatal: a tile it does not reach is built with its extent and rebuilt the next month
+  from `data/urls_footprint_changed.txt`. `item_fields.py audit` checks every staged set for
+  the new fields.
+
+Tooling — the published catalogue is unchanged by these.
 
 - Registration and verification are now the
   [`stacs`](https://github.com/NewGraphEnvironment/stacs) package, pinned at

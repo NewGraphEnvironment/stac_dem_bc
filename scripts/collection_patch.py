@@ -22,6 +22,7 @@ Fields applied (#30, and the id since #34):
               if derived products (CHM) land in this collection later.
   keywords    so the collection is discoverable by something other than its id.
   description names `dem` as the bare-earth asset beside `dsm`.
+  related     one link to stac-pointcloud-bc, whose items share lidarbc:delivery (#55).
 
 The STAC Version Extension is handled SEPARATELY, by --version / --clear-version,
 and deliberately sits outside collection_patch()'s idempotence contract. If the
@@ -178,6 +179,34 @@ def links_retitle(collection: dict, title: str) -> int:
     return n
 
 
+# #55: items here and in stac-pointcloud-bc carry the same `lidarbc:delivery`,
+# so a client can match a DEM tile to the point clouds of its delivery with one
+# filter. The link says where to look; the key does the matching. Points at the
+# collection's own S3 self href, as stac-pointcloud-bc's self link does.
+RELATED_POINTCLOUD = {
+    "rel": "related",
+    "href": "https://stac-pointcloud-bc.s3.us-west-2.amazonaws.com/collection.json",
+    "type": "application/json",
+    "title": "Point clouds from the same LidarBC deliveries (stac-pointcloud-bc); "
+             "match items on lidarbc:delivery",
+}
+
+
+def links_related(collection: dict) -> bool:
+    """Exactly one `related` link to stac-pointcloud-bc. Returns True if anything changed."""
+    links = collection.setdefault("links", [])
+    ours = [l for l in links if l.get("rel") == "related"
+            and l.get("href") == RELATED_POINTCLOUD["href"]]
+    if ours == [RELATED_POINTCLOUD]:
+        return False
+    collection["links"] = [l for l in links if l not in ours]
+    # Before the item links, so it is not buried after ~102k of them.
+    first_item = next((i for i, l in enumerate(collection["links"]) if l.get("rel") == "item"),
+                      len(collection["links"]))
+    collection["links"].insert(first_item, dict(RELATED_POINTCLOUD))
+    return True
+
+
 def collection_patch(collection: dict, allow_id_change: bool = False) -> tuple[dict, list[str]]:
     """Return the patched collection and the names of fields that changed.
 
@@ -222,6 +251,8 @@ def collection_patch(collection: dict, allow_id_change: bool = False) -> tuple[d
     n_titles = links_retitle(collection, COLLECTION_TITLE)
     if n_titles:
         changed.append("root link title")
+    if links_related(collection):
+        changed.append("related link to stac-pointcloud-bc")
     for field, value in (("id", COLLECTION_ID),
                          ("title", COLLECTION_TITLE),
                          ("providers", PROVIDERS),

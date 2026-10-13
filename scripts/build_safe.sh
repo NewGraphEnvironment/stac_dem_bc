@@ -147,6 +147,23 @@ fi
 log ""
 
 # =============================================================================
+# Step 4b: Footprints (#2)
+# =============================================================================
+# Before item creation, so items are built with their footprint rather than
+# their raster extent. Resumable and incremental: only tiles missing from
+# data/footprints.csv are read (the first full pass is ~20 h).
+
+log "Step 4b: Computing footprints for tiles not yet cached..."
+FOOTPRINT_LOG="${LOG_DIR}/${TIMESTAMP}_footprints.log"
+
+if python scripts/footprint_extract.py --workers 16 2>&1 | tee "$FOOTPRINT_LOG"; then
+    log "✓ Footprints up to date"
+else
+    error "Footprint extraction failed - check $FOOTPRINT_LOG (resumable: re-run to continue)"
+fi
+log ""
+
+# =============================================================================
 # Step 5: Create Items
 # =============================================================================
 

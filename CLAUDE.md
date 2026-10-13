@@ -139,6 +139,8 @@ data/
 ├── urls_deleted.txt           # Deleted URLs (audit trail)
 ├── dem_dsm_pairs.csv          # DEM→DSM pairing (dem_key, dsm_key, convention, status)
 ├── dsm_pairing_report.md      # What paired, and every tile that did not
+├── footprints.csv             # Per-tile footprint, valid %, sha256 + size (#2); empty WKT = the BCGS cell
+├── urls_footprint_changed.txt # Published URLs whose footprint arrived after their item was built
 ├── stac_geotiff_checks.csv    # Source validation (url, is_geotiff, is_cog)
 └── stac_item_validation.csv   # Output validation (item_id, json_valid, error)
 ```

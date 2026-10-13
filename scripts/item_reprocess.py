@@ -6,7 +6,7 @@ This script:
 1. Reads URLs from data/urls_invalid_items.txt
 2. Recreates STAC items with placeholder datetime for items missing dates
 3. Overwrites invalid JSON files with valid versions
-4. Flags items with datetime_unknown=True property
+4. Flags items with lidarbc:datetime_unknown=True
 
 Usage:
     python scripts/item_reprocess.py
@@ -20,9 +20,12 @@ import os
 from tqdm import tqdm
 from datetime import datetime, timezone
 
+from item_fields import footprints_load, pystac_item_fields_apply
+
 from stac_utils import (
     ASSET_DEM,
     ASSET_DSM,
+    LIDARBC_DATETIME_UNKNOWN,
     item_create_from_cache,
     date_extract_from_path,
     datetime_parse_item,
@@ -42,7 +45,7 @@ PATH_COLLECTION = f"{PATH_LOCAL}/collection.json"
 INVALID_URLS_FILE = "data/urls_invalid_items.txt"
 
 def process_item(path_item: str, collection, results_lookup,
-                 dsm_lookup: dict | None = None) -> dict | None:
+                 dsm_lookup: dict | None = None, footprints: dict | None = None) -> dict | None:
     """
     Process a single GeoTIFF URL to create a STAC item with datetime handling.
 
@@ -109,24 +112,26 @@ def process_item(path_item: str, collection, results_lookup,
                 collection_url=PATH_S3_JSON,
                 asset_roles=["data"]
             )
-            item.assets[ASSET_DEM].href = href_item
+            item.assets[ASSET_DEM].href = encode_url_for_gdal(href_item)   # #25
 
         item.datetime = item_time
 
         if datetime_is_unknown:
-            item.properties["datetime_unknown"] = True
+            item.properties[LIDARBC_DATETIME_UNKNOWN] = True
 
         dsm_href = (dsm_lookup or {}).get(href_item)
         if dsm_href:
             item.add_asset(
                 ASSET_DSM,
                 pystac.Asset(
-                    href=dsm_href,
+                    href=encode_url_for_gdal(dsm_href),
                     media_type=media_type,
                     roles=["data"],
                     title="Digital surface model",
                 ),
             )
+
+        item = pystac_item_fields_apply(item, href_item, footprints or {})
 
         # Save item JSON locally (overwrites invalid version)
         path_item_json = f"{PATH_LOCAL}/{item_id}.json"
@@ -189,6 +194,8 @@ def main():
     from item_create import dsm_lookup_load
     dsm_lookup = dsm_lookup_load()
     print(f"✓ Loaded {len(dsm_lookup)} DEM->DSM pairs")
+    footprints = footprints_load()
+    print(f"✓ Loaded {len(footprints)} footprint rows")
     print()
 
     # Process items in parallel
@@ -203,7 +210,7 @@ def main():
                 tqdm(
                     executor.map(
                         lambda url: process_item(url, collection, results_lookup,
-                                                 dsm_lookup),
+                                                 dsm_lookup, footprints),
                         urls_to_process
                     ),
                     total=len(urls_to_process),
