@@ -43,8 +43,8 @@ Review findings and dispositions: `review-1.md`.
 
 ## Phase 3: Cache + extraction
 - [x] `scripts/footprint_extract.py`: `--incremental` = `urls_list − cache`, `--urls-file`, `--limit`, `--workers`, `--max-minutes`, `--min-free-gb`; streamed temp files in one dir cleared at start/exit; rows appended as they finish (resumable); errors file + rate gate; writes `data/urls_footprint_changed.txt` (computed this run, not new this month)
-- [ ] `data/footprints.csv` columns: url, method, footprint_wkt (EPSG:4326, empty = the cell), valid_percent, checksum, size; `https://` guard and `test_urls_scheme.py` coverage
-- [ ] Full local run with logging (`logs/`), peak disk logged; cache committed; counts by method recorded in findings
+- [x] `data/footprints.csv` columns: url, method, footprint_wkt (EPSG:4326, empty = the cell), valid_percent, checksum, size; `https://` guard and `test_urls_scheme.py` coverage
+- [x] Full local run with logging (`logs/`), peak disk logged; cache committed; counts by method recorded in findings
 
 ## Phase 4: New-item path
 - [x] One helper applies a footprint row to an item (geometry, bbox, proj:geometry in the item's CRS incl. `proj:wkt2`, ∩ proj:bbox; file + raster fields on `dem`; extension URLs); used by item_create's cache and rio_stac branches and `item_reprocess.py`
@@ -67,7 +67,7 @@ Review findings and dispositions: `review-1.md`.
 - [ ] Publish (dispatch after merge, then `stacs register --mode drift` + `stacs verify`) — **only on the user's word**
 
 ## Phase 7: Docs
-- [ ] README (remove #2 from "future work"; geometry, checksum, valid_percent, `lidarbc:` fields, QGIS bbox note), scripts/README, CLAUDE.md data tree, NEWS Unreleased; PR closes #2, #55 (queryables to stacs#8)
+- [x] README (remove #2 from "future work"; geometry, checksum, valid_percent, `lidarbc:` fields, QGIS bbox note), scripts/README, CLAUDE.md data tree, NEWS Unreleased; PR closes #2, #55 (queryables to stacs#8)
 
 ## Validation
 

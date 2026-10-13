@@ -198,3 +198,20 @@ Full read of the 94,808 non-COG 1:2,500 tiles: **559 GB ≈ 20 h at 7.8 MB/s (46
 - Residual: `--max-minutes` stops new submissions but waits on work in flight, so a hang inside
   one tile outlives it. In CI the job's `timeout-minutes: 330` is the backstop, and the rows from
   that run would be lost with the commit step. No other hang is known; this is noted, not fixed.
+
+## The full run (2026-10-13)
+
+- Restarted from HEAD at 2026-10-11T15:48Z. It finished 2026-10-13T01:56Z: 92,172 tiles in 122,889 s
+  (0.75 tiles/s), 0 transient errors, peak scratch 11.6 GB. The cache holds 102,416 rows and covers
+  every listed URL. `--audit` is clean.
+- By method: download 101,443 (all checksummed), overview 955, empty 16, crs_mismatch 2. Footprints:
+  74,010 are the cell, 25,774 Polygon, 2,614 MultiPolygon. Median valid_percent is 95.96; 4,390 tiles
+  are under 50%.
+- Rehearsal (`logs/20261013_footprint_apply_rehearsal.log`): `--limit 300 --verify 30`, 300 written,
+  0 errors, verify passed. `item_validate.py` passed 300/300 against lidarbc v1.1.0, and the field
+  audit passed. Earlier, a published albers item was rewritten and validated.
+- NEWS had said "checksum on every tile up to 64 MB". That was wrong once the strip mapsheets were
+  downloaded whole: every downloaded tile carries one. Corrected.
+- `data/footprints.csv` is 64 MB, of which 45.7 MB is the WKT; gzip gives 15.1 MB. GitHub warns
+  above 50 MB and refuses above 100 MB, which at ~0.62 KB/row is about 55k more tiles away. Filed
+  as a follow-up.

@@ -1,6 +1,6 @@
 # LidarBC DEM tile footprints
 
-**Verified:** 2026-10-10 · **Issues:** #2, #55; spawned crate#26, stacs#8 · **Produced by:**
+**Verified:** 2026-10-13 · **Issues:** #2, #55; spawned crate#26, stacs#8 · **Produced by:**
 `scripts/footprint.py`, `scripts/footprint_extract.py`; Phase 1 probes and counts in
 `planning/archive/2026-10-issue-2-*/findings.md`; population checks in `tests/test_footprint.py`.
 
@@ -64,3 +64,32 @@ they are not repaired here.
   GitHub served the same machine 7.2 MB/s on a single stream. A full read of the 94,808 non-COG
   1:2,500 tiles is 559 GB, ≈ 20 h at 7.8 MB/s. The first estimate, 1.4 TB / 5 days, came from a
   sample that included the 100 MB albers tiles. A GitHub runner's throughput is unmeasured.
+- **Strip mapsheets.** 954 no-quadrant mapsheet tiles are ~520 MB strips with no overviews. A
+  decimated remote read of one did not finish in 10 min, so they are downloaded whole and
+  decimated on read to ≤ 25 Mpx (~3 m).
+- **Coastlines.** An outline is simplified to ≤ 100 vertices by doubling a tolerance t. Buffering
+  the full-resolution pixel staircase by t goes quadratic: on `bc_092b032_xl1m_utm10_2019` (54%
+  valid, Saanich coast) it took 72 s at t = 96 m and 347 s at 192 m, and it held 24 workers for
+  hours. Simplifying by t/2 before buffering by t (then simplifying by t/2) still covers every
+  pixel, and the whole loop on that tile takes 0.26 s.
+
+## The whole population (2026-10-13)
+
+One local run over all 102,416 listed tiles at 24 workers, with 0 transient errors. It was stalled
+for ~10 h by the coastline buffer above, then restarted from the cache. The restarted pass read
+92,172 tiles in 34.1 h (0.75 tiles/s). Peak scratch was 11.6 GB.
+
+| outcome | tiles |
+|---|---|
+| downloaded whole, checksummed | 101,443 |
+| read at the coarsest overview | 955 |
+| footprint is exactly the cell | 74,010 |
+| footprint is a polygon | 25,774 |
+| footprint is a multipolygon | 2,614 |
+| no valid data (`empty`) | 16 |
+| declares the wrong UTM zone (`crs_mismatch`) | 2 |
+
+Median `valid_percent` is 95.96, and 4,390 tiles are under half valid. The 16 empty tiles are
+2012-2017 deliveries (`bcts_092l…_x_2012`, `…_xl2m_…_2016…`, one `082e072` 2017). They keep their
+published geometry.
+

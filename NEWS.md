@@ -24,9 +24,15 @@ after this merges. Until that dispatch runs, the published catalogue is unchange
   `proj:geometry` the same footprint in the item's CRS. QGIS draws `bbox`, so a partly empty
   tile's box shrinks; a diagonal strip of data still draws as a rectangle.
 - The `dem` asset carries `raster:bands[0].statistics.valid_percent` and, where the whole file
-  was read (every tile up to 64 MB), `file:checksum` (sha256 multihash) and `file:size`.
-  Larger files are read at their coarsest overview and carry no checksum. The DSM is assumed
-  to cover what the DEM covers.
+  was downloaded, `file:checksum` (sha256 multihash) and `file:size`. Files over 64 MB that have
+  overviews are read at their coarsest overview over HTTP and carry no checksum. The DSM is
+  assumed to cover what the DEM covers.
+- Measured over all 102,416 listed tiles (2026-10-10 to 10-13, one local run, 0 transient
+  errors): 101,443 downloaded whole (all checksummed), 955 read at overview. Their footprints:
+  74,010 are exactly their cell, 25,774 a polygon, 2,614 a multipolygon. 16 tiles hold no valid
+  data and 2 are the UTM-14 tiles below; those 18 keep their published geometry. Median
+  `valid_percent` 95.96; 4,390 tiles are under half valid. The 44 published items whose source
+  is gone upstream (#28) get the `lidarbc:` edits only.
 - `lidarbc:delivery` (`"092/092g/2016"`) on every item from a LidarBC delivery — every item but
   the `albers10k2m` ones — the key stac-pointcloud-bc items carry, plus one `related` link from
   the collection to stac-pointcloud-bc (#55). The `lidarbc:` schema is crate's (`lidarbc`

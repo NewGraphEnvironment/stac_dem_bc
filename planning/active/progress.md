@@ -30,3 +30,4 @@
 - Fix: simplify before buffering after round 1; real coastal mask as fixture; test fails at 60 s against the old loop. 310 tests pass
 - Restarted from a frozen copy of HEAD (guards included)
 - Review round 5 (one reviewer, the buffer fix): coverage argument sound, mitre 2.0 never short, test fails on the old loop; one fragile finding — the 10×MIN_AREA_M2 allowance hid a 1,538 m² under-buffer. Tightened to hygiene-cleaned data < 1 m²; mutant now RED
+- Full run complete 2026-10-13T01:56Z: 102,416 rows, 0 transient errors; audit clean; rehearsal 300/300 written and valid; NEWS counts and research/footprints.md population table; cache committed
