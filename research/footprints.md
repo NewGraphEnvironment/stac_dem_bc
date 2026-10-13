@@ -2,7 +2,7 @@
 
 **Verified:** 2026-10-13 · **Issues:** #2, #55; spawned crate#26, stacs#8 · **Produced by:**
 `scripts/footprint.py`, `scripts/footprint_extract.py`; Phase 1 probes and counts in
-`planning/archive/2026-10-issue-2-*/findings.md`; population checks in `tests/test_footprint.py`.
+`planning/archive/2026-10-issue-2-true-footprints/findings.md`; population checks in `tests/test_footprint.py`.
 
 What a DEM tile on the BC objectstore (`nrs.objectstore.gov.bc.ca/gdwuts`) covers, how to compute
 it, and what it costs.
