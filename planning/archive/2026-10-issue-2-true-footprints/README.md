@@ -16,10 +16,14 @@ The approved design was wrong and was replaced mid-run. Phase 1 found that readi
 delivery-edge tiles would miss most gaps: 19% of interior tiles and 25% of edge tiles have gaps,
 and the edge test caught 8 of 29. The user then chose to read every tile.
 
-Merge blockers resolved: crate#26 shipped `lidarbc` v1.1.0, and the full cache is committed. Two
-boxes stay open in `task_plan.md` and are not this branch's to close. Both happen after the merge
-and on the user's word: the pre-dispatch check, and the publish (the `footprint` dispatch, then
-`stacs register --mode drift` and `stacs verify`).
+Merge blockers resolved: crate#26 shipped `lidarbc` v1.1.0, and the full cache is committed.
+
+Published 2026-10-13, after the merge and on the user's word. The first `footprint` dispatch
+(run 38339265803) rewrote all 102,460 items with 0 errors, then its S3 sync failed on expired OIDC
+credentials after 91,772 uploads (#60). The workflow discarded the rewrite manifest as designed. A
+re-dispatch (run 38452466305) found those 91,772 unchanged, wrote the other 10,688, and synced them
+plus `collection.json`. `stacs register --mode drift` then loaded 102,460 changed items and the
+collection, and `stacs verify` reported IN SYNC.
 
 Filed along the way:
 - #56: a transient read marks a tile unreadable. Pre-existing.

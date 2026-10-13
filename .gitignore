@@ -63,3 +63,4 @@ rsconnect/
 
 # Logs (but keep README)
 logs/*.log
+verify_report/
