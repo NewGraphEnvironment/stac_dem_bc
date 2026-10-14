@@ -65,3 +65,13 @@ Reviewer confirmed: the sync is the only AWS user; a second `configure-aws-crede
 Mechanism: the detector recognises *spellings* of AWS use and was checked against no list of real users. Terminal step is an enumeration: a grep for aws/boto/vsis3 over `scripts/` gives 8 files; by reading each, 3 sign AWS calls (`s3_sync-ci.sh`, `s3_sync.R`, `catalogue_qa.py`) and 5 mention only anonymous https URLs or prose. New test pins the detector to exactly that set over every .py/.sh/.R in `scripts/`.
 
 Mutations on a scratch copy, all red: `&& aws`, `.venv/bin/aws`, boto3 two imports deep, `aws-actions/amazon-ecr-login`, a `catalogue_qa.py` step, an `s3_sync.R` step, `system(paste0("aws s3 cp "...))` reached through R `source()`, late step deleted; and `s3_sync.R` with its code removed but comments kept drops out of the set.
+
+## code-check round 3 (a defect inside round 2's fix)
+
+Mechanism, as the reviewer named it: "uses AWS" was decided by matching a list of spellings, and round 2's ground truth `SIGNED` was enumerated with the same vocabulary as the regex, so it could not see a spelling outside it (verification reads its own output). Mutation: `subprocess.run(["aws"] + ["s3","ls"])` passed every test.
+
+Enumeration, independent of the regex: the reviewer searched every .py/.sh/.R/.qmd/.toml/.yml in the repo for aws, boto, vsis3, s3fs, paws, aws.s3, AWS_, s3://, fsspec, obstore, minio, s3cmd and ngr_s3, read ngr 0.0.3's `ngr_s3_keys_get` (anonymous `httr::GET`), checked that installed `stacs` has no boto3/s3fs/obstore, and walked every workflow step. Result: exactly the three files in `SIGNED`, and only `Sync catalog to S3` uses AWS.
+
+Fix, which tests the property rather than the spelling: the probe gets `output-env-credentials: false` (v4 source read: it still calls AssumeRoleWithWebIdentity, so a broken trust policy still fails the step, but `exportCredentials` skips every `core.exportVariable`). Any AWS step without its own re-assume now fails on every run, not only after an hour. Test pins the probe at false and every later credentials step at true. Mutations red: probe exporting again; late step with export off.
+
+Accepted: the static scan covers `scripts/`, not `tests/` (offline, bucket strings only), nor third-party internals.

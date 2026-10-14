@@ -127,10 +127,14 @@ jobs:
       # is anonymous HTTPS). The session lasts one hour, so the sync re-assumes
       # (#60). Kept so a broken trust condition (#40 moves it) fails here,
       # before hours of item work, rather than at the sync.
+      # output-env-credentials: false -- the role is still assumed, but nothing
+      # is exported. A later AWS step without its own re-assume then fails on
+      # every run, rather than working for an hour and failing only on long ones.
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::414155577829:role/role_gha_stac_dem_bc
           aws-region: us-west-2
+          output-env-credentials: false
 
       - name: Detect changes
         id: detect

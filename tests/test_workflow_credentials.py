@@ -26,9 +26,12 @@ IMPORT = re.compile(r"^\s*(?:from|import)\s+(\w+)", re.M)
 R_SOURCE = re.compile(r"""\bsource\(\s*["'](scripts/[\w./-]+\.R)["']""")
 
 # Every script under scripts/ whose code signs an AWS call, enumerated by hand
-# on 2026-10-14 from a grep for aws/boto/vsis3 over the directory. The other
-# matches are anonymous https URLs and prose. Pinning the detector to this set
-# is what shows it recognises how this repo actually calls AWS.
+# on 2026-10-14: a grep for aws/boto/vsis3, re-checked independently with
+# s3fs, paws, aws.s3, AWS_, s3://, fsspec, obstore, minio, s3cmd and ngr_s3.
+# The other matches are anonymous https URLs and prose. This pins the detector
+# to how the repo calls AWS today; it shares the detector's vocabulary, so it
+# cannot see a new spelling. The runtime guard for that is the probe exporting
+# nothing (test_the_probe_exports_no_credential).
 SIGNED = {"s3_sync-ci.sh", "s3_sync.R", "catalogue_qa.py"}
 
 
@@ -112,3 +115,13 @@ def test_every_credentials_step_assumes_the_same_role_in_the_same_region():
     assert len(creds) >= 2, "expected the early probe and the pre-sync re-assume"
     roles = {(c["role-to-assume"], c["aws-region"]) for c in creds}
     assert len(roles) == 1, roles
+
+
+def test_the_probe_exports_no_credential():
+    # The early step only proves the trust policy. If it exported its session,
+    # an AWS step with no re-assume of its own would work for an hour and fail
+    # only on a long run, which is #60 again. Every later step must export.
+    creds = [s["with"] for s in steps() if is_creds(s)]
+    assert str(creds[0].get("output-env-credentials")).lower() == "false"
+    for c in creds[1:]:
+        assert str(c.get("output-env-credentials", True)).lower() == "true"
