@@ -15,9 +15,9 @@ Exploration: the sync (`scripts/s3_sync-ci.sh`) is the only step that uses the c
 - [x] Tests green; restore the bug and confirm the new test goes red
 
 ## Phase 3: Issues and records
-- [ ] Confirm run 38452466305 was the `footprint: true` recovery and its sync succeeded; edit #60's body to record it
-- [ ] File the `urls_list.txt` stranding issue, linking #57 and #60
-- [ ] Session note in `progress.md`
+- [x] Confirm run 38452466305 was the `footprint: true` recovery and its sync succeeded; edit #60's body to record it
+- [x] File the `urls_list.txt` stranding issue, linking #57 and #60 (#63)
+- [x] Session note in `progress.md`
 
 ## Validation
 
