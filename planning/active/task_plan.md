@@ -5,8 +5,8 @@
 Exploration: the sync (`scripts/s3_sync-ci.sh`) is the only step that uses the credential; every other S3 read is unauthenticated HTTPS. Keep the early step as a fail-fast probe of the trust policy (#40 moves it), and re-assume immediately before the sync.
 
 ## Phase 1: Test first
-- [ ] Add `tests/test_workflow_credentials.py`: every step calling `aws ` or `s3_sync-ci.sh` is immediately preceded by a `configure-aws-credentials` step with the same `if:`; every credentials step names the same role and region
-- [ ] Run it and confirm it fails against the current workflow
+- [x] Add `tests/test_workflow_credentials.py`: every step calling `aws ` or `s3_sync-ci.sh` is immediately preceded by a `configure-aws-credentials` step with the same `if:`; every credentials step names the same role and region
+- [x] Run it and confirm it fails against the current workflow
 
 ## Phase 2: The fix
 - [ ] Add `configure-aws-credentials@v4` immediately before `Sync catalog to S3`, same role and region, carrying the sync's `if:`
