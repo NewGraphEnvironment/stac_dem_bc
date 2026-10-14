@@ -7,11 +7,20 @@ collection.json never written.
 """
 
 import os
+import re
 
 import yaml
 
-WF = os.path.join(os.path.dirname(__file__), "..", ".github", "workflows", "update.yml")
+ROOT = os.path.join(os.path.dirname(__file__), "..")
+WF = os.path.join(ROOT, ".github", "workflows", "update.yml")
 CREDS = "aws-actions/configure-aws-credentials"
+
+# Signed AWS access: the CLI in any command position (`&& aws`, `.venv/bin/aws`),
+# boto3, or GDAL's signed S3 handler. Not `s3://` alone, which comments use to
+# name the bucket. Anonymous HTTPS reads need no credential and do not count.
+AWS = re.compile(r"(^|[\s;&|(/`])aws\s+[a-z]|\bboto3\b|/vsis3/", re.M)
+SCRIPT = re.compile(r"scripts/[\w./-]+\.(?:py|sh|R)\b")
+IMPORT = re.compile(r"^\s*(?:from|import)\s+(\w+)", re.M)
 
 
 def steps():
@@ -24,17 +33,40 @@ def is_creds(step):
     return str(step.get("uses", "")).startswith(CREDS + "@")
 
 
+def sources(run):
+    """The scripts a step runs, plus the repo modules their Python imports."""
+    todo = [os.path.join(ROOT, p) for p in SCRIPT.findall(run)]
+    seen = set()
+    while todo:
+        path = todo.pop()
+        if path in seen or not os.path.exists(path):
+            continue
+        seen.add(path)
+        if path.endswith(".py"):
+            with open(path) as fh:
+                mods = IMPORT.findall(fh.read())
+            todo += [os.path.join(ROOT, "scripts", m + ".py") for m in mods]
+    return seen
+
+
 def uses_aws(step):
+    uses = str(step.get("uses", ""))
+    if uses.startswith("aws-actions/") and not is_creds(step):
+        return True
     run = step.get("run", "")
-    return "s3_sync-ci.sh" in run or any(
-        line.strip().startswith("aws ") for line in run.splitlines()
-    )
+    if AWS.search(run):
+        return True
+    for path in sources(run):
+        with open(path) as fh:
+            if AWS.search(fh.read()):
+                return True
+    return False
 
 
 def test_the_sync_is_found():
     # A rename of the sync step or its script would otherwise leave the test
     # below checking nothing.
-    assert any(uses_aws(s) for s in steps())
+    assert "Sync catalog to S3" in [s.get("name") for s in steps() if uses_aws(s)]
 
 
 def test_every_aws_step_is_immediately_preceded_by_a_credentials_step():

@@ -50,3 +50,9 @@ Re-dispatch `footprint: true`. Items already on S3 in the new shape come back `u
 | late step's `if:` dropped | 1 failed |
 | late step's region changed | 1 failed |
 | none | 3 passed; full suite 313 passed |
+
+## code-check round 1
+
+One finding, fragile: `uses_aws` recognised only a line starting `aws ` or a call to `s3_sync-ci.sh`, so `&& aws`, `.venv/bin/aws`, boto3 and other `aws-actions/` steps passed unseen. Fixed: the CLI in any command position, boto3 and `/vsis3/`, searched in the step's run text and in every script it runs plus that script's repo imports. `s3://` alone is excluded because comments name the bucket with it (`collection_patch.py:77`). Mutations on a scratch copy, all red: `&& aws`, `.venv/bin/aws`, boto3 two imports deep, `aws-actions/amazon-ecr-login`, late step deleted.
+
+Reviewer confirmed: the sync is the only AWS user; a second `configure-aws-credentials@v4` does a fresh web-identity assume and overwrites the env; the new step's `if:` behaves as the sync's.
