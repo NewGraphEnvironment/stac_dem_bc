@@ -40,3 +40,13 @@ Re-dispatch `footprint: true`. Items already on S3 in the new shape come back `u
 
 | Error | Resolution |
 |-------|------------|
+| Mutation backup `cp ... "$TMPDIR/uy.bak"` failed (`TMPDIR` unset in the Bash tool), so the first mutation stayed applied | Back up to the session scratchpad and `cmp` after restoring |
+
+## Mutation table (Phase 2)
+
+| mutation | result |
+|---|---|
+| late credentials step deleted | 2 failed |
+| late step's `if:` dropped | 1 failed |
+| late step's region changed | 1 failed |
+| none | 3 passed; full suite 313 passed |

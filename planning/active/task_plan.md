@@ -9,10 +9,10 @@ Exploration: the sync (`scripts/s3_sync-ci.sh`) is the only step that uses the c
 - [x] Run it and confirm it fails against the current workflow
 
 ## Phase 2: The fix
-- [ ] Add `configure-aws-credentials@v4` immediately before `Sync catalog to S3`, same role and region, carrying the sync's `if:`
-- [ ] Comment both credential steps (probe vs. re-assume, citing run 38339265803)
-- [ ] Update the header comment block of `update.yml` if it describes auth
-- [ ] Tests green; restore the bug and confirm the new test goes red
+- [x] Add `configure-aws-credentials@v4` immediately before `Sync catalog to S3`, same role and region, carrying the sync's `if:`
+- [x] Comment both credential steps (probe vs. re-assume, citing run 38339265803)
+- [x] Update the header comment block of `update.yml` if it describes auth (no change: it names the role and OIDC, nothing about a single assume)
+- [x] Tests green; restore the bug and confirm the new test goes red
 
 ## Phase 3: Issues and records
 - [ ] Confirm run 38452466305 was the `footprint: true` recovery and its sync succeeded; edit #60's body to record it
