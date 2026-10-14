@@ -24,4 +24,4 @@ Exploration: the sync (`scripts/s3_sync-ci.sh`) is the only step that uses the c
 - [x] Tests pass
 - [x] `/code-check` clean (each commit, or once over the branch with `/code-check branch`)
 - [x] PWF checkboxes match landed work
-- [ ] `/planning-archive` on completion
+- [x] `/planning-archive` on completion
