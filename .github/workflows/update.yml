@@ -122,10 +122,19 @@ jobs:
                "second would overwrite the first. Dispatch them separately."
           exit 1
 
+      # A fail-fast probe of the role's trust policy, not the credential the
+      # sync uses: nothing before the sync needs AWS auth (every other S3 read
+      # is anonymous HTTPS). The session lasts one hour, so the sync re-assumes
+      # (#60). Kept so a broken trust condition (#40 moves it) fails here,
+      # before hours of item work, rather than at the sync.
+      # output-env-credentials: false -- the role is still assumed, but nothing
+      # is exported. A later AWS step without its own re-assume then fails on
+      # every run, rather than working for an hour and failing only on long ones.
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::414155577829:role/role_gha_stac_dem_bc
           aws-region: us-west-2
+          output-env-credentials: false
 
       - name: Detect changes
         id: detect
@@ -471,6 +480,20 @@ jobs:
       - name: Audit item fields (footprint, lidarbc)
         if: steps.publish.outputs.count != '0' && steps.publish.outputs.count != ''
         run: .venv/bin/python scripts/item_fields.py audit --dir "$STAC_OUTPUT_DIR"
+
+      # Re-assume immediately before the only step that writes to AWS. The OIDC
+      # session lasts one hour from the step that assumed it, and the sync can
+      # start later than that: run 38339265803 assumed at 03:01, reached the
+      # sync at 03:50 and hit ExpiredToken at 04:01, with 91,772 of 102,460
+      # items uploaded and collection.json never written (#60). Same `if:` as
+      # the sync, so it runs exactly when the sync does.
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: >-
+          (steps.publish.outputs.count != '0' && steps.publish.outputs.count != '')
+          || steps.collpatch.outputs.changed == 'true'
+        with:
+          role-to-assume: arn:aws:iam::414155577829:role/role_gha_stac_dem_bc
+          aws-region: us-west-2
 
       # Runs when there are new items OR only rebuilt ones: a pairing-only month
       # produces item JSONs and no new URLs, and skipping the sync would leave
