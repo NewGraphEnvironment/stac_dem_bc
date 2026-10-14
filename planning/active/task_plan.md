@@ -21,7 +21,7 @@ Exploration: the sync (`scripts/s3_sync-ci.sh`) is the only step that uses the c
 
 ## Validation
 
-- [ ] Tests pass
-- [ ] `/code-check` clean (each commit, or once over the branch with `/code-check branch`)
-- [ ] PWF checkboxes match landed work
+- [x] Tests pass
+- [x] `/code-check` clean (each commit, or once over the branch with `/code-check branch`)
+- [x] PWF checkboxes match landed work
 - [ ] `/planning-archive` on completion
