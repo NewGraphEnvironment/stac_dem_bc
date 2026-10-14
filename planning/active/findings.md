@@ -56,3 +56,12 @@ Re-dispatch `footprint: true`. Items already on S3 in the new shape come back `u
 One finding, fragile: `uses_aws` recognised only a line starting `aws ` or a call to `s3_sync-ci.sh`, so `&& aws`, `.venv/bin/aws`, boto3 and other `aws-actions/` steps passed unseen. Fixed: the CLI in any command position, boto3 and `/vsis3/`, searched in the step's run text and in every script it runs plus that script's repo imports. `s3://` alone is excluded because comments name the bucket with it (`collection_patch.py:77`). Mutations on a scratch copy, all red: `&& aws`, `.venv/bin/aws`, boto3 two imports deep, `aws-actions/amazon-ecr-login`, late step deleted.
 
 Reviewer confirmed: the sync is the only AWS user; a second `configure-aws-credentials@v4` does a fresh web-identity assume and overwrites the env; the new step's `if:` behaves as the sync's.
+
+## code-check round 2 (a defect inside round 1's fix)
+
+1. fragile: the round-1 regex missed the CLI called as a quoted argv. `catalogue_qa.py:36` (`["aws", "s3", "cp", ...]`) went undetected, and `s3_sync.R` was caught only through its prose comments. Reproduced. Fixed: quoted forms added, whole-line `#` comments stripped before matching.
+2. fragile: `sources()` followed Python imports but not R `source()`. Fixed: follows `source("scripts/....R")`, and only that, so prose naming a script in a docstring is not followed.
+
+Mechanism: the detector recognises *spellings* of AWS use and was checked against no list of real users. Terminal step is an enumeration: a grep for aws/boto/vsis3 over `scripts/` gives 8 files; by reading each, 3 sign AWS calls (`s3_sync-ci.sh`, `s3_sync.R`, `catalogue_qa.py`) and 5 mention only anonymous https URLs or prose. New test pins the detector to exactly that set over every .py/.sh/.R in `scripts/`.
+
+Mutations on a scratch copy, all red: `&& aws`, `.venv/bin/aws`, boto3 two imports deep, `aws-actions/amazon-ecr-login`, a `catalogue_qa.py` step, an `s3_sync.R` step, `system(paste0("aws s3 cp "...))` reached through R `source()`, late step deleted; and `s3_sync.R` with its code removed but comments kept drops out of the set.

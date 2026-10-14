@@ -15,12 +15,21 @@ ROOT = os.path.join(os.path.dirname(__file__), "..")
 WF = os.path.join(ROOT, ".github", "workflows", "update.yml")
 CREDS = "aws-actions/configure-aws-credentials"
 
-# Signed AWS access: the CLI in any command position (`&& aws`, `.venv/bin/aws`),
+# Signed AWS access: the CLI in any command position (`&& aws`, `.venv/bin/aws`)
+# or as a quoted argv (`["aws", "s3", ...]`, `paste0("aws s3 sync ", ...)`),
 # boto3, or GDAL's signed S3 handler. Not `s3://` alone, which comments use to
 # name the bucket. Anonymous HTTPS reads need no credential and do not count.
-AWS = re.compile(r"(^|[\s;&|(/`])aws\s+[a-z]|\bboto3\b|/vsis3/", re.M)
+AWS = re.compile(r"""(^|[\s;&|(/`"'])aws(\s+|["']\s*,\s*["'])[a-z]|\bboto3\b|/vsis3/""", re.M)
+COMMENT = re.compile(r"^\s*#.*$", re.M)
 SCRIPT = re.compile(r"scripts/[\w./-]+\.(?:py|sh|R)\b")
 IMPORT = re.compile(r"^\s*(?:from|import)\s+(\w+)", re.M)
+R_SOURCE = re.compile(r"""\bsource\(\s*["'](scripts/[\w./-]+\.R)["']""")
+
+# Every script under scripts/ whose code signs an AWS call, enumerated by hand
+# on 2026-10-14 from a grep for aws/boto/vsis3 over the directory. The other
+# matches are anonymous https URLs and prose. Pinning the detector to this set
+# is what shows it recognises how this repo actually calls AWS.
+SIGNED = {"s3_sync-ci.sh", "s3_sync.R", "catalogue_qa.py"}
 
 
 def steps():
@@ -33,8 +42,13 @@ def is_creds(step):
     return str(step.get("uses", "")).startswith(CREDS + "@")
 
 
+def signs_aws(text):
+    """True when code, not a whole-line comment, makes a signed AWS call."""
+    return bool(AWS.search(COMMENT.sub("", text)))
+
+
 def sources(run):
-    """The scripts a step runs, plus the repo modules their Python imports."""
+    """The scripts a step runs, plus the repo files they import or source()."""
     todo = [os.path.join(ROOT, p) for p in SCRIPT.findall(run)]
     seen = set()
     while todo:
@@ -42,10 +56,12 @@ def sources(run):
         if path in seen or not os.path.exists(path):
             continue
         seen.add(path)
+        with open(path) as fh:
+            text = fh.read()
         if path.endswith(".py"):
-            with open(path) as fh:
-                mods = IMPORT.findall(fh.read())
-            todo += [os.path.join(ROOT, "scripts", m + ".py") for m in mods]
+            todo += [os.path.join(ROOT, "scripts", m + ".py") for m in IMPORT.findall(text)]
+        elif path.endswith(".R"):
+            todo += [os.path.join(ROOT, p) for p in R_SOURCE.findall(text)]
     return seen
 
 
@@ -54,13 +70,24 @@ def uses_aws(step):
     if uses.startswith("aws-actions/") and not is_creds(step):
         return True
     run = step.get("run", "")
-    if AWS.search(run):
+    if signs_aws(run):
         return True
     for path in sources(run):
         with open(path) as fh:
-            if AWS.search(fh.read()):
+            if signs_aws(fh.read()):
                 return True
     return False
+
+
+def test_the_detector_finds_exactly_the_scripts_that_sign_aws_calls():
+    d = os.path.join(ROOT, "scripts")
+    found = set()
+    for f in os.listdir(d):
+        if f.endswith((".py", ".sh", ".R")):
+            with open(os.path.join(d, f)) as fh:
+                if signs_aws(fh.read()):
+                    found.add(f)
+    assert found == SIGNED
 
 
 def test_the_sync_is_found():
