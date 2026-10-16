@@ -173,7 +173,7 @@ collections:
 - [`stac_airphoto_bc`](https://github.com/NewGraphEnvironment/stac_airphoto_bc)
   — historic airphoto thumbnails, 1963–2019 (`stac-airphoto-bc`)
 - [`stac_uav_bc`](https://github.com/NewGraphEnvironment/stac_uav_bc) —
-  UAV imagery, organized by watershed (`imagery-uav-bc-prod`)
+  UAV imagery, organized by watershed (`stac-imagery-uav-bc`)
 
 ## Roadmap
 
