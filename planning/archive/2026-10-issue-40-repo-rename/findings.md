@@ -73,7 +73,7 @@ bucket, which is worth stating because all three now differ:
 Nothing breaks. This is tidiness, and the cost of leaving it is that the repo
 name is one more thing to explain to whoever picks the catalogue up next.
 
-Relates to #34, NewGraphEnvironment/rtj#255
+Relates to #34, the infrastructure cutover issue
 
 
 
@@ -82,7 +82,7 @@ Relates to #34, NewGraphEnvironment/rtj#255
 - `gh api repos/NewGraphEnvironment/stac_dem_bc/actions/oidc/customization/sub` →
   `use_immutable_subject: false`, prefix `repo:NewGraphEnvironment/stac_dem_bc`. The rename
   therefore changes the token's `sub`, and `rtj/env/prod/main.tf:114` must move with it.
-- rtj#395 (open, not landed): repos created after ~2026-10 get immutable subjects
+- the infrastructure issue on immutable OIDC subjects (open, not landed): repos created after ~2026-10 get immutable subjects
   (`repo:Org@id/repo@id`), and `gha_s3_role` cannot express them yet. Not this issue's scope;
   the repo-string change is sufficient for a mutable-subject repo.
 - Pages: `html_url` https://www.newgraphenvironment.com/stac_dem_bc/, no CNAME of its own;
@@ -96,7 +96,7 @@ Relates to #34, NewGraphEnvironment/rtj#255
 
 ## Plan review and code-check round 1 (2026-10-17)
 
-- `review-plan.md`: rtj prod state is on m4 only; the org website links the old Pages URL and can
+- `review-plan.md`: rtj prod state is on the state host only; the org website links the old Pages URL and can
   host a redirect at `/stac_dem_bc/` (it owns `www.newgraphenvironment.com`). Adopted.
 - `review-round1.md`: don't cancel the confirming dispatch. `Commit refreshed caches` runs under
   `always()` after `detect_changes.R` has rewritten `urls_list.txt`, so a cancel after detection
@@ -111,13 +111,13 @@ Relates to #34, NewGraphEnvironment/rtj#255
 ## Code-check round 2 and the enumeration (2026-10-17)
 
 Round 2 (`review-round2.md`) found three prose defects, two inside round 1's fixes (a Phase 1 box
-left describing the pre-redirect NEWS; this PR and rtj#400 giving different merge orders), plus a
+left describing the pre-redirect NEWS; this PR and the infrastructure PR giving different merge orders), plus a
 rename date in rtj docs that preceded the rename. Mechanism: the cutover order, the old Pages URL's
 fate and "already renamed" claims are each restated by hand across documents. Enumerated all nine
-(rtj#400 body, this PR body, flooded#88, wedzin#164, website#60 bodies, task_plan, findings, NEWS,
+(the infrastructure PR body, this PR body, flooded#88, wedzin#164, website#60 bodies, task_plan, findings, NEWS,
 CLAUDE.md) for each claim class. The enumeration found one more instance (flooded/wedzin bodies
 said the old link "would stop working", written before the redirect); fixed. All nine now agree:
-plan and apply on m4 from the rtj branch, merge rtj#400 after the apply, never cancel the
+plan and apply on the state host from the rtj branch, merge the infrastructure PR after the apply, never cancel the
 confirming dispatch, the old path redirects via the org site.
 
 ## Code-check round 3 and the terminal enumeration (2026-10-17)
@@ -131,4 +131,4 @@ plus a misquoted condition in #66. All fixed.
 Terminal enumeration: every added line in all five branch diffs plus all five PR bodies and #66
 (569 lines), grepped for the two claim classes (instructions: cancel/rollback/revert/merge/archive/
 apply/mv; sequence-state: renamed/is now/redirect/404/stop/gone/dates), each hit read. All agree;
-the only early statements are rtj#400's docs/comment, merged minutes before the rename (accepted).
+the only early statements are the infrastructure PR's docs/comment, merged minutes before the rename (accepted).

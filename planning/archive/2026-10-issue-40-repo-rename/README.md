@@ -2,14 +2,14 @@
 
 Prepared the rename of the repo `stac_dem_bc` → `stac_elevation_bc` so it matches the collection
 it publishes (`stac-elevation-bc`, #34). The catalogue itself is unchanged. Across five repos:
-this repo's links, NEWS, DESCRIPTION, `.Rproj`, logos and CLAUDE.md; rtj#400 moves
+this repo's links, NEWS, DESCRIPTION, `.Rproj`, logos and CLAUDE.md; the infrastructure PR moves
 `role_gha_stac_dem_bc`'s OIDC trust to the new name, as an in-place update; the org website (#60)
 gets a redirect page at the old Pages path, because GitHub Pages does not redirect a renamed
 project site and the URL is already in proposals and emails; flooded#88 and
 restoration_wedzin_kwa_2024#164 fix inbound links.
 
 What was learned:
-- rtj's `env/prod` state lives only on m4. A plan from m1 shows phantom creates (`2 to add`).
+- The infrastructure's prod state lives on one machine only. A plan from any other machine shows phantom creates (`2 to add`).
 - The confirming `update.yml` dispatch must not be cancelled: `Commit refreshed caches` runs
   under `always()` after detection has rewritten `urls_list.txt`, which also makes
   `scripts/README.md`'s "a failed run persists nothing" false (#66).

@@ -1,12 +1,12 @@
-# Code-check round 1 — #40 repo rename (stac_dem_bc, rtj#400, flooded#88, restoration_wedzin_kwa_2024#164)
+# Code-check round 1 — #40 repo rename (stac_dem_bc, the infrastructure PR, flooded#88, restoration_wedzin_kwa_2024#164)
 
 Reviewed 2026-10-17 against: the diff in scratchpad/diff.txt, the full current files on each
 branch, index.html / README.html and the regenerated logo in the working tree, and the open PR
-bodies (rtj#400, flooded#88, restoration_wedzin_kwa_2024#164).
+bodies (the infrastructure PR, flooded#88, restoration_wedzin_kwa_2024#164).
 
 ## Findings
 
-- **[fragile]** rtj#400 PR body, "Order" step 4 — "Dispatch `update.yml` there and confirm
+- **[fragile]** the infrastructure PR PR body, "Order" step 4 — "Dispatch `update.yml` there and confirm
   the `AWS credentials` step passes. You can cancel the run once that step is green."
   Cancelling is not safe at every point after that step. `Commit refreshed caches`
   (`.github/workflows/update.yml:536-597`) is gated on
@@ -33,7 +33,7 @@ bodies (rtj#400, flooded#88, restoration_wedzin_kwa_2024#164).
   `local.subs`, so in `aws_iam_role.this.assume_role_policy`. `name` derives from the bucket,
   and `aws_iam_role_policy.s3` keys on the unchanged role name. Changing `repo` is therefore one
   in-place update. Expecting `0 to add, 1 to change, 0 to destroy` is correct, provided the
-  plan reads m4's state.
+  plan reads the state host's state.
 - The module label, output and role name are unchanged. `update.yml:135` and `:495` still
   name `role_gha_stac_dem_bc`, which is correct.
 - update.yml has no `environment:` key, so the sub is `repo:<org>/<repo>:ref:refs/heads/main`,
@@ -65,5 +65,5 @@ bodies (rtj#400, flooded#88, restoration_wedzin_kwa_2024#164).
   path `~/Projects/repo/stac_dem_bc`. The only references are logs.
 
 Not a finding: rtj's `test_gh-auth.sh` now probes the new name. The old name would have kept
-resolving after the rename. The new name fails only in the minutes between merging rtj#400
+resolving after the rename. The new name fails only in the minutes between merging the infrastructure PR
 and the rename, and that window is meant to be a single sitting.

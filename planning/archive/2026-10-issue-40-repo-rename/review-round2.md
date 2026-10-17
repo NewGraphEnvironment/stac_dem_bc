@@ -1,4 +1,4 @@
-# Code-check round 2 — #40 repo rename (stac_dem_bc, rtj#400, flooded#88, restoration_wedzin_kwa_2024#164, newgraphenvironment.github.io#60)
+# Code-check round 2 — #40 repo rename (stac_dem_bc, the infrastructure PR, flooded#88, restoration_wedzin_kwa_2024#164, newgraphenvironment.github.io#60)
 
 Reviewed 2026-10-17 against scratchpad/diff2.txt, the full files on each branch
 (`origin/stac-elevation-bc-repo-rename` for the four other repos; HEAD for this repo), the live
@@ -10,7 +10,7 @@ this diff (CI monitoring, infra state/plan, credential timing, tracked-artifact 
 None that break anything. Two prose claims are wrong or will become wrong. Both are low severity:
 
 - **[fragile]** rtj `docs/stac-endpoints.md:28`: "(renamed from `stac_dem_bc` 2026-10-17)" gives the
-  rename date ahead of time. The rename is step 3 of a cutover that waits on a `tofu apply` on m4.
+  rename date ahead of time. The rename is step 3 of a cutover that waits on a `tofu apply` on the state host.
   If that slips past today, the table states a false date and nothing will correct it. Either
   drop the date or fill it in during the cutover.
 - **[fragile]** `planning/active/task_plan.md:487` (Phase 1, checked): "add an Unreleased line saying
@@ -19,8 +19,8 @@ None that break anything. Two prose claims are wrong or will become wrong. Both 
   isn't in the tree, which fails the "PWF checkboxes match landed work" validation item. Reword
   the box.
 
-Inconsistency, not a defect: this PR body's cutover step 2 says "merge rtj#400, `tofu plan`, then
-apply", while rtj#400's own Order step 2 says "pull this branch, then `tofu plan`". Merging before
+Inconsistency, not a defect: this PR body's cutover step 2 says "merge the infrastructure PR, `tofu plan`, then
+apply", while the infrastructure PR's own Order step 2 says "pull this branch, then `tofu plan`". Merging before
 the plan is verified would leave rtj main describing an unapplied trust if the plan shows a
 surprise. rtj has no workflows, so nothing auto-applies on merge. Use one order in both bodies,
 preferably plan and apply from the branch, then merge.

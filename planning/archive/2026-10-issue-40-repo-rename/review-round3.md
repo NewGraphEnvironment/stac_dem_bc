@@ -1,4 +1,4 @@
-# Code-check round 3: #40 repo rename (stac_dem_bc, rtj#400, flooded#88, restoration_wedzin_kwa_2024#164, newgraphenvironment.github.io#60)
+# Code-check round 3: #40 repo rename (stac_dem_bc, the infrastructure PR, flooded#88, restoration_wedzin_kwa_2024#164, newgraphenvironment.github.io#60)
 
 Reviewed 2026-10-17 against scratchpad/diff3.txt, the working tree at f3d77c7 (clean), the four live PR
 bodies (identical to the saved copies apart from a trailing newline), issue #66, update.yml and
@@ -37,15 +37,15 @@ Every member is checked below.
 
 - **[fragile]** `CLAUDE.md:386`: "Main repo: `/Users/airvine/Projects/repo/stac_elevation_bc` (the
   clone was `stac_dem_bc` until #40…)". This lands on main at cutover step 7. The `mv` that makes it
-  true is a separate manual step afterwards (task_plan Phase 5), and it may never happen for m4's clone.
+  true is a separate manual step afterwards (task_plan Phase 5), and it may never happen for the state host's clone.
   Until it does, the file every session here auto-loads names a directory that does not exist, and it
   says the clone moved "with #40" when #40's merge does not move it. This is class (b), the same shape
   as the rtj date. Fix: phrase it without a time anchor, e.g. "expected at …/stac_elevation_bc; a clone
   made before #40 is at …/stac_dem_bc until moved". Or do the `mv` right after the rename, before
   merging.
 
-- **[fragile]** Rollback, in three places: pr40 body ("Rollback"), rtj#400 body ("Rollback"), and
-  `planning/active/task_plan.md` Phase 3 last line. All three say: rename back, revert rtj#400,
+- **[fragile]** Rollback, in three places: pr40 body ("Rollback"), the infrastructure PR body ("Rollback"), and
+  `planning/active/task_plan.md` Phase 3 last line. All three say: rename back, revert the infrastructure PR,
   re-apply. That is complete only up to step 6. Step 7 merges #40, #60, #88 and #164. A rollback after
   that leaves:
   - the org site home page, open-source page and table, flooded's README and wedzin's executive
@@ -87,8 +87,8 @@ Every member is checked below.
 
 | text | claim class | verdict |
 |---|---|---|
-| rtj#400 body Order 1–4 | order, dispatch | consistent with pr40 and task_plan: plan/apply on m4 from branch → merge → rename → dispatch, let it finish. Cron "Nov 3 09:23 UTC" matches `'23 9 3 * *'`. `use_immutable_subject: false` matches round 2's API read. Saved plan under base airvine and apply under role-assume match rtj CLAUDE.md:336-350 |
-| rtj#400 body Rollback | rollback | finding 2 |
+| the infrastructure PR body Order 1–4 | order, dispatch | consistent with pr40 and task_plan: plan/apply on the state host from branch → merge → rename → dispatch, let it finish. Cron "Nov 3 09:23 UTC" matches `'23 9 3 * *'`. `use_immutable_subject: false` matches round 2's API read. Saved plan under base airvine and apply under role-assume match rtj CLAUDE.md:336-350 |
+| the infrastructure PR body Rollback | rollback | finding 2 |
 | pr40 body steps 1–7 | order, dispatch, OIDC, Pages | consistent. The name `stac_elevation_bc` is free (API 404). "No releases" is true (`gh release list` empty). The step 4 field exists (`sub_claim_prefix`, round 2) |
 | pr40 body Rollback | rollback | finding 2 |
 | task_plan Phase 3 | order | consistent with both bodies; rollback line is finding 2 |
