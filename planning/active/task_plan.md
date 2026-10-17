@@ -27,20 +27,25 @@ and git remote. What it does break is CI.
 - [x] Open the rtj PR, link it to rtj#255: rtj#400. `tofu plan` **not verified**: env/prod keeps local state, which isn't on this machine (a plan here reads no state and shows `2 to add`). Moved to Phase 3, run where the state lives
 
 ## Phase 3: Cutover (one sitting, in this order)
-- [ ] **You:** merge the rtj PR and run `tofu apply` (I'll hand you the bare command; first output to check is the plan's `1 to change, 0 to add, 0 to destroy`)
-- [ ] Rename on GitHub: `gh repo rename stac_elevation_bc` (I run it after you confirm the apply)
-- [ ] `gh repo edit --homepage https://www.newgraphenvironment.com/stac_elevation_bc/`; check the new Pages URL returns 200 and record what the old one returns
-- [ ] Check `gh api .../actions/oidc/customization/sub` shows `repo:NewGraphEnvironment/stac_elevation_bc`
-- [ ] Dispatch `update.yml` on `main` and confirm `AWS credentials` passes. **Note:** there's no dry-run input, so this is a real incremental monthly run (the same job the Nov 3 cron would do), ~6–90 min
+- [ ] No `update.yml` run in progress (`gh run list … --status in_progress`)
+- [ ] **You, on m4:** merge rtj#400, `tofu plan -out=…` shows `0 to add, 1 to change, 0 to destroy`, then apply that saved plan
+- [ ] `gh repo rename stac_elevation_bc --yes` from this clone; `git remote -v` names the new repo
+- [ ] `gh repo edit --homepage https://www.newgraphenvironment.com/stac_elevation_bc/`
+- [ ] OIDC `sub` prefix reads `repo:NewGraphEnvironment/stac_elevation_bc`. Stop if not (rtj#395)
+- [ ] New Pages URL returns 200 (else `gh api -X POST …/pages/builds`)
+- [ ] Dispatch `update.yml`; `AWS credentials` passes; **let it finish** (no cancel: #66)
+- [ ] Merge this PR, then the website redirect PR (check the old URL now redirects), flooded and wedzin PRs
+- Rollback: `gh repo rename stac_dem_bc --yes`, revert rtj#400, re-apply. Never create a new repo named `stac_dem_bc`
 
 ## Phase 4: Inbound links in other repos (dead Pages URL)
 - [x] `flooded/README.md:46` (and its source, if it's rendered from one) → PR
 - [x] `restoration_wedzin_kwa_2024/0050-executive-summary.Rmd:84` (+ CLAUDE.md table row) → PR restoration_wedzin_kwa_2024#164; flooded#88. Both merge after the rename
+- [x] `newgraphenvironment.github.io`: links, table row, hex copy, and a redirect page at `static/stac_dem_bc/index.html` → newgraphenvironment.github.io#60 (merge after the rename)
 - [x] Leave proposals, compost drafts and planning archives as they are (history, or already submitted)
 
 ## Phase 5: Close out
 - [ ] `/code-check branch`, `/planning-archive`, `/gh-pr-push` (the PR body links the rtj and other-repo PRs)
-- [ ] After merge (you, outside this session, since it moves the session's cwd): `mv ~/Projects/repo/stac_dem_bc ~/Projects/repo/stac_elevation_bc`, and move `~/.claude/projects/-Users-airvine-Projects-repo-stac-dem-bc/memory/` to the new path's project folder. I'll give you both commands
+- [ ] After merge (you, outside this session, since it moves the session's cwd; then recreate `.venv`, which hardcodes its path; m4's clone too, if it has one): `mv ~/Projects/repo/stac_dem_bc ~/Projects/repo/stac_elevation_bc`, and move `~/.claude/projects/-Users-airvine-Projects-repo-stac-dem-bc/memory/` to the new path's project folder. I'll give you both commands
 
 ## Validation
 

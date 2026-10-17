@@ -16,3 +16,7 @@
   couldn't be verified from here (local state lives elsewhere); handed to the user with Phase 3.
 - Phase 4: flooded#88, restoration_wedzin_kwa_2024#164 (merge after the rename).
 - Phase 3 (cutover) waits on the user's `tofu apply`.
+- Plan review in (`review-plan.md`): rtj#400's order now runs plan/apply on m4; website PR
+  newgraphenvironment.github.io#60 adds a redirect page at the old Pages path; NEWS reworded.
+- Code-check round 1 (`review-round1.md`): one finding, in the PR bodies (don't cancel the
+  confirming dispatch). Fixed in rtj#400 and this PR's body; the docs error behind it is #66.

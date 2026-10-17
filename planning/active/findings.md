@@ -89,8 +89,18 @@ Relates to #34, NewGraphEnvironment/rtj#255
   repo `homepage` carries the same URL.
 - Org-wide: 393 code-search hits on `stac_dem_bc`; functional ones outside this repo are only in
   rtj (trust, geobuild cloud-init, gh-auth test). Live inbound Pages links: flooded README,
-  restoration_wedzin_kwa_2024 exec summary, rtj docs/stac-endpoints.md.
+  restoration_wedzin_kwa_2024 exec summary, and the org website (home page pipeline, open-source
+  page). rtj docs/stac-endpoints.md carries the repo *name*, not the Pages URL (corrected after the
+  plan review).
 - `update.yml` has no dry-run input; a plain dispatch is a real incremental run.
+
+## Plan review and code-check round 1 (2026-10-17)
+
+- `review-plan.md`: rtj prod state is on m4 only; the org website links the old Pages URL and can
+  host a redirect at `/stac_dem_bc/` (it owns `www.newgraphenvironment.com`). Adopted.
+- `review-round1.md`: don't cancel the confirming dispatch. `Commit refreshed caches` runs under
+  `always()` after `detect_changes.R` has rewritten `urls_list.txt`, so a cancel after detection
+  strands that month's new files. The wider docs error is #66.
 
 ## Errors Encountered
 

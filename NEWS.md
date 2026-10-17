@@ -15,8 +15,9 @@ matching `water-temp-bc`. Releases live here and in git tags.
 collection it publishes. Nothing in the catalogue changes: the collection is still
 `stac-elevation-bc`, the bucket is still `stac-dem-bc`, and item ids and hrefs are as
 they were. github.com URLs, issue links and git remotes redirect to the new name. The
-landing page does not: it moves to <https://www.newgraphenvironment.com/stac_elevation_bc/>,
-and the old `/stac_dem_bc/` address stops serving it. The monthly workflow's AWS trust
+landing page moves to <https://www.newgraphenvironment.com/stac_elevation_bc/>. GitHub
+Pages does not redirect a renamed site, so the old `/stac_dem_bc/` address is now a redirect
+page on the organisation's website. The monthly workflow's AWS trust
 moved with the rename (rtj); the role keeps its name, `role_gha_stac_dem_bc`, because it
 is named for the bucket.
 
