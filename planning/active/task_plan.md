@@ -10,15 +10,15 @@ data consumer sees changes, and GitHub permanently redirects old URLs, both web
 and git remote. What it does break is CI.
 
 ## Phase 1: Rename inside this repo (branch `40-rename-the-repo-to-stac-elevation-bc-and`)
-- [ ] `README.Rmd`: Pages URL (line 130) and the `github.com/.../stac_dem_bc/issues/N` links → `stac_elevation_bc`; re-render `README.md` with the two-pass `rmarkdown::render` shown in its header
-- [ ] `NEWS.md` line 1 heading → `# stac_elevation_bc`; add an Unreleased line saying the repo was renamed, the old Pages URL is gone and github.com URLs redirect
-- [ ] `DESCRIPTION` `Title:` → `stac_elevation_bc` (`Package: stac.dem.bc` → `stac.elevation.bc`; it's a `Type: Project` manifest, so nothing installs it by name)
-- [ ] `git mv stac_dem_bc.Rproj stac_elevation_bc.Rproj`
-- [ ] `data-raw/make_hexsticker.R` `package_name`, then regenerate `man/figures/logo.png` (and the small logo if the script writes one)
-- [ ] `scripts/README.md:213` Actions link; `CLAUDE.md` names table (line 38 → done, #40), File Locations paths, and the three-names prose
-- [ ] `tests/test_collection_identity.py:46`: update the underscore-name assertion to the new repo name
-- [ ] Repo-wide grep: every remaining `stac_dem_bc` outside `planning/`, `logs/`, `data/`, NEWS history and `~/Projects/gis` paths is either justified or fixed
-- [ ] `pytest` passes
+- [x] `README.Rmd`: Pages URL (line 130) and the `github.com/.../stac_dem_bc/issues/N` links → `stac_elevation_bc`; re-render `README.md` with the two-pass `rmarkdown::render` shown in its header
+- [x] `NEWS.md` line 1 heading → `# stac_elevation_bc`; add an Unreleased line saying the repo was renamed, the old Pages URL is gone and github.com URLs redirect
+- [x] `DESCRIPTION` `Title:` → `stac_elevation_bc` (`Package: stac.dem.bc` → `stac.elevation.bc`; it's a `Type: Project` manifest, so nothing installs it by name)
+- [x] `git mv stac_dem_bc.Rproj stac_elevation_bc.Rproj`
+- [x] `data-raw/make_hexsticker.R` `package_name`, then regenerate `man/figures/logo.png` (and the small logo if the script writes one)
+- [x] `scripts/README.md:213` Actions link; `CLAUDE.md` names table (line 38 → done, #40), File Locations paths, and the three-names prose
+- [x] `tests/test_collection_identity.py:46`: assertion kept (it guards the `~/Projects/gis/stac_dem_bc` path string, which stays); comment updated
+- [x] Repo-wide grep: every remaining `stac_dem_bc` outside `planning/`, `logs/`, `data/`, NEWS history and `~/Projects/gis` paths is either justified or fixed
+- [x] `pytest` passes
 
 ## Phase 2: rtj PR (trust plus references)
 - [ ] `env/prod/main.tf`: `repo = "NewGraphEnvironment/stac_elevation_bc"` (the module label `stac_dem_bc_update` and the output name stay: renaming them would make tofu destroy and recreate the role)

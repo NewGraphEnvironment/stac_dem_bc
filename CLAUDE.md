@@ -35,7 +35,7 @@ This project maintains the STAC catalog for BC's LidarBC DEM collection with aut
 
   | thing | name |
   |---|---|
-  | repo | `stac_dem_bc` (rename tracked as #40) |
+  | repo | `stac_elevation_bc` (renamed from `stac_dem_bc`, #40) |
   | STAC collection | `stac-elevation-bc` |
   | S3 bucket | `stac-dem-bc` — **unchanged, deliberately** |
 
@@ -383,8 +383,7 @@ WHY: Reprocessing same URLs (e.g., after failures, testing) would create duplica
 **Note:** The monthly update runs on GitHub-hosted runners (no VM). S3 buckets and the OIDC role are IaC-managed in rtj; the pgstac host is rtj-provisioned. `geoserv` names the server stack (its containers and `/opt/geoserv`), not a host — the host is the one `stacs.toml` names.
 
 ### File Locations
-- **Main repo:** `/Users/airvine/Projects/repo/stac_dem_bc`
-- **Phase 1-2 worktree:** `/Users/airvine/Projects/repo/stac_dem_bc-phase1-2-modernization`
+- **Main repo:** `/Users/airvine/Projects/repo/stac_elevation_bc` (the clone was `stac_dem_bc` until #40; GitHub redirects the old remote, a local path does not)
 - **Infrastructure repo:** `/Users/airvine/Projects/repo/rtj` (formerly awshak; provisions the bucket, OIDC role, and geoserv STAC host)
 - **STAC catalog:** `s3://stac-dem-bc/` is the only complete copy. Local builds write to a scratch workspace via the `STAC_OUTPUT_DIR` env override in `scripts/stac_utils.py` (the old `/Users/airvine/Projects/gis/.../stac/prod` dir is empty/historical)
 

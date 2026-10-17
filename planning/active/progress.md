@@ -6,3 +6,9 @@
 - Created branch `40-rename-the-repo-to-stac-elevation-bc-and` off main
 - Scaffolded PWF baseline from issue #40 with approved phases
 - Next: start Phase 1
+- Phase 1 done: README.Rmd/scripts/README.md links, NEWS heading + Unreleased entry, DESCRIPTION,
+  `.Rproj`, hex logos regenerated (fit checked by eye), CLAUDE.md table + path. README.md/index.html
+  re-rendered: rewrapping, plus index.html catching up the #2/#55 footprint paragraph already in
+  README.md. Dropped the dead `stac_dem_bc-phase1-2-modernization` worktree line (dir is gone).
+  Remaining `stac_dem_bc` strings are history or the `~/Projects/gis/stac_dem_bc` data dir.
+  pytest: 315 passed.

@@ -25,7 +25,7 @@ footprint:
 
 An item’s **geometry is its footprint** — the part of the tile that
 holds data, not the raster’s extent
-([\#2](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/2)).
+([\#2](https://github.com/NewGraphEnvironment/stac_elevation_bc/issues/2)).
 For tiles named on the BC Geographic System 1:2,500 grid it is the grid
 cell minus any no-data inside it, so a full tile’s footprint is exactly
 its cell and neighbours meet without overlapping; for the rest it is the
@@ -39,7 +39,7 @@ delivery carries `lidarbc:delivery` (`"092/092g/2016"`), the key
 [`stac-pointcloud-bc`](https://github.com/NewGraphEnvironment/stac_pointcloud_bc)
 items share, so a tile matches its delivery’s point clouds with one
 filter
-([\#55](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/55));
+([\#55](https://github.com/NewGraphEnvironment/stac_elevation_bc/issues/55));
 the `lidarbc:` fields are defined in
 [crate](https://github.com/NewGraphEnvironment/crate).
 
@@ -119,8 +119,8 @@ tab <- purrr::map_dfr(r$features, function(f) {
 
 <br>
 
-Please see <http://www.newgraphenvironment.com/stac_dem_bc> for the
-published table of collection links.
+Please see <http://www.newgraphenvironment.com/stac_elevation_bc> for
+the published table of collection links.
 
 <br>
 
@@ -178,24 +178,25 @@ collections:
 ## Roadmap
 
 The big one landed in 2026: the catalog is now **self-updating**
-([\#23](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/23)) —
-the goal open since the first build — and the July catch-up grew the
+([\#23](https://github.com/NewGraphEnvironment/stac_elevation_bc/issues/23))
+— the goal open since the first build — and the July catch-up grew the
 collection from 58k to ~98k fully-validated items. Items now also carry
 the **digital surface model** alongside the bare-earth DEM
-([\#31](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/31)),
+([\#31](https://github.com/NewGraphEnvironment/stac_elevation_bc/issues/31)),
 paired on tile id and acquisition date, and each item’s geometry is its
 **footprint** — the tile’s grid cell minus its no-data — rather than its
 raster extent
-([\#2](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/2)).
+([\#2](https://github.com/NewGraphEnvironment/stac_elevation_bc/issues/2)).
 Still ahead:
 
 - **Registration from CI** — registration is a client-side upsert from
   this repo (the [`stacs`](https://github.com/NewGraphEnvironment/stacs)
-  package, configured by `stacs.toml`), but it still runs from a laptop: no GitHub Actions runner can reach the STAC host today.
-  Closing that needs a tailnet or deploy-key decision in the
-  infrastructure repo, and it unblocks every catalogue repo at once.
+  package, configured by `stacs.toml`), but it still runs from a laptop:
+  no GitHub Actions runner can reach the STAC host today. Closing that
+  needs a tailnet or deploy-key decision in the infrastructure repo, and
+  it unblocks every catalogue repo at once.
 - **Upstream-deletion handling**
-  ([\#28](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/28))
+  ([\#28](https://github.com/NewGraphEnvironment/stac_elevation_bc/issues/28))
   — propagate objectstore removals to the catalog. The September run
   settled the open question — the deleted tiles did not reappear under
   new names, so they are deletions rather than a rename in flight.
@@ -204,22 +205,22 @@ Still ahead:
   Recorded as a declared coverage gap in `data/dsm_pairing_report.md`;
   deriving a raster from the point cloud is unscoped.
 - **CHM**
-  ([\#29](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/29))
+  ([\#29](https://github.com/NewGraphEnvironment/stac_elevation_bc/issues/29))
   — 264 canopy-height tiles are published province-wide, ~1.1% coverage
   of the mapsheet-years that carry them. Worth indexing for
   completeness; not a substitute for deriving.
 - **Structured logging + performance benchmarking**
-  ([\#6](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/6)) —
-  instrument the pipeline so build performance is quantifiable across
+  ([\#6](https://github.com/NewGraphEnvironment/stac_elevation_bc/issues/6))
+  — instrument the pipeline so build performance is quantifiable across
   runs.
 - **uv-based Python dependency management**
-  ([\#16](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/16))
+  ([\#16](https://github.com/NewGraphEnvironment/stac_elevation_bc/issues/16))
   — the CI workflow already installs with uv; migrate the local conda
   environment to match.
 
 Browse [open
-issues](https://github.com/NewGraphEnvironment/stac_dem_bc/issues) for
-the full backlog.
+issues](https://github.com/NewGraphEnvironment/stac_elevation_bc/issues)
+for the full backlog.
 
 ## License
 
