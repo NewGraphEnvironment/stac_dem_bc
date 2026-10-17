@@ -41,8 +41,8 @@ BUCKET_FORMS = (
     "arn:aws:s3:::stac-dem-bc",
 )
 
-# Repo and filesystem paths spell it with underscores, which is a different
-# string and not this test's business.
+# Filesystem paths spell it with underscores (as the repo did until #40), which
+# is a different string and not this test's business.
 assert "stac_dem_bc" != OLD_ID
 
 

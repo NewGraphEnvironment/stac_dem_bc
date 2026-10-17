@@ -1,4 +1,4 @@
-# stac_dem_bc
+# stac_elevation_bc
 
 Versions describe the **published catalogue** — the state of `s3://stac-dem-bc`
 and, once registered, the API at <https://images.a11s.one>. They do not track the
@@ -10,6 +10,16 @@ convention as [`stac_uav_bc`](https://github.com/NewGraphEnvironment/stac_uav_bc
 matching `water-temp-bc`. Releases live here and in git tags.
 
 ## Unreleased
+
+**The repo is renamed `stac_dem_bc` → `stac_elevation_bc` (#40).** It now matches the
+collection it publishes. Nothing in the catalogue changes: the collection is still
+`stac-elevation-bc`, the bucket is still `stac-dem-bc`, and item ids and hrefs are as
+they were. github.com URLs, issue links and git remotes redirect to the new name. The
+landing page moves to <https://www.newgraphenvironment.com/stac_elevation_bc/>. GitHub
+Pages does not redirect a renamed site, so the old `/stac_dem_bc/` address is now a redirect
+page on the organisation's website. The monthly workflow's AWS trust
+moved with the rename (rtj); the role keeps its name, `role_gha_stac_dem_bc`, because it
+is named for the bucket.
 
 **Catalogue change (#2, #55)**, published by dispatching `update.yml` with `footprint: true`
 after this merges. Until that dispatch runs, the published catalogue is unchanged.

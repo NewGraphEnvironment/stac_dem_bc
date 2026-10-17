@@ -1,6 +1,6 @@
-Package: stac.dem.bc
+Package: stac.elevation.bc
 Type: Project
-Title: Manifest for stac_dem_bc dependency resolution
+Title: Manifest for stac_elevation_bc dependency resolution
 Version: 0.0.0.9000
 Description: Not an R package. This DESCRIPTION exists so that
     r-lib/actions/setup-r-dependencies can resolve runtime deps for the
