@@ -20,3 +20,6 @@
   newgraphenvironment.github.io#60 adds a redirect page at the old Pages path; NEWS reworded.
 - Code-check round 1 (`review-round1.md`): one finding, in the PR bodies (don't cancel the
   confirming dispatch). Fixed in rtj#400 and this PR's body; the docs error behind it is #66.
+- Code-check round 2 (3 prose defects, 2 inside round-1 fixes) and round 3 (4 + a #66 misquote,
+  in documents round 2's hand-picked enumeration missed). Loop ended by enumerating all 569 added
+  and body lines for the two claim classes.

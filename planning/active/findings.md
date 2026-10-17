@@ -119,3 +119,16 @@ CLAUDE.md) for each claim class. The enumeration found one more instance (floode
 said the old link "would stop working", written before the redirect); fixed. All nine now agree:
 plan and apply on m4 from the rtj branch, merge rtj#400 after the apply, never cancel the
 confirming dispatch, the old path redirects via the org site.
+
+## Code-check round 3 and the terminal enumeration (2026-10-17)
+
+Round 3 (`review-round3.md`) named the mechanism: one cutover sequence restated by hand in ~a dozen
+places, each statement true at only one point of it and none saying which. Round 2's enumeration
+had checked a hand-picked list of nine documents; round 3's four findings sat in files it missed
+(CLAUDE.md clone path, the rollback's scope in three places, review-plan.md G10, archive timing),
+plus a misquoted condition in #66. All fixed.
+
+Terminal enumeration: every added line in all five branch diffs plus all five PR bodies and #66
+(569 lines), grepped for the two claim classes (instructions: cancel/rollback/revert/merge/archive/
+apply/mv; sequence-state: renamed/is now/redirect/404/stop/gone/dates), each hit read. All agree;
+the only early statements are rtj#400's docs/comment, merged minutes before the rename (accepted).

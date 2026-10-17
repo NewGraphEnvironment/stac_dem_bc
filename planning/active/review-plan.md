@@ -14,7 +14,7 @@ Read-only reviewer; findings returned as reply text and recorded here with dispo
 | G7 | no rollback, no path for an immutable `sub` | — | cutover: stop if prefix ≠ `repo:NewGraphEnvironment/stac_elevation_bc`; rollback in rtj#400 |
 | G8 | Pages may need a manual build after rename | build_type legacy | cutover: `gh api -X POST …/pages/builds` if new URL ≠ 200 |
 | G9 | rtj docs/dem-sources.md:71, geoserv README:144 | redirecting repo links | left (redirect) |
-| G10 | cancel the confirming dispatch once `AWS credentials` is green | — | cutover step |
+| G10 | cancel the confirming dispatch once `AWS credentials` is green | overturned by code-check round 1 | **rejected**: let it finish. `Commit refreshed caches` runs under `always()` after detection rewrote `urls_list.txt` (#66) |
 | O1 | no in-flight update.yml run at apply time | update.yml re-assumes before sync (#60) | rtj#400 step 1 |
 | O2–O6 | gate dispatch on sub prefix; redirect after rename; `gh` from clone after origin rewrite; rtj#395 may land first; merge this PR soon after rename | — | folded into cutover order |
 | A1 | tofu change is in place | yes (module main.tf) | — |

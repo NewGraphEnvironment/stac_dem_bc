@@ -35,7 +35,7 @@ and git remote. What it does break is CI.
 - [ ] New Pages URL returns 200 (else `gh api -X POST …/pages/builds`)
 - [ ] Dispatch `update.yml`; `AWS credentials` passes; **let it finish** (no cancel: #66)
 - [ ] Merge this PR, then the website redirect PR (check the old URL now redirects), flooded and wedzin PRs
-- Rollback: `gh repo rename stac_dem_bc --yes`, revert rtj#400, re-apply. Never create a new repo named `stac_dem_bc`
+- Rollback before the merge step: `gh repo rename stac_dem_bc --yes`, revert rtj#400, re-apply. After it, also revert this PR, website#60, flooded#88, wedzin#164. Never create a new repo named `stac_dem_bc`
 
 ## Phase 4: Inbound links in other repos (dead Pages URL)
 - [x] `flooded/README.md:46` (and its source, if it's rendered from one) → PR
@@ -44,12 +44,12 @@ and git remote. What it does break is CI.
 - [x] Leave proposals, compost drafts and planning archives as they are (history, or already submitted)
 
 ## Phase 5: Close out
-- [ ] `/code-check branch`, `/planning-archive`, `/gh-pr-push` (the PR body links the rtj and other-repo PRs)
+- [x] `/code-check branch`, `/planning-archive`, `/gh-pr-push` (the PR body links the rtj and other-repo PRs). The archive is taken **before** Phase 3, which is a post-PR handoff run by the user; its boxes stay open in the archive by design, and the PR body carries the live checklist
 - [ ] After merge (you, outside this session, since it moves the session's cwd; then recreate `.venv`, which hardcodes its path; m4's clone too, if it has one): `mv ~/Projects/repo/stac_dem_bc ~/Projects/repo/stac_elevation_bc`, and move `~/.claude/projects/-Users-airvine-Projects-repo-stac-dem-bc/memory/` to the new path's project folder. I'll give you both commands
 
 ## Validation
 
-- [ ] Tests pass
-- [ ] `/code-check` clean (each commit, or once over the branch with `/code-check branch`)
-- [ ] PWF checkboxes match landed work
-- [ ] `/planning-archive` on completion
+- [x] Tests pass
+- [x] `/code-check` clean (each commit, or once over the branch with `/code-check branch`): 3 rounds + terminal enumeration
+- [x] PWF checkboxes match landed work (Phase 3 and the post-merge handoff open by design)
+- [x] `/planning-archive` on completion

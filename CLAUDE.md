@@ -383,7 +383,7 @@ WHY: Reprocessing same URLs (e.g., after failures, testing) would create duplica
 **Note:** The monthly update runs on GitHub-hosted runners (no VM). S3 buckets and the OIDC role are IaC-managed in rtj; the pgstac host is rtj-provisioned. `geoserv` names the server stack (its containers and `/opt/geoserv`), not a host — the host is the one `stacs.toml` names.
 
 ### File Locations
-- **Main repo:** `/Users/airvine/Projects/repo/stac_elevation_bc` (the clone was `stac_dem_bc` until #40; GitHub redirects the old remote, a local path does not)
+- **Main repo:** the clone under `~/Projects/repo/`, named `stac_elevation_bc` on a machine whose clone has been moved after #40, `stac_dem_bc` on one that has not. GitHub redirects the old remote either way; only the directory name differs
 - **Infrastructure repo:** `/Users/airvine/Projects/repo/rtj` (formerly awshak; provisions the bucket, OIDC role, and geoserv STAC host)
 - **STAC catalog:** `s3://stac-dem-bc/` is the only complete copy. Local builds write to a scratch workspace via the `STAC_OUTPUT_DIR` env override in `scripts/stac_utils.py` (the old `/Users/airvine/Projects/gis/.../stac/prod` dir is empty/historical)
 
