@@ -1,0 +1,50 @@
+# Task: Rename the repo to stac_elevation_bc, and move the OIDC trust condition with it (#40)
+
+
+The collection is now `stac-elevation-bc` (#34, v2.0.0). The repo is still
+`stac_dem_bc`, so the name describes one of several products the catalogue
+carries — the same mismatch #34 existed to remove, moved one level out.
+
+#34 deliberately scoped this out. It has a **different blast radius**: nothing a
+data consumer sees changes, and GitHub permanently redirects old URLs, both web
+and git remote. What it does break is CI.
+
+## Phase 1: Rename inside this repo (branch `40-rename-the-repo-to-stac-elevation-bc-and`)
+- [ ] `README.Rmd`: Pages URL (line 130) and the `github.com/.../stac_dem_bc/issues/N` links → `stac_elevation_bc`; re-render `README.md` with the two-pass `rmarkdown::render` shown in its header
+- [ ] `NEWS.md` line 1 heading → `# stac_elevation_bc`; add an Unreleased line saying the repo was renamed, the old Pages URL is gone and github.com URLs redirect
+- [ ] `DESCRIPTION` `Title:` → `stac_elevation_bc` (`Package: stac.dem.bc` → `stac.elevation.bc`; it's a `Type: Project` manifest, so nothing installs it by name)
+- [ ] `git mv stac_dem_bc.Rproj stac_elevation_bc.Rproj`
+- [ ] `data-raw/make_hexsticker.R` `package_name`, then regenerate `man/figures/logo.png` (and the small logo if the script writes one)
+- [ ] `scripts/README.md:213` Actions link; `CLAUDE.md` names table (line 38 → done, #40), File Locations paths, and the three-names prose
+- [ ] `tests/test_collection_identity.py:46`: update the underscore-name assertion to the new repo name
+- [ ] Repo-wide grep: every remaining `stac_dem_bc` outside `planning/`, `logs/`, `data/`, NEWS history and `~/Projects/gis` paths is either justified or fixed
+- [ ] `pytest` passes
+
+## Phase 2: rtj PR (trust plus references)
+- [ ] `env/prod/main.tf`: `repo = "NewGraphEnvironment/stac_elevation_bc"` (the module label `stac_dem_bc_update` and the output name stay: renaming them would make tofu destroy and recreate the role)
+- [ ] `docs/stac-endpoints.md:28` repo→collection row; `modules/gha_s3_role/README.md:49`
+- [ ] `env/do/dev/geobuild/cloud-init.yaml:187,251` and `scripts/geobuild/tests/test_gh-auth.sh:16-19` → new name
+- [ ] Open the rtj PR, link it to rtj#255. `tofu plan` must show **only** an in-place update to the role's assume-role policy
+
+## Phase 3: Cutover (one sitting, in this order)
+- [ ] **You:** merge the rtj PR and run `tofu apply` (I'll hand you the bare command; first output to check is the plan's `1 to change, 0 to add, 0 to destroy`)
+- [ ] Rename on GitHub: `gh repo rename stac_elevation_bc` (I run it after you confirm the apply)
+- [ ] `gh repo edit --homepage https://www.newgraphenvironment.com/stac_elevation_bc/`; check the new Pages URL returns 200 and record what the old one returns
+- [ ] Check `gh api .../actions/oidc/customization/sub` shows `repo:NewGraphEnvironment/stac_elevation_bc`
+- [ ] Dispatch `update.yml` on `main` and confirm `AWS credentials` passes. **Note:** there's no dry-run input, so this is a real incremental monthly run (the same job the Nov 3 cron would do), ~6–90 min
+
+## Phase 4: Inbound links in other repos (dead Pages URL)
+- [ ] `flooded/README.md:46` (and its source, if it's rendered from one) → PR
+- [ ] `restoration_wedzin_kwa_2024/0050-executive-summary.Rmd:84` → PR
+- [ ] Leave proposals, compost drafts and planning archives as they are (history, or already submitted)
+
+## Phase 5: Close out
+- [ ] `/code-check branch`, `/planning-archive`, `/gh-pr-push` (the PR body links the rtj and other-repo PRs)
+- [ ] After merge (you, outside this session, since it moves the session's cwd): `mv ~/Projects/repo/stac_dem_bc ~/Projects/repo/stac_elevation_bc`, and move `~/.claude/projects/-Users-airvine-Projects-repo-stac-dem-bc/memory/` to the new path's project folder. I'll give you both commands
+
+## Validation
+
+- [ ] Tests pass
+- [ ] `/code-check` clean (each commit, or once over the branch with `/code-check branch`)
+- [ ] PWF checkboxes match landed work
+- [ ] `/planning-archive` on completion
