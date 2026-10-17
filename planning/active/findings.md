@@ -96,3 +96,4 @@ Relates to #34, NewGraphEnvironment/rtj#255
 
 | Error | Resolution |
 |-------|------------|
+| `tofu plan` (rtj env/prod, targeted) showed `2 to add` for the role | env/prod's `backend.tf` is empty (local state) and no `terraform.tfstate` is on this machine; the plan read no state. Not a real diff. Plan and apply must run where that state lives. |

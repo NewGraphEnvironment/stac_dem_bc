@@ -12,3 +12,7 @@
   README.md. Dropped the dead `stac_dem_bc-phase1-2-modernization` worktree line (dir is gone).
   Remaining `stac_dem_bc` strings are history or the `~/Projects/gis/stac_dem_bc` data dir.
   pytest: 315 passed.
+- Phase 2: rtj#400 opened (trust repo string, docs row, module README, gh-auth test). The prod plan
+  couldn't be verified from here (local state lives elsewhere); handed to the user with Phase 3.
+- Phase 4: flooded#88, restoration_wedzin_kwa_2024#164 (merge after the rename).
+- Phase 3 (cutover) waits on the user's `tofu apply`.
