@@ -107,3 +107,15 @@ Relates to #34, NewGraphEnvironment/rtj#255
 | Error | Resolution |
 |-------|------------|
 | `tofu plan` (rtj env/prod, targeted) showed `2 to add` for the role | env/prod's `backend.tf` is empty (local state) and no `terraform.tfstate` is on this machine; the plan read no state. Not a real diff. Plan and apply must run where that state lives. |
+
+## Code-check round 2 and the enumeration (2026-10-17)
+
+Round 2 (`review-round2.md`) found three prose defects, two inside round 1's fixes (a Phase 1 box
+left describing the pre-redirect NEWS; this PR and rtj#400 giving different merge orders), plus a
+rename date in rtj docs that preceded the rename. Mechanism: the cutover order, the old Pages URL's
+fate and "already renamed" claims are each restated by hand across documents. Enumerated all nine
+(rtj#400 body, this PR body, flooded#88, wedzin#164, website#60 bodies, task_plan, findings, NEWS,
+CLAUDE.md) for each claim class. The enumeration found one more instance (flooded/wedzin bodies
+said the old link "would stop working", written before the redirect); fixed. All nine now agree:
+plan and apply on m4 from the rtj branch, merge rtj#400 after the apply, never cancel the
+confirming dispatch, the old path redirects via the org site.

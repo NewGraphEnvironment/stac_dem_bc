@@ -11,7 +11,7 @@ and git remote. What it does break is CI.
 
 ## Phase 1: Rename inside this repo (branch `40-rename-the-repo-to-stac-elevation-bc-and`)
 - [x] `README.Rmd`: Pages URL (line 130) and the `github.com/.../stac_dem_bc/issues/N` links → `stac_elevation_bc`; re-render `README.md` with the two-pass `rmarkdown::render` shown in its header
-- [x] `NEWS.md` line 1 heading → `# stac_elevation_bc`; add an Unreleased line saying the repo was renamed, the old Pages URL is gone and github.com URLs redirect
+- [x] `NEWS.md` line 1 heading → `# stac_elevation_bc`; add an Unreleased line saying the repo was renamed, github.com URLs redirect, and the old Pages path becomes a redirect page on the org site
 - [x] `DESCRIPTION` `Title:` → `stac_elevation_bc` (`Package: stac.dem.bc` → `stac.elevation.bc`; it's a `Type: Project` manifest, so nothing installs it by name)
 - [x] `git mv stac_dem_bc.Rproj stac_elevation_bc.Rproj`
 - [x] `data-raw/make_hexsticker.R` `package_name`, then regenerate `man/figures/logo.png` (and the small logo if the script writes one)
@@ -28,7 +28,7 @@ and git remote. What it does break is CI.
 
 ## Phase 3: Cutover (one sitting, in this order)
 - [ ] No `update.yml` run in progress (`gh run list … --status in_progress`)
-- [ ] **You, on m4:** merge rtj#400, `tofu plan -out=…` shows `0 to add, 1 to change, 0 to destroy`, then apply that saved plan
+- [ ] **You, on m4, from rtj#400's branch:** `tofu plan -out=…` shows `0 to add, 1 to change, 0 to destroy`; apply that saved plan; then merge rtj#400
 - [ ] `gh repo rename stac_elevation_bc --yes` from this clone; `git remote -v` names the new repo
 - [ ] `gh repo edit --homepage https://www.newgraphenvironment.com/stac_elevation_bc/`
 - [ ] OIDC `sub` prefix reads `repo:NewGraphEnvironment/stac_elevation_bc`. Stop if not (rtj#395)
